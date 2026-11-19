@@ -20,10 +20,21 @@
  * cannot deliver. A partly covered call records the rows it has and still notes
  * the source, so revert says what it did not undo.
  *
+ * Deleting a file is what reverting a create does, so a create is recorded only
+ * when it is provably new and provably the command's: the path was not in the
+ * listing taken before the command (whether or not its bytes could be read),
+ * does not match one in case on a case-folding filesystem, was not ignored
+ * before, and was modified inside the command's window. Anything else leaves
+ * the file alone and marks the call partial. What no file system call can tell
+ * apart is the command's own write from a concurrent writer's during the run;
+ * that stays a stated limit of the setting.
+ *
  * Cost scales with the tree, not with what the command touched, which is why
  * this is opt-in and capped. On a 4.8k-file, 57 MB checkout a full capture took
- * about 10 s and moved 65 MB of base64 through the runtime pipe, so anything
- * over the limits below degrades without paying for the capture.
+ * about 10 s and moved 65 MB of base64 through the runtime pipe. Each path is
+ * therefore statted first, which moves no content, and anything over the limits
+ * below degrades before a byte of file data is loaded. Every phase runs under a
+ * time budget enforced on its runtime calls.
  */
 
 import {
@@ -324,33 +335,40 @@ async function captureBaseline(
   limits: ShellWorkspaceLimits,
   signal: AbortSignal | undefined
 ): Promise<Baseline> {
-  const startedAt = Date.now();
-  const overBudget = () => Date.now() - startedAt > limits.setupBudgetMs;
+  const deadline = new Deadline(limits.setupBudgetMs, signal);
 
   const [listing, ignoredEntries, foldsCase] = await Promise.all([
-    listWorkspace(runtime, root, signal),
-    listIgnoredEntries(runtime, root, signal),
-    filesystemFoldsCase(runtime, root, signal),
+    listWorkspace(runtime, root, deadline),
+    listIgnoredEntries(runtime, root, deadline),
+    filesystemFoldsCase(runtime, root, deadline),
   ]);
-  if (!listing || !ignoredEntries) return { ok: false, reason: 'git_unavailable' };
+  if (!listing || !ignoredEntries) {
+    return { ok: false, reason: deadline.expired ? 'too_slow' : 'git_unavailable' };
+  }
   if (listing.files.length > limits.maxFiles) return { ok: false, reason: 'too_many_files' };
 
   const files = new Map<string, BaselineFile>();
   const hashOnly = new Set<string>();
   let incomplete = false;
-  let capturedBytes = 0;
   let failures = 0;
   let abort: WorkspaceUnavailableReason | undefined;
 
+  // First pass: stat every listed path. It moves no content, so the caps below
+  // are decided before a single byte of file data crosses the pipe.
+  const present = new Map<string, ObservedFile>();
   await mapWithConcurrency(listing.files, CAPTURE_CONCURRENCY, async (relative) => {
     if (abort) return;
-    if (overBudget()) {
+    if (deadline.expired) {
       abort = 'too_slow';
       return;
     }
     const path = paths.join(root, relative);
-    const observed = await statFile(runtime, path, signal);
+    const observed = await statFile(runtime, path, deadline);
     if (!observed) {
+      if (deadline.expired) {
+        abort = 'too_slow';
+        return;
+      }
       // Only a runtime refusing the capability, not one file, fails this many.
       incomplete = true;
       failures += 1;
@@ -367,17 +385,34 @@ async function captureBaseline(
     // bytes over whatever it points at. The listing still names it, which keeps
     // a later create from claiming the path.
     if (observed.symlink) return;
-    if (observed.hash === null) {
-      files.set(path, { hash: null });
+    if (observed.hash === null) files.set(path, { hash: null });
+    else present.set(path, observed);
+  });
+  if (abort) return { ok: false, reason: abort };
+
+  let plannedBytes = 0;
+  for (const observed of present.values()) plannedBytes += observed.size ?? 0;
+  if (plannedBytes > limits.maxBytes) return { ok: false, reason: 'too_many_bytes' };
+
+  let capturedBytes = 0;
+  await mapWithConcurrency([...present], CAPTURE_CONCURRENCY, async ([path, observed]) => {
+    if (abort) return;
+    if (deadline.expired) {
+      abort = 'too_slow';
       return;
     }
     let snapshot: RuntimeBeforeSnapshot;
     try {
-      snapshot = await runtime.snapshot.capture({ path }, requestOptions(signal));
+      snapshot = await runtime.snapshot.capture({ path }, { signal: deadline.signal });
     } catch (error) {
-      if (signal?.aborted) throw error;
-      // Typically the runtime's per-file size refusal. The hash above still
-      // says whether the file changed, which is worth having when it did not.
+      if (deadline.callerAborted) throw error;
+      if (deadline.expired) {
+        abort = 'too_slow';
+        return;
+      }
+      // Typically the runtime's per-file size refusal. The hash from the first
+      // pass still says whether the file changed, which is worth having when it
+      // did not.
       files.set(path, { hash: observed.hash });
       hashOnly.add(path);
       return;
@@ -386,6 +421,8 @@ async function captureBaseline(
       files.set(path, { hash: null });
       return;
     }
+    // The sizes above were a moment ago; a file that grew since still may not
+    // push the snapshot past its cap.
     capturedBytes += Buffer.byteLength(snapshot.contentBase64 ?? '', 'base64');
     if (capturedBytes > limits.maxBytes) {
       abort = 'too_many_bytes';
@@ -419,7 +456,7 @@ async function captureBaseline(
 async function filesystemFoldsCase(
   runtime: RuntimeClient,
   root: string,
-  signal: AbortSignal | undefined
+  deadline: Deadline
 ): Promise<boolean> {
   if (runtime.manifest.platform === 'darwin' || runtime.manifest.platform === 'win32') return true;
   try {
@@ -427,15 +464,15 @@ async function filesystemFoldsCase(
       {
         args: ['config', '--type=bool', '--get', 'core.ignorecase'],
         cwd: root,
-        timeoutMs: GIT_TIMEOUT_MS,
+        timeoutMs: Math.min(GIT_TIMEOUT_MS, deadline.remainingMs),
         // Exit 1 is git's "key not set", an answer rather than a failure.
         acceptedExitCodes: [0, 1],
       },
-      requestOptions(signal)
+      { signal: deadline.signal }
     );
     return result.exitCode === 0 && result.stdout.trim() === 'true';
   } catch (error) {
-    if (signal?.aborted) throw error;
+    if (deadline.callerAborted) throw error;
     return false;
   }
 }
@@ -454,7 +491,12 @@ async function recordWorkspaceChanges(
   const { runtime, paths, context } = input;
   let complete = !baseline.incomplete;
 
-  const listing = await listWorkspace(runtime, root);
+  // The turn's own abort is deliberately not part of this: a command that was
+  // cancelled is exactly when files are half-written and the rows matter. What
+  // bounds the diff is a budget of its own, so a stalled runtime or a huge tree
+  // cannot hold the tool result back indefinitely.
+  const deadline = new Deadline(limits.setupBudgetMs);
+  const listing = await listWorkspace(runtime, root, deadline);
   if (!listing) return false;
   const { added: addedRelative, renamedByCase } = selectAddedPaths(
     listing.files,
@@ -475,7 +517,8 @@ async function recordWorkspaceChanges(
   const candidates = [...baseline.files.keys(), ...added];
   const observedFiles = await mapWithConcurrency(candidates, HASH_CONCURRENCY, async (path) => ({
     path,
-    observed: await statFile(runtime, path),
+    // Past the budget nothing more is asked; the path is reported unexamined.
+    observed: deadline.expired ? undefined : await statFile(runtime, path, deadline),
   }));
   const current = new Map<string, string | null>();
   const modifiedAt = new Map<string, number | undefined>();
@@ -523,6 +566,9 @@ async function recordWorkspaceChanges(
   });
   if (changes.length === 0) return complete;
 
+  // A fresh budget for persistence: the rows found above are the point of the
+  // diff, and a spent one would discard all of them for want of a final hash.
+  const persistDeadline = new Deadline(limits.setupBudgetMs);
   await withMutationPersistence(
     context,
     changes.map((change) => change.path),
@@ -531,7 +577,9 @@ async function recordWorkspaceChanges(
       for (const change of changes) {
         // Under the path lock the hash is final for this call's purposes: it
         // is what a later builtin mutation of the path will collapse onto.
-        const final = await statFile(runtime, change.path);
+        const final = persistDeadline.expired
+          ? undefined
+          : await statFile(runtime, change.path, persistDeadline);
         if (!final || final.symlink) {
           complete = false;
           continue;
@@ -572,10 +620,10 @@ interface ObservedFile {
 async function statFile(
   runtime: RuntimeClient,
   path: string,
-  signal?: AbortSignal
+  deadline: Deadline
 ): Promise<ObservedFile | undefined> {
   try {
-    const result = await runtime.snapshot.hash({ path }, requestOptions(signal));
+    const result = await runtime.snapshot.hash({ path }, { signal: deadline.signal });
     return {
       hash: result.hash,
       size: result.size,
@@ -583,7 +631,7 @@ async function statFile(
       symlink: result.symlink === true,
     };
   } catch (error) {
-    if (signal?.aborted) throw error;
+    if (deadline.callerAborted) throw error;
     return undefined;
   }
 }
@@ -591,13 +639,13 @@ async function statFile(
 async function listWorkspace(
   runtime: RuntimeClient,
   root: string,
-  signal?: AbortSignal
+  deadline: Deadline
 ): Promise<WorkspaceListing | null> {
   const stdout = await gitListing(
     runtime,
     root,
     ['ls-files', '-z', '-s', '-o', '--exclude-standard'],
-    signal
+    deadline
   );
   return stdout === null ? null : { files: parseWorkspaceListing(stdout) };
 }
@@ -610,41 +658,75 @@ async function listWorkspace(
 async function listIgnoredEntries(
   runtime: RuntimeClient,
   root: string,
-  signal: AbortSignal | undefined
+  deadline: Deadline
 ): Promise<ReadonlySet<string> | null> {
   const stdout = await gitListing(
     runtime,
     root,
     ['ls-files', '-z', '-o', '-i', '--exclude-standard', '--directory'],
-    signal
+    deadline
   );
   if (stdout === null) return null;
   return new Set(stdout.split('\0').filter(Boolean));
 }
 
-/** Stdout of a successful, complete git call, or null for anything else. */
+/**
+ * Stdout of a successful, complete git call, or null for anything else. The
+ * call is capped by what is left of the phase's budget, so a slow `git` on a
+ * big tree cannot spend the whole 20 s default and then be followed by the
+ * per-file work.
+ */
 async function gitListing(
   runtime: RuntimeClient,
   root: string,
   args: readonly string[],
-  signal?: AbortSignal
+  deadline: Deadline
 ): Promise<string | null> {
   try {
     const result = await runtime.git.exec(
-      { args, cwd: root, timeoutMs: GIT_TIMEOUT_MS },
-      requestOptions(signal)
+      { args, cwd: root, timeoutMs: Math.min(GIT_TIMEOUT_MS, deadline.remainingMs) },
+      { signal: deadline.signal }
     );
     return result.exitCode === 0 && !result.incomplete ? result.stdout : null;
   } catch (error) {
-    if (signal?.aborted) throw error;
+    if (deadline.callerAborted) throw error;
     return null;
+  }
+}
+
+/**
+ * A phase's time budget and the signal that enforces it on every runtime call
+ * the phase makes. `caller` is the turn's own abort: when that fires the error
+ * propagates like any cancelled call, whereas the budget running out only
+ * degrades the snapshot.
+ */
+class Deadline {
+  readonly signal: AbortSignal;
+  private readonly endsAt: number;
+
+  constructor(
+    budgetMs: number,
+    private readonly caller?: AbortSignal
+  ) {
+    this.endsAt = Date.now() + budgetMs;
+    const budget = AbortSignal.timeout(Math.max(1, budgetMs));
+    this.signal = caller ? AbortSignal.any([caller, budget]) : budget;
+  }
+
+  get expired(): boolean {
+    return Date.now() >= this.endsAt;
+  }
+
+  /** At least 1 ms: a zero timeout reads as "no timeout" to some peers. */
+  get remainingMs(): number {
+    return Math.max(1, this.endsAt - Date.now());
+  }
+
+  get callerAborted(): boolean {
+    return this.caller?.aborted === true;
   }
 }
 
 function relativeTo(paths: TargetPaths, root: string, path: string): string {
   return paths.relative(root, path).replaceAll('\\', '/');
-}
-
-function requestOptions(signal: AbortSignal | undefined): { signal: AbortSignal } | undefined {
-  return signal ? { signal } : undefined;
 }

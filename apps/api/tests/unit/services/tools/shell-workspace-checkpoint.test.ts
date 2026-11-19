@@ -14,6 +14,7 @@ import {
   runWithWorkspaceCheckpoint,
   selectAddedPaths,
   SHELL_WORKSPACE_LIMITS,
+  type ShellWorkspaceLimits,
   wasWrittenDuringCommand,
 } from '../../../../src/services/tools/shell-workspace-checkpoint';
 import type { ToolContext } from '../../../../src/services/tools/types';
@@ -171,8 +172,14 @@ describe('foldPathKey', () => {
 class FakeWorkspaceRuntime {
   readonly manifest = { platform: 'linux' };
   readonly gitCalls: string[][] = [];
+  readonly gitTimeoutsMs: Array<number | undefined> = [];
   readonly captureCalls: string[] = [];
   readonly hashCalls: string[] = [];
+  /**
+   * Hashes after this many calls never answer on their own and reject only when
+   * their request is aborted, like a runtime that stopped responding mid-run.
+   */
+  stallHashesAfter: number | undefined;
 
   constructor(
     private readonly gitOutcome: { exitCode: number; stdout: string } | 'throw',
@@ -187,8 +194,9 @@ class FakeWorkspaceRuntime {
   ) {}
 
   readonly git = {
-    exec: (params: { args: readonly string[] }) => {
+    exec: (params: { args: readonly string[]; timeoutMs?: number }) => {
       this.gitCalls.push([...params.args]);
+      this.gitTimeoutsMs.push(params.timeoutMs);
       if (this.gitOutcome === 'throw') return Promise.reject(new Error('git consent denied'));
       return Promise.resolve({ stderr: '', ...this.gitOutcome });
     },
@@ -200,9 +208,14 @@ class FakeWorkspaceRuntime {
       if (this.refuseSnapshots) return Promise.reject(new Error('checkpoints consent denied'));
       return Promise.resolve({ exists: false });
     },
-    hash: (params: { path: string }) => {
+    hash: (params: { path: string }, options?: { signal?: AbortSignal }) => {
       this.hashCalls.push(params.path);
       if (this.refuseSnapshots) return Promise.reject(new Error('checkpoints consent denied'));
+      if (this.stallHashesAfter !== undefined && this.hashCalls.length > this.stallHashesAfter) {
+        return new Promise<never>((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => reject(new Error('request aborted')));
+        });
+      }
       return Promise.resolve(this.hashResult);
     },
   };
@@ -224,7 +237,7 @@ const context: ToolContext = {
 
 async function runDegraded(
   runtime: FakeWorkspaceRuntime,
-  overrides: { cwd?: string; workdir?: string } = {}
+  overrides: { cwd?: string; workdir?: string; limits?: ShellWorkspaceLimits } = {}
 ): Promise<{ ran: number; result: string }> {
   let ran = 0;
   const result = await runWithWorkspaceCheckpoint({
@@ -232,6 +245,7 @@ async function runDegraded(
     runtime: runtime as unknown as RuntimeClient,
     paths,
     cwd: overrides.cwd ?? '/w',
+    ...(overrides.limits ? { limits: overrides.limits } : {}),
     run: () => {
       ran += 1;
       return Promise.resolve('command-result');
@@ -314,6 +328,55 @@ describe('runWithWorkspaceCheckpoint degradation', () => {
     // `hash` alone follows links, so a restore could write through one: without
     // `size`/`symlink` in the answer, nothing is captured at all.
     expect(runtime.captureCalls).toEqual([]);
+  });
+
+  it('sizes the snapshot from stat before loading any content through the pipe', async () => {
+    const sixMiB = 6 * 1024 * 1024;
+    const runtime = new FakeWorkspaceRuntime(
+      { exitCode: 0, stdout: ['a.bin', 'b.bin', 'c.bin'].join(NUL) },
+      false,
+      { hash: 'h', size: sixMiB, modifiedAtMs: 1, symlink: false }
+    );
+
+    expect(await runDegraded(runtime)).toEqual({ ran: 1, result: 'command-result' });
+    // 18 MiB against a 16 MiB cap is known from the sizes alone; capturing even
+    // one file first spends base64 through the pipe on a snapshot that degrades.
+    expect(runtime.captureCalls).toEqual([]);
+  });
+
+  it('hands each git listing only the setup budget that is left', async () => {
+    const runtime = new FakeWorkspaceRuntime({ exitCode: 0, stdout: 'a.txt' });
+
+    await runDegraded(runtime, {
+      limits: { ...SHELL_WORKSPACE_LIMITS, setupBudgetMs: 800 },
+    });
+    expect(runtime.gitTimeoutsMs.length).toBeGreaterThan(0);
+    for (const timeoutMs of runtime.gitTimeoutsMs) {
+      expect(
+        timeoutMs !== undefined && timeoutMs > 0 && timeoutMs <= 800,
+        `expected every git timeoutMs in (0, 800] | received ${JSON.stringify(runtime.gitTimeoutsMs)}`
+      ).toBe(true);
+    }
+  });
+
+  it('stops waiting on a runtime that stalls after the command, within the same budget', async () => {
+    const runtime = new FakeWorkspaceRuntime({ exitCode: 0, stdout: 'a.txt' }, false, {
+      hash: 'h',
+      size: 1,
+      modifiedAtMs: 1,
+      symlink: false,
+    });
+    // The baseline stat answers; every hash after it hangs.
+    runtime.stallHashesAfter = 1;
+
+    const outcome = await Promise.race([
+      runDegraded(runtime, { limits: { ...SHELL_WORKSPACE_LIMITS, setupBudgetMs: 100 } }),
+      new Promise<'still waiting'>((resolve) => setTimeout(() => resolve('still waiting'), 2_000)),
+    ]);
+    expect(
+      outcome,
+      'expected the post-command pass to give up inside its 100 ms budget | received: still waiting after 2000 ms'
+    ).toEqual({ ran: 1, result: 'command-result' });
   });
 
   it('does not capture a symlink the runtime reports', async () => {
