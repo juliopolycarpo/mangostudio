@@ -47,6 +47,11 @@ evaluates — a classic script without `defer`/`async` runs where the parser mee
 module scripts are deferred. Keep it classic. The API serves it `no-cache` rather than the
 `max-age=86400` other unhashed files get, because it is the one file a deployer edits.
 
+Upgrade the API before the bundle. The bundle sends the `x-mangostudio-writer-id` request
+header on app-settings writes, and an API from before that header was allowed answers the CORS
+preflight without it, so the browser refuses the save (see
+[Writer identity](realtime.md#writer-identity)).
+
 `VITE_API_URL` is accepted as a deprecated alias of `MANGO_API_URL` for one release and warns
 at build time; it is named after a bundler this repo no longer uses.
 

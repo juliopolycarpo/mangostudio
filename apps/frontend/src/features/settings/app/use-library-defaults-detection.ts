@@ -24,8 +24,8 @@ import {
 
 import type { RealtimeSignal } from '@/lib/realtime/realtime-client';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
+import { isOwnWriterId } from '@/lib/realtime/writer-id';
 
-import { hasRecentAppSettingsLocalWrite } from './local-write-window';
 import {
   appSettingsKeys,
   appSettingsQueryOptions,
@@ -64,13 +64,17 @@ export function useLibraryDefaultsDetection(): LibraryDefaultsDetection {
 
 /**
  * Refetches app settings for an `app` invalidation or a subscription ack.
- * Skipped while this tab is mid-write: that write's own answer waited for
- * detection, so it already carries the real defaults, and refetching now would
+ * The echo of this tab's own write is skipped: that write's answer waited for
+ * detection, so it already carries the real defaults, and refetching would
  * clobber the settings screen's optimistic edit.
  */
 function refetchOnAppInvalidation(queryClient: QueryClient, signal: RealtimeSignal): Promise<void> {
-  if (hasRecentAppSettingsLocalWrite()) return Promise.resolve();
-  if (signal.type === 'subscribed' || isAppScope(signal.message.scopes)) {
+  if (signal.type === 'subscribed') {
+    return queryClient.invalidateQueries({ queryKey: appSettingsKeys.all });
+  }
+  const { message } = signal;
+  const writerId = 'writerId' in message ? message.writerId : undefined;
+  if (!isOwnWriterId(writerId) && isAppScope(message.scopes)) {
     return queryClient.invalidateQueries({ queryKey: appSettingsKeys.all });
   }
   return Promise.resolve();

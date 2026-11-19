@@ -28,15 +28,15 @@ import {
   type WorkspacePanelSettings,
   type WorkspaceSettings,
 } from '@mangostudio/shared/workspaces';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { hashKey, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { useToast } from '@/components/ui/Toast';
 import { updateAppSettings } from '@/features/settings/app/api';
-import { markAppSettingsLocalWrite } from '@/features/settings/app/local-write-window';
 import {
   appSettingsConfirmedWrite,
   appSettingsConflictEpoch,
+  appSettingsConflictRefreshPending,
   appSettingsKeys,
   appSettingsQueryOptions,
   appSettingsQueueCanSave,
@@ -48,6 +48,7 @@ import {
   recordAppSettingsConflict,
   refreshAppSettingsAfterConflict,
 } from '@/features/settings/app/queries';
+import { rebaseAppSettingsDraft } from '@/features/settings/app/rebase-draft';
 import { useI18n } from '@/hooks/use-i18n';
 import { ApiError } from '@/lib/utils';
 
@@ -94,9 +95,12 @@ export function useGlobalSettings() {
     readonly confirmedWrite: number | undefined;
   } | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const activeSaveRef = useRef<{ promise: Promise<unknown>; revision: string | undefined } | null>(
-    null
-  );
+  const activeSaveRef = useRef<{
+    promise: Promise<unknown>;
+    revision: string | undefined;
+    /** What this submission is writing: unconfirmed until its PUT answers. */
+    settings: AppSettings;
+  } | null>(null);
   /**
    * State to restore when a save fails, captured when an edit burst starts.
    * It cannot be read at mutate time: the setters write the cache immediately,
@@ -136,7 +140,14 @@ export function useGlobalSettings() {
     onError: async (error, _nextSettings, context) => {
       // A superseded save must not roll back: a newer submission either already
       // persisted its value or will report its own failure against it.
-      const restoredSettings = context?.write.isLatest() ? context.previousSettings : null;
+      // `rollbackRef` first: a refetch that landed while this save was open
+      // rebased it onto the fetched snapshot (see the rebase effect), and
+      // `previousSettings` still names the one the burst started on. Restoring
+      // that would drop what the refetch brought and leave the cache on a
+      // revision the next `If-Match` is guaranteed to lose.
+      const restoredSettings = context?.write.isLatest()
+        ? (rollbackRef.current ?? context.previousSettings)
+        : null;
       if (restoredSettings) {
         queryClient.setQueryData(appSettingsKeys.current(), restoredSettings);
       }
@@ -167,11 +178,6 @@ export function useGlobalSettings() {
       }
     },
     onSuccess: async (savedSettings, submitted, context) => {
-      // Re-marked here so the echo window still covers the server's own event,
-      // which cannot arrive before the write that triggered it has settled. Only
-      // a successful write publishes one, so a failure leaves the window closed
-      // and the next invalidation is free to repair the rolled-back cache.
-      markAppSettingsLocalWrite();
       if (!context.write.isLatest()) return;
       // A read started before this confirmed response can still be in flight.
       // Cancel its cache publication before accepting the response, even when
@@ -183,10 +189,25 @@ export function useGlobalSettings() {
       const pending = pendingSaveRef.current;
       const revision = appSettingsRevision(savedSettings);
       if (
+        pending?.revision !== undefined &&
+        revision !== undefined &&
+        submitted.revision !== undefined &&
+        pending.revision !== submitted.revision &&
+        pending.revision !== revision
+      ) {
+        // A refetch re-anchored the queue on a revision later than this save's
+        // own commit: this save committed on the one it named, so anything
+        // else is a write that landed after it. The cache already holds the
+        // fetched state plus the queued edits, and the response in hand is
+        // older than both, so publishing it would drop the queued edits from
+        // the cache the next keystroke builds on.
+        return;
+      }
+      if (
         pending &&
         revision !== undefined &&
         submitted.revision !== undefined &&
-        pending.revision === submitted.revision
+        (pending.revision === submitted.revision || pending.revision === revision)
       ) {
         // This owner's queued typing extends the exact snapshot its own PUT
         // just confirmed. Advance that queue only; another owner's older draft
@@ -259,7 +280,11 @@ export function useGlobalSettings() {
       patch: appSettingsPatchExcludingProfiles(pendingSettings.settings),
       revision: pendingSettings.revision,
     });
-    const active = { promise, revision: pendingSettings.revision };
+    const active = {
+      promise,
+      revision: pendingSettings.revision,
+      settings: pendingSettings.settings,
+    };
     activeSaveRef.current = active;
     try {
       await promise;
@@ -281,11 +306,75 @@ export function useGlobalSettings() {
     [flushPendingSave]
   );
 
+  /**
+   * Keeps unsent edits across a refetch.
+   *
+   * Anything can refetch the app settings while the user is typing: the
+   * realtime ack, the hub's detection event, another tab's write. The refetch
+   * replaces the cache the setters build from, so without this the edits made
+   * since the last answer vanish from the screen and from the next patch, which
+   * is only sent once the debounce settles. Rebasing the burst's edited fields
+   * over what arrived keeps them (see `rebaseAppSettingsDraft`) and re-anchors
+   * the queued save on the fetched revision, so `If-Match` names the snapshot
+   * the edit now sits on; if that is stale too, the save is rejected and the
+   * conflict path refreshes as usual.
+   *
+   * Every mounted consumer registers its own listener over its own refs, and
+   * they all run for the same event in subscription order. A consumer with no
+   * burst returns at once. When two have one, the later reads the earlier's
+   * rebased cache as its "fetched" state and re-applies only its own edited
+   * fields on top, so the shared cache ends up as fetched plus both edits
+   * (pinned by the "several consumers" tests). Capturing the fetched data once
+   * per client instead would let the last writer overwrite the other's edits.
+   *
+   * Only reads rebase: a cache write from this hook is `manual`, and a queue
+   * the conflict epoch already rejected is left to fail, since replaying it
+   * is exactly what that guard forbids.
+   */
+  useEffect(() => {
+    const currentHash = hashKey(appSettingsKeys.current());
+    return queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== 'updated' || event.action.type !== 'success') return;
+      if (event.action.manual === true || event.query.queryHash !== currentHash) return;
+
+      const burstStart = rollbackRef.current;
+      const pending = pendingSaveRef.current;
+      const draft = pending?.settings ?? activeSaveRef.current?.settings;
+      const fetched = event.query.state.data as AppSettings | undefined;
+      if (!burstStart || !draft || !fetched) return;
+      if (
+        pending &&
+        !appSettingsQueueCanSave(queryClient, pending.conflictEpoch, pending.confirmedWrite)
+      ) {
+        return;
+      }
+
+      const rebased = normalizeAppSettings(rebaseAppSettingsDraft(burstStart, draft, fetched));
+      const cache = queryClient.setQueryData<AppSettings>(
+        appSettingsKeys.current(),
+        keepAppSettingsMetadata(fetched, rebased)
+      );
+      // The fetched value is the new rollback target: a failed save restores
+      // what the server holds, not the settings from before the refetch.
+      rollbackRef.current = keepAppSettingsMetadata(fetched, normalizeAppSettings(fetched));
+      if (pending) {
+        pendingSaveRef.current = {
+          settings: rebased,
+          revision: appSettingsRevision(fetched),
+          conflictEpoch: pending.conflictEpoch,
+          confirmedWrite: appSettingsConfirmedWrite(cache),
+        };
+      }
+    });
+  }, [queryClient]);
+
   const saveSettings = useCallback(
     (updater: (current: AppSettings) => AppSettings) => {
-      if (queryClient.getQueryState(appSettingsKeys.current())?.isInvalidated) {
+      if (appSettingsConflictRefreshPending(queryClient)) {
         // A conflict refresh is pending or failed. Do not build another whole
         // field from that rejected cache, including consent writes callers await.
+        // Only a 409 counts: an ordinary invalidation leaves the cache usable,
+        // and the refetch it starts is rebased under whatever is typed meanwhile.
         toast(t.errors.settingsSaveFailed, 'error');
         void queryClient
           .fetchQuery({ ...appSettingsQueryOptions(), staleTime: 0 })
@@ -328,10 +417,6 @@ export function useGlobalSettings() {
         conflictEpoch,
         confirmedWrite,
       };
-      // Opens the echo window at the first keystroke, not at the PUT, so the
-      // whole debounce is protected too.
-      markAppSettingsLocalWrite();
-
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
       }
@@ -355,7 +440,7 @@ export function useGlobalSettings() {
    * still in the debounce window and could still fail.
    *
    * Everything `saveSettings` establishes still applies: the same normalization,
-   * the same rollback baseline, the same echo window. Only the timer is skipped,
+   * the same rollback baseline, the same writer id. Only the timer is skipped,
    * so an edit already queued rides along rather than being dropped.
    */
   const saveSettingsNow = useCallback(

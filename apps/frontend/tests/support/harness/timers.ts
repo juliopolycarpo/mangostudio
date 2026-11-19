@@ -12,8 +12,7 @@
  * already inside an `act` get a nested one, which React supports.
  *
  * Fake timers also move `Date.now()` (verified on 1.4.0 and 1.4.2), so code
- * that measures a window by timestamp rather than by timer —
- * `local-write-window.ts` — sees the same jump.
+ * that measures a window by timestamp rather than by timer sees the same jump.
  */
 
 import { jest } from 'bun:test';

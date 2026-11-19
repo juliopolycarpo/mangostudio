@@ -6,6 +6,7 @@
 
 import { cors } from '@elysia/cors';
 import { openapi } from '@elysia/openapi';
+import { REALTIME_WRITER_ID_HEADER } from '@mangostudio/shared/realtime';
 import { Elysia, NotFound } from 'elysia';
 import { websocket } from 'elysia/websocket';
 
@@ -200,7 +201,15 @@ export const app = new Elysia()
       },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'If-Match'],
+      // The writer id header rides every app-settings save, so a split
+      // deployment's preflight must allow it or the save never leaves the browser.
+      allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'x-api-key',
+        'If-Match',
+        REALTIME_WRITER_ID_HEADER,
+      ],
     })
   )
   .use(createGeneratedImageRoutes(IMAGES_DIR))

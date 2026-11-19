@@ -20,6 +20,7 @@ import { OnboardingStateSchema } from '../onboarding/schemas';
 import { ProfileIdSchema } from '../profiles';
 import { PromptSettingsSchema } from '../prompt-rules';
 import { ReasoningEffortSchema } from '../provider-settings';
+import { REALTIME_WRITER_ID_HEADER } from '../realtime/schemas';
 import { WorkspaceSettingsSchema } from '../workspaces';
 
 export const ImageQualitySchema = Type.Union([
@@ -213,9 +214,18 @@ export const AppSettingsPutBodySchema = Type.Partial(
   })
 );
 
-/** Optional precondition for a settings patch built from a prior response. */
+/**
+ * Optional headers on a settings patch: the precondition for one built from a
+ * prior response, and the writing tab's id, which the hub echoes on the
+ * realtime invalidation so that tab can recognise its own write.
+ *
+ * The writer id is deliberately a bare string here: a malformed one must cost
+ * the tab a redundant refetch, never a rejected save. The hub drops it from the
+ * event instead (see `RealtimeWriterIdSchema`).
+ */
 export const AppSettingsPutHeadersSchema = Type.Object({
   'if-match': Type.Optional(Type.String()),
+  [REALTIME_WRITER_ID_HEADER]: Type.Optional(Type.String()),
 });
 
 export type ImageQuality = Static<typeof ImageQualitySchema>;

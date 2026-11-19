@@ -963,4 +963,22 @@ describe('app settings revision contracts', () => {
     expect(Value.Check(AppSettingsPutHeadersSchema, { 'if-match': '"r1"' })).toBe(true);
     expect(Value.Check(AppSettingsPutHeadersSchema, { 'if-match': 1 })).toBe(false);
   });
+
+  it('accepts the writer id header without making it required', () => {
+    expect(Value.Check(AppSettingsPutHeadersSchema, { 'x-mangostudio-writer-id': 'tab-1' })).toBe(
+      true
+    );
+    expect(
+      Value.Check(AppSettingsPutHeadersSchema, {
+        'if-match': '"r1"',
+        'x-mangostudio-writer-id': 'tab-1',
+      })
+    ).toBe(true);
+    // Lenient on purpose: a malformed id is dropped by the hub, never a reason
+    // to reject the save (the event schema bounds it instead).
+    expect(
+      Value.Check(AppSettingsPutHeadersSchema, { 'x-mangostudio-writer-id': 'w'.repeat(500) })
+    ).toBe(true);
+    expect(Value.Check(AppSettingsPutHeadersSchema, { 'x-mangostudio-writer-id': 1 })).toBe(false);
+  });
 });

@@ -20,8 +20,8 @@ import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { SETTINGS_TOPIC } from '@mangostudio/shared/realtime';
 
 import { resetRealtimeInvalidations } from '@/lib/realtime/use-realtime-invalidation';
+import { getTabWriterId } from '@/lib/realtime/writer-id';
 
-import { resetAppSettingsLocalWriteWindow } from '../../../../src/features/settings/app/local-write-window';
 import { act, renderHook, screen, waitFor } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
@@ -69,9 +69,14 @@ const LOCATIONS = [
   location({ id: 'claude-skills', path: '/home/dev/.claude/skills', targetIds: ['claude'] }),
 ];
 
-function publishAppInvalidation(): Promise<void> {
+function publishAppInvalidation(writerId?: string): Promise<void> {
   return act(() =>
-    realtime.invalidate({ type: 'invalidate', topic: SETTINGS_TOPIC, scopes: ['app'] })
+    realtime.invalidate({
+      type: 'invalidate',
+      topic: SETTINGS_TOPIC,
+      scopes: ['app'],
+      ...(writerId === undefined ? {} : { writerId }),
+    })
   );
 }
 
@@ -81,7 +86,6 @@ describe('library location defaults while the hub is detecting agents', () => {
   beforeEach(() => {
     setTestSession({ user: { id: 'user-test' } });
     resetRealtimeInvalidations();
-    resetAppSettingsLocalWriteWindow();
     fetchScenario.install();
     fetchScenario.respondWithJson('GET', '/api/environments', { body: [] });
     fetchScenario.respondWithJson('GET', '/api/library/locations', { body: LOCATIONS });
@@ -124,6 +128,35 @@ describe('library location defaults while the hub is detecting agents', () => {
       realtime.isSubscribed(SETTINGS_TOPIC),
       'expected the detection listener to unsubscribe once the defaults are real'
     ).toBe(false);
+  });
+
+  it('skips the echo of this tab own write but refetches for any other writer', async () => {
+    fetchScenario.respondWithJson('GET', '/api/settings/app', { body: PENDING_ANSWER });
+    const settingsReads = () =>
+      fetchScenario.fetchMock.mock.calls.filter(
+        ([input]) =>
+          new URL(input instanceof Request ? input.url : String(input), 'http://localhost')
+            .pathname === '/api/settings/app'
+      ).length;
+
+    renderHook(() => useEnabledLocationIds());
+    await waitFor(() => expect(realtime.isSubscribed(SETTINGS_TOPIC)).toBe(true));
+    const readsBeforeEvents = settingsReads();
+
+    // This tab's own write already answered after detection, so its echo has
+    // nothing new to fetch.
+    await publishAppInvalidation(getTabWriterId());
+    expect(
+      settingsReads(),
+      `expected no app-settings read after this tab's own echo | received: ${settingsReads() - readsBeforeEvents} more`
+    ).toBe(readsBeforeEvents);
+
+    // Another tab's write (or the hub's detection event, which names nobody)
+    // is applied at once, with no window to wait out.
+    await publishAppInvalidation('other-tab-writer');
+    await waitFor(() => expect(settingsReads()).toBe(readsBeforeEvents + 1));
+    await publishAppInvalidation();
+    await waitFor(() => expect(settingsReads()).toBe(readsBeforeEvents + 2));
   });
 
   it('never subscribes when the defaults were already detected', async () => {

@@ -5,6 +5,7 @@ import {
   AppSettingsResponseSchema,
 } from '@mangostudio/shared/app-settings';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
+import { REALTIME_WRITER_ID_HEADER } from '@mangostudio/shared/realtime';
 import { Elysia, status } from 'elysia';
 import type { Kysely } from 'kysely';
 
@@ -46,7 +47,13 @@ export function createAppSettingsRoutes(database: () => Kysely<Database> = getDb
         // Migrated from ESLint
         async ({ body, headers, user }) => {
           try {
-            return await writeAppSettings(database(), user?.id ?? '', body, headers['if-match']);
+            return await writeAppSettings(
+              database(),
+              user?.id ?? '',
+              body,
+              headers['if-match'],
+              headers[REALTIME_WRITER_ID_HEADER]
+            );
           } catch (error) {
             if (!(error instanceof AppSettingsConflict)) throw error;
             return status(409, { error: error.message, code: ERROR_CODES.CONFLICT });

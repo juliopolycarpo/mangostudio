@@ -165,11 +165,34 @@ export const RealtimePongMessageSchema = Type.Object(
 );
 export type RealtimePongMessage = Static<typeof RealtimePongMessageSchema>;
 
+/**
+ * Request header a writer sends so the hub can name it on the invalidation its
+ * write produces. Lowercase: it is also the key Elysia reads the header under.
+ */
+export const REALTIME_WRITER_ID_HEADER = 'x-mangostudio-writer-id' as const;
+
+/**
+ * Opaque id a browser tab picks for itself (one per page load) and sends with
+ * its writes, so the tab can recognise the invalidation its own write caused
+ * and tell it from another tab's. A correlation token, not an identity: the
+ * hub never trusts it for anything but echoing it back to the same user's
+ * sockets, and a missing or malformed one only costs the tab a redundant
+ * refetch.
+ */
+export const RealtimeWriterIdSchema = Type.String({ minLength: 1, maxLength: 64 });
+export type RealtimeWriterId = Static<typeof RealtimeWriterIdSchema>;
+
 const RealtimeSettingsInvalidateMessageSchema = Type.Object(
   {
     type: Type.Literal('invalidate'),
     topic: Type.Literal(SETTINGS_TOPIC),
     scopes: Type.Optional(Type.Array(SettingsScopeSchema, { minItems: 1 })),
+    /**
+     * Who wrote, when the writer named itself. Absent for a hub-originated
+     * event (library detection landing) and for a client that sent no id, so
+     * every tab treats those as someone else's change.
+     */
+    writerId: Type.Optional(RealtimeWriterIdSchema),
   },
   { additionalProperties: false }
 );

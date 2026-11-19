@@ -6,6 +6,8 @@ import { en } from '@mangostudio/shared/i18n';
 import type { WorkspacePanelSettings } from '@mangostudio/shared/workspaces';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { getTabWriterId } from '@/lib/realtime/writer-id';
+
 import { act, flushAsyncRender, renderHook, screen, waitFor } from '../../support/harness/render';
 import {
   advanceTimersByTimeAsync,
@@ -17,6 +19,11 @@ import {
 // what the factory below hands back, so keep them instead.
 const mockGet = jest.fn();
 const mockPut = jest.fn();
+
+/** Every save names this tab as the writer next to its precondition. */
+function putOptions(revision: string) {
+  return { headers: { 'x-mangostudio-writer-id': getTabWriterId(), 'if-match': revision } };
+}
 
 void mock.module('../../../src/lib/api-client', () => ({
   client: {
@@ -111,7 +118,7 @@ describe('useGlobalSettings', () => {
       await advanceTimersByTimeAsync(300);
       expect(mockPut).toHaveBeenCalledTimes(1);
       expect(mockPut.mock.calls[0]?.[0].promptSettings.textSystemPrompt).toBe('older draft');
-      expect(mockPut.mock.calls[0]?.[1]).toEqual({ headers: { 'if-match': '"r1"' } });
+      expect(mockPut.mock.calls[0]?.[1]).toEqual(putOptions('"r1"'));
     } finally {
       await restoreRealTimers();
     }
@@ -128,8 +135,8 @@ describe('useGlobalSettings', () => {
     await act(async () => {
       await result.current.updateExternalAgentSettings({});
     });
-    expect(mockPut.mock.calls[0]?.[1]).toEqual({ headers: { 'if-match': '"r1"' } });
-    expect(mockPut.mock.calls[1]?.[1]).toEqual({ headers: { 'if-match': '"r2"' } });
+    expect(mockPut.mock.calls[0]?.[1]).toEqual(putOptions('"r1"'));
+    expect(mockPut.mock.calls[1]?.[1]).toEqual(putOptions('"r2"'));
   });
 
   it('clamps maxToolIterations before persisting', async () => {
@@ -570,7 +577,7 @@ describe('useGlobalSettings', () => {
           await advanceTimersByTimeAsync(0);
           if (succeeds) {
             expect(mockPut).toHaveBeenCalledTimes(2);
-            expect(mockPut.mock.calls[1]?.[1]).toEqual({ headers: { 'if-match': '"r2"' } });
+            expect(mockPut.mock.calls[1]?.[1]).toEqual(putOptions('"r2"'));
             expect(completed).toBe(false);
             await settle(
               settlePut[1],
@@ -614,7 +621,7 @@ describe('useGlobalSettings', () => {
         await advanceTimersByTimeAsync(0);
         expect(mockPut).toHaveBeenCalledTimes(2);
         expect(mockPut.mock.calls[1]?.[0].promptSettings.textSystemPrompt).toBe('second');
-        expect(mockPut.mock.calls[1]?.[1]).toEqual({ headers: { 'if-match': '"r2"' } });
+        expect(mockPut.mock.calls[1]?.[1]).toEqual(putOptions('"r2"'));
         await settle(
           settlePut[1],
           mockMutationResult({ ...DEFAULT_APP_SETTINGS, revision: '"r3"' })
@@ -647,7 +654,7 @@ describe('useGlobalSettings', () => {
         expect(result.current.promptSettings.textSystemPrompt).toBe('second');
         await advanceTimersByTimeAsync(300);
         expect(mockPut).toHaveBeenCalledTimes(2);
-        expect(mockPut.mock.calls[1]?.[1]).toEqual({ headers: { 'if-match': '"r2"' } });
+        expect(mockPut.mock.calls[1]?.[1]).toEqual(putOptions('"r2"'));
         await settle(settlePut[1], failedPut());
         await advanceTimersByTimeAsync(0);
         expect(result.current.promptSettings.textSystemPrompt).toBe('first');
@@ -1303,5 +1310,369 @@ describe('useGlobalSettings while library defaults are pending', () => {
       cachedPending(result.current.queryClient),
       'expected cache after rollback: pending | received: detected (the placeholder snapshot lost its flag)'
     ).toBe(true);
+  });
+});
+
+// A refetch can land at any moment: the realtime ack, the hub's detection event
+// or another tab's write. The edits typed since the last answer are only sent
+// once the debounce settles, so the refetch must not take them with it.
+describe('useGlobalSettings when a refetch lands mid-burst', () => {
+  const PROMPT_A = 'typed before the refetch';
+  const TOOL_ITERATIONS_B = 12;
+
+  function renderWithCache() {
+    return renderHook(() => ({ settings: useGlobalSettings(), queryClient: useQueryClient() }));
+  }
+
+  function refetchAppSettings(queryClient: ReturnType<typeof useQueryClient>) {
+    return act(async () => {
+      await queryClient.invalidateQueries({ queryKey: appSettingsKeys.all });
+    });
+  }
+
+  /** Types key A and waits until the optimistic value is on screen. */
+  async function typePromptA(
+    current: () => ReturnType<typeof renderWithCache>['result']['current']
+  ) {
+    act(() => current().settings.setTextSystemPrompt(PROMPT_A));
+    await waitFor(() => expect(current().settings.promptSettings.textSystemPrompt).toBe(PROMPT_A));
+  }
+
+  /** The cached prompt, read straight from the query cache with no render in between. */
+  function cachedPrompt(queryClient: ReturnType<typeof useQueryClient>): string | undefined {
+    return queryClient.getQueryData<AppSettings>(appSettingsKeys.current())?.promptSettings
+      .textSystemPrompt;
+  }
+
+  /** The If-Match a PUT carried, read without depending on the other headers. */
+  function ifMatchOf(callIndex: number): unknown {
+    const options = mockPut.mock.calls[callIndex]?.[1] as
+      { headers?: Record<string, string> } | undefined;
+    return options?.headers?.['if-match'];
+  }
+
+  beforeEach(() => {
+    mockGet.mockReset();
+    mockPut.mockReset();
+    mockGet.mockResolvedValue(mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r1"' }));
+    mockPut.mockImplementation((settings: AppSettingsPutBody) =>
+      Promise.resolve(mockMutationResult({ ...settings, revision: '"r9"' }))
+    );
+  });
+
+  it('keeps the unsent key through a same-revision refetch and sends it with the next one', async () => {
+    const { result } = renderWithCache();
+    await waitFor(() => expect(result.current.settings.isLoading).toBe(false));
+
+    await typePromptA(() => result.current);
+    const readsBeforeRefetch = mockGet.mock.calls.length;
+    await refetchAppSettings(result.current.queryClient);
+    expect(mockGet.mock.calls.length).toBe(readsBeforeRefetch + 1);
+
+    // Not reverted while it waits for the debounce: the cache the screen and
+    // the next edit read from still holds it.
+    expect(cachedPrompt(result.current.queryClient)).toBe(PROMPT_A);
+    await waitFor(() =>
+      expect(result.current.settings.promptSettings.textSystemPrompt).toBe(PROMPT_A)
+    );
+
+    act(() => result.current.settings.setMaxToolIterations(TOOL_ITERATIONS_B));
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+
+    const sent = mockPut.mock.calls[0]?.[0] as AppSettingsPutBody;
+    expect(
+      sent.promptSettings?.textSystemPrompt,
+      'expected the PUT to carry key A (typed before the refetch) | received: the refetched value'
+    ).toBe(PROMPT_A);
+    expect(sent.maxToolIterations).toBe(TOOL_ITERATIONS_B);
+    expect(ifMatchOf(0)).toBe('"r1"');
+  });
+
+  it('rebases the unsent key over another tab write and sends both on the newer revision', async () => {
+    const { result } = renderWithCache();
+    await waitFor(() => expect(result.current.settings.isLoading).toBe(false));
+
+    await typePromptA(() => result.current);
+    // Another tab saved a different field, so the server is now at r2.
+    mockGet.mockResolvedValue(
+      mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r2"', globalImageQuality: '4K' })
+    );
+    await refetchAppSettings(result.current.queryClient);
+
+    expect(cachedPrompt(result.current.queryClient)).toBe(PROMPT_A);
+    await waitFor(() => expect(result.current.settings.globalImageQuality).toBe('4K'));
+    expect(result.current.settings.promptSettings.textSystemPrompt).toBe(PROMPT_A);
+
+    act(() => result.current.settings.setMaxToolIterations(TOOL_ITERATIONS_B));
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+
+    const sent = mockPut.mock.calls[0]?.[0] as AppSettingsPutBody;
+    expect(sent.promptSettings?.textSystemPrompt).toBe(PROMPT_A);
+    expect(sent.maxToolIterations).toBe(TOOL_ITERATIONS_B);
+    // The other tab's field rides along unchanged rather than being reset.
+    expect(sent.globalImageQuality).toBe('4K');
+    expect(
+      ifMatchOf(0),
+      'expected If-Match to name the refetched revision "r2" | received: the revision the burst started on'
+    ).toBe('"r2"');
+
+    await waitFor(() => expect(result.current.settings.maxToolIterations).toBe(TOOL_ITERATIONS_B));
+    expect(result.current.settings.promptSettings.textSystemPrompt).toBe(PROMPT_A);
+    expect(result.current.settings.globalImageQuality).toBe('4K');
+  });
+
+  it('still converges through the conflict path when the rebased revision is stale too', async () => {
+    const { result } = renderWithCache();
+    await waitFor(() => expect(result.current.settings.isLoading).toBe(false));
+
+    await typePromptA(() => result.current);
+    mockGet.mockResolvedValue(
+      mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r2"', globalImageQuality: '4K' })
+    );
+    await refetchAppSettings(result.current.queryClient);
+    act(() => result.current.settings.setMaxToolIterations(TOOL_ITERATIONS_B));
+
+    // Yet another write lands before this flush, so r2 is rejected.
+    mockGet.mockResolvedValue(
+      mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r3"', globalImageQuality: '2K' })
+    );
+    mockPut.mockResolvedValueOnce(
+      mockMutationResult(null, { value: { error: 'Settings changed', code: 'CONFLICT' } })
+    );
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+    expect(ifMatchOf(0)).toBe('"r2"');
+
+    // The refresh wins: the rejected snapshot is never replayed over it.
+    await waitFor(() => expect(result.current.settings.globalImageQuality).toBe('2K'));
+    expect(result.current.settings.promptSettings.textSystemPrompt).toBe(
+      DEFAULT_APP_SETTINGS.promptSettings.textSystemPrompt
+    );
+    expect(mockPut).toHaveBeenCalledTimes(1);
+
+    // And the next edit builds on the refreshed revision.
+    act(() => result.current.settings.setMaxToolIterations(TOOL_ITERATIONS_B + 1));
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(2));
+    expect(ifMatchOf(1)).toBe('"r3"');
+  });
+
+  it('keeps a key that is still in flight when a same-revision refetch lands', async () => {
+    let answerPut: ((result: MockPutResult) => void) | undefined;
+    mockPut.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answerPut = resolve;
+        })
+    );
+    const { result } = renderWithCache();
+    await waitFor(() => expect(result.current.settings.isLoading).toBe(false));
+
+    await typePromptA(() => result.current);
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+    await refetchAppSettings(result.current.queryClient);
+
+    // The PUT has not answered, so the server still holds the old value: the
+    // screen must not show the edit reverting underneath the user.
+    expect(cachedPrompt(result.current.queryClient)).toBe(PROMPT_A);
+
+    act(() => {
+      answerPut?.(
+        mockMutationResult({
+          ...DEFAULT_APP_SETTINGS,
+          revision: '"r2"',
+          promptSettings: { ...DEFAULT_APP_SETTINGS.promptSettings, textSystemPrompt: PROMPT_A },
+        })
+      );
+    });
+    await waitFor(() =>
+      expect(result.current.settings.promptSettings.textSystemPrompt).toBe(PROMPT_A)
+    );
+  });
+
+  /** Holds every PUT open so the test decides when, and how, each one answers. */
+  function holdEveryPut(): Array<(result: MockPutResult) => void> {
+    const answerPut: Array<(result: MockPutResult) => void> = [];
+    mockPut.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answerPut.push(resolve);
+        })
+    );
+    return answerPut;
+  }
+
+  /** Answers a held PUT and lets its mutation callbacks finish before returning. */
+  async function answer(
+    answerPut: ((result: MockPutResult) => void) | undefined,
+    putResult: MockPutResult
+  ): Promise<void> {
+    await act(async () => {
+      answerPut?.(putResult);
+      await Promise.resolve();
+    });
+  }
+
+  function cachedSettings(queryClient: ReturnType<typeof useQueryClient>) {
+    return queryClient.getQueryData<AppSettings & { revision?: string }>(appSettingsKeys.current());
+  }
+
+  describe('several consumers of the same cache', () => {
+    function renderTwoConsumers() {
+      return renderHook(() => ({
+        first: useGlobalSettings(),
+        second: useGlobalSettings(),
+        queryClient: useQueryClient(),
+      }));
+    }
+
+    const OTHER_TAB_REFETCH = {
+      ...DEFAULT_APP_SETTINGS,
+      revision: '"r2"',
+      globalImageQuality: '4K',
+    };
+
+    it('rebases once for an idle second consumer and sends the same save', async () => {
+      const { result } = renderTwoConsumers();
+      await waitFor(() => expect(result.current.first.isLoading).toBe(false));
+
+      act(() => result.current.first.setTextSystemPrompt(PROMPT_A));
+      mockGet.mockResolvedValue(mockQueryResult(OTHER_TAB_REFETCH));
+      await refetchAppSettings(result.current.queryClient);
+
+      // Both surfaces read one cache, and only the consumer that owns the burst
+      // may touch it: the idle one has no baseline and must leave it alone.
+      // Read through `result.current` each time: a captured consumer is a
+      // snapshot of one render.
+      for (const consumerOf of [() => result.current.first, () => result.current.second]) {
+        await waitFor(() => expect(consumerOf().globalImageQuality).toBe('4K'));
+        expect(consumerOf().promptSettings.textSystemPrompt).toBe(PROMPT_A);
+      }
+
+      await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+      const sent = mockPut.mock.calls[0]?.[0] as AppSettingsPutBody;
+      expect(sent.promptSettings?.textSystemPrompt).toBe(PROMPT_A);
+      expect(sent.globalImageQuality).toBe('4K');
+      expect(ifMatchOf(0)).toBe('"r2"');
+    });
+
+    it('keeps both consumers unsent edits when each rebases over the same refetch', async () => {
+      const { result } = renderTwoConsumers();
+      await waitFor(() => expect(result.current.first.isLoading).toBe(false));
+
+      // The second consumer builds on the cache the first one already edited,
+      // so each rebase starts from the other's result. That composes: the
+      // later listener reads the earlier one's rebased cache as its "fetched"
+      // state and re-applies only its own edited fields on top, so neither
+      // edit is lost from the shared cache.
+      act(() => result.current.first.setTextSystemPrompt(PROMPT_A));
+      act(() => result.current.second.setMaxToolIterations(TOOL_ITERATIONS_B));
+      mockGet.mockResolvedValue(mockQueryResult(OTHER_TAB_REFETCH));
+      await refetchAppSettings(result.current.queryClient);
+
+      const rebased = cachedSettings(result.current.queryClient);
+      expect(
+        rebased?.promptSettings.textSystemPrompt,
+        "expected the first consumer's unsent prompt in the shared cache | received: the fetched value"
+      ).toBe(PROMPT_A);
+      expect(
+        rebased?.maxToolIterations,
+        "expected the second consumer's unsent iteration limit in the shared cache | received: the fetched value"
+      ).toBe(TOOL_ITERATIONS_B);
+      expect(rebased?.globalImageQuality).toBe('4K');
+      expect(rebased?.revision).toBe('"r2"');
+    });
+  });
+
+  describe('an in-flight save answering after a rebase', () => {
+    it('rolls a failed save back to the rebased snapshot, not the one the burst started on', async () => {
+      const answerPut = holdEveryPut();
+      const { result } = renderWithCache();
+      await waitFor(() => expect(result.current.settings.isLoading).toBe(false));
+
+      await typePromptA(() => result.current);
+      await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+      expect(ifMatchOf(0)).toBe('"r1"');
+
+      // Another tab saved image quality, so the refetch lands on r2 and the
+      // cache becomes r2 plus this tab's still-unanswered key A.
+      mockGet.mockResolvedValue(
+        mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r2"', globalImageQuality: '4K' })
+      );
+      await refetchAppSettings(result.current.queryClient);
+      expect(cachedSettings(result.current.queryClient)?.revision).toBe('"r2"');
+
+      // A non-conflict failure: the server never took key A.
+      await answer(
+        answerPut[0],
+        mockMutationResult(null, { value: { error: 'settings write failed' } })
+      );
+      await waitFor(() => expect(cachedPrompt(result.current.queryClient)).not.toBe(PROMPT_A));
+
+      const rolledBack = cachedSettings(result.current.queryClient);
+      expect(
+        rolledBack?.revision,
+        'expected the rollback to keep the refetched revision "r2" | received: the revision the burst started on'
+      ).toBe('"r2"');
+      expect(
+        rolledBack?.globalImageQuality,
+        "expected the other tab's image quality '4K' to stay on screen | received: the pre-refetch value"
+      ).toBe('4K');
+
+      // The next edit therefore builds on r2 instead of a guaranteed 409.
+      act(() => result.current.settings.setMaxToolIterations(TOOL_ITERATIONS_B));
+      await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(2));
+      expect(ifMatchOf(1)).toBe('"r2"');
+    });
+
+    it('keeps an edit queued behind a save whose own commit the refetch already holds', async () => {
+      const answerPut = holdEveryPut();
+      const { result } = renderWithCache();
+      await waitFor(() => expect(result.current.settings.isLoading).toBe(false));
+
+      await typePromptA(() => result.current);
+      await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+      act(() => result.current.settings.setMaxToolIterations(TOOL_ITERATIONS_B));
+
+      // PUT1 committed as r2 before it answered, and another reader (a second
+      // tab's echo, the detection event) refetched in that gap.
+      const committedByPut1 = {
+        ...DEFAULT_APP_SETTINGS,
+        revision: '"r2"',
+        promptSettings: { ...DEFAULT_APP_SETTINGS.promptSettings, textSystemPrompt: PROMPT_A },
+      };
+      mockGet.mockResolvedValue(mockQueryResult(committedByPut1));
+      await refetchAppSettings(result.current.queryClient);
+      expect(cachedSettings(result.current.queryClient)?.maxToolIterations).toBe(TOOL_ITERATIONS_B);
+
+      await answer(answerPut[0], mockMutationResult(committedByPut1));
+      await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(2));
+
+      expect(
+        cachedSettings(result.current.queryClient)?.maxToolIterations,
+        'expected the queued edit to stay in the cache while its save is in flight | received: the value PUT1 confirmed'
+      ).toBe(TOOL_ITERATIONS_B);
+      expect((mockPut.mock.calls[1]?.[0] as AppSettingsPutBody).maxToolIterations).toBe(
+        TOOL_ITERATIONS_B
+      );
+      expect(ifMatchOf(1)).toBe('"r2"');
+
+      // A keystroke now builds on the cache, so losing the edit there would
+      // silently overwrite it with the old value.
+      act(() => result.current.settings.setGlobalImageQuality('4K'));
+      await answer(
+        answerPut[1],
+        mockMutationResult({
+          ...committedByPut1,
+          maxToolIterations: TOOL_ITERATIONS_B,
+          revision: '"r3"',
+        })
+      );
+      await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(3));
+      const lastPut = mockPut.mock.calls[2]?.[0] as AppSettingsPutBody;
+      expect(lastPut.globalImageQuality).toBe('4K');
+      expect(
+        lastPut.maxToolIterations,
+        'expected the third PUT to still carry the queued edit | received: the pre-edit value'
+      ).toBe(TOOL_ITERATIONS_B);
+    });
   });
 });
