@@ -14,6 +14,17 @@ on:
       - .github/workflows/native-bun-qualification.yml
       - scripts/ci/native-bun-qualification.ts
       - scripts/lib/native-bun-qualification*.ts
+      # Modules the qualification entry imports outside its own family. The
+      # workflow policy test derives this set from the imports and fails on a
+      # missing one.
+      - scripts/lib/junit-report.ts
+      - scripts/lib/log-lines.ts
+      - scripts/lib/native-command-output.ts
+      # The scheduled-run helper this workflow executes. Its shared scripts/lib
+      # imports (config, exec, log, process-tree, ...) are deliberately not
+      # listed: they would start the native jobs on most scripts/lib edits.
+      - scripts/ci/native-platform-watch.ts
+      - scripts/ci/native-watch/**
       - scripts/tests/native-bun-qualification*.unit.test.ts
       - scripts/tests/native-bun-compiler-helpers.unit.test.ts
       - scripts/lib/native-windows-job*.ps1
