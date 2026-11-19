@@ -14,6 +14,7 @@ import type { MachineCheck } from '@mangostudio/shared/machine';
 import {
   MACHINE_CHECK_DETAIL_MAX,
   MACHINE_CHECK_LABEL_MAX,
+  MACHINE_CHECK_PARAMS_MAX,
   MACHINE_DOCTOR_CHECK_LIMIT,
 } from '@mangostudio/shared/machine';
 
@@ -40,5 +41,15 @@ export function fitDoctorChecks(checks: readonly MachineCheck[]): MachineCheck[]
     ...check,
     label: fitToLimit(check.label, MACHINE_CHECK_LABEL_MAX),
     detail: fitToLimit(check.detail, MACHINE_CHECK_DETAIL_MAX),
+    ...(check.params ? { params: fitCheckParams(check.params) } : {}),
   }));
+}
+
+/** Params cut like the detail they fill: each value to the detail cap, and no more entries than the schema holds. */
+function fitCheckParams(params: Readonly<Record<string, string>>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(params)
+      .slice(0, MACHINE_CHECK_PARAMS_MAX)
+      .map(([name, value]) => [name, fitToLimit(value, MACHINE_CHECK_DETAIL_MAX)])
+  );
 }

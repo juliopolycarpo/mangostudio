@@ -651,6 +651,84 @@ export const messages: FeatureMessages<'environments'> = {
         title: 'Doctor',
         summary: '{warnings} warnings, {failures} failures',
         clear: 'Every check passed.',
+        /**
+         * One template per doctor label or detail, keyed by the key the check
+         * carries on the wire (`MachineCheck.labelKey` / `detailKey`). The CLI
+         * prints these same English strings, so an edit here changes the
+         * terminal output too. A `{param}` that holds text from outside the
+         * product (an OS error, a path, a version) is filled in as is.
+         */
+        checks: {
+          'core.label.homeDirectory': 'Home directory',
+          'core.label.logsDirectory': 'Logs directory',
+          'core.label.runDirectory': 'Run directory',
+          'core.label.config': 'Config',
+          'core.label.database': 'Database',
+          'core.label.frontend': 'Frontend',
+          'core.label.authSecret': 'Auth secret',
+          'core.label.instance': 'Instance',
+          'core.label.runtime': 'Runtime',
+          'core.label.runtimeBinary': 'Runtime binary',
+          'core.label.runtimeSlot': 'Runtime slot ({slot})',
+          'core.label.runtimeCache': 'Runtime cache',
+          'core.label.sshClient': 'SSH client',
+          'core.label.serverBuild': 'Server build',
+          'core.label.checkoutBuild': 'Checkout build',
+          'core.label.frontendBuild': 'Frontend build',
+          'core.detail.directoryWritable': '{path} (writable)',
+          'core.detail.directoryNotWritable': '{path} (not writable)',
+          'core.detail.directoryWillBeCreated': '{path} (will be created)',
+          'core.detail.directoryParentNotWritable': '{path} (parent not writable)',
+          'core.detail.configFile': '{host}:{port} ({path})',
+          'core.detail.configDefaults': '{host}:{port} (defaults)',
+          'core.detail.databaseInMemory': 'in-memory',
+          'core.detail.databasePath': '{path}',
+          'core.detail.frontendPresent': '{path} (present)',
+          'core.detail.frontendMissing': '{path} (missing — API only)',
+          'core.detail.frontendEmbeddedFiles': 'embedded in binary ({count} files)',
+          'core.detail.frontendEmbeddedInServer': 'embedded in running server binary',
+          'core.detail.authSecretInvalid': '{message}',
+          'core.detail.authSecretSet': 'set ({minLength}+ characters)',
+          'core.detail.instanceNotRunning': 'not running',
+          'core.detail.instanceStale': 'stale state file (PID {pid})',
+          'core.detail.instanceRunning': 'running (PID {pid}, port {port}, health not probed)',
+          'core.detail.runtimeStandalone': 'v{version} {platform}-{arch} standalone',
+          'core.detail.runtimeDevelopment': 'v{version} {platform}-{arch} dev',
+          'core.detail.runtimeBinaryNotBuilt':
+            'not built in this source checkout; Local cannot start. Run "{command}" from the repository root',
+          'core.detail.runtimeBinaryMissing':
+            'missing at {path}; Local cannot start. Reinstall MangoStudio so it ships beside the hub, or set MANGOSTUDIO_RUNTIME_BINARY',
+          'core.detail.runtimeBinaryNoVersion': '{path} did not report a version ({reason})',
+          'core.detail.runtimeBinaryNoVersionUnknown':
+            '{path} did not report a version (unknown reason)',
+          'core.detail.runtimeBinaryMismatch':
+            'v{version} does not match hub v{hubVersion}; reinstall so both come from one release',
+          'core.detail.runtimeBinaryOk': 'v{version} at {path}',
+          'core.detail.runtimeSlotUnreadable':
+            '{file} in {directory} {error}; run "{command}" to rewrite it',
+          'core.detail.runtimeSlotPending': 'waiting for consent; run "{command}" on that machine',
+          'core.detail.runtimeSlotConfigured': '{profile}  {directory}',
+          'core.detail.runtimeSlotConfiguredVersion': 'v{version}  {profile}  {directory}',
+          'core.detail.runtimeSlotDenied': '{profile} (denied: {denied})  {directory}',
+          'core.detail.runtimeSlotDeniedVersion':
+            'v{version}  {profile} (denied: {denied})  {directory}',
+          'core.detail.runtimeCacheEmpty': 'empty  {directory}',
+          'core.detail.runtimeCacheVersions': '{versions}  {directory}',
+          'core.detail.sshClientMissing': 'no ssh on PATH; SSH environments cannot start',
+          'core.detail.sshClientNoVersion': '{path} did not report a version ({reason})',
+          'core.detail.sshClientNoVersionUnknown':
+            '{path} did not report a version (unknown reason)',
+          'core.detail.sshClientOk': '{version}  {path}',
+          'core.detail.buildStampClean': '{sha} (built {builtAt}, clean, {buildType})',
+          'core.detail.buildStampDirty': '{sha} (built {builtAt}, dirty, {buildType})',
+          'core.detail.buildStampDirtyUnknown':
+            '{sha} (built {builtAt}, dirty unknown, {buildType})',
+          'core.detail.serverBuildMissing': 'running server did not report build metadata',
+          'core.detail.checkoutBuildDiffers':
+            'checkout {checkout} differs from server {server}; restart or rebuild if unexpected',
+          'core.detail.frontendBuildMissing': '{path} missing; rebuild frontend assets to compare',
+          'core.detail.frontendBuildDiffers': 'frontend {frontend} differs from server {server}',
+        },
       },
       logs: {
         title: 'Log',

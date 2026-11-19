@@ -110,11 +110,12 @@ const scenario = createFetchScenario();
 
 function mountScenario(
   status: MachineStatus = STATUS,
-  update: MachineUpdateStatus = UPDATE_STATUS
+  update: MachineUpdateStatus = UPDATE_STATUS,
+  doctor: MachineDoctorReport = DOCTOR
 ) {
   scenario
     .respondWithJson('GET', '/api/machine/status', { body: status })
-    .respondWithJson('GET', '/api/machine/doctor', { body: DOCTOR })
+    .respondWithJson('GET', '/api/machine/doctor', { body: doctor })
     .respondWithJson('GET', '/api/machine/logs?tail=200', { body: LOGS })
     .respondWithJson('GET', '/api/machine/update', { body: update })
     .install();
@@ -251,6 +252,113 @@ describe('MachinePage', () => {
     await waitFor(() =>
       expect(document.body.textContent).toContain('O servidor foi iniciado em um terminal')
     );
+  });
+
+  describe('doctor rows with keys', () => {
+    // What a hub that has keyed its core checks sends: English prose beside the
+    // key, so a reader without the key still has something to show.
+    const KEYED_DOCTOR: MachineDoctorReport = {
+      checks: [
+        {
+          label: 'Runtime binary',
+          labelKey: 'core.label.runtimeBinary',
+          status: 'warn',
+          detail: 'v0.9.0 does not match hub v1.0.0; reinstall so both come from one release',
+          detailKey: 'core.detail.runtimeBinaryMismatch',
+          params: { version: '0.9.0', hubVersion: '1.0.0' },
+        },
+        {
+          label: 'Frontend',
+          labelKey: 'core.label.frontend',
+          status: 'ok',
+          detail: '/app (present)',
+          detailKey: 'core.detail.frontendPresent',
+          params: { path: '/app' },
+        },
+      ],
+      warnings: 1,
+      failures: 0,
+    };
+
+    it('words a keyed row in the reader locale and keeps its params', async () => {
+      localStorage.setItem(LOCALE_STORAGE_KEY, 'pt-BR');
+      mountScenario(STATUS, UPDATE_STATUS, KEYED_DOCTOR);
+      render(<MachinePage />);
+
+      const doctor = await screen.findByTestId('machine-doctor');
+      await waitFor(() => expect(within(doctor).getByText('Binário do runtime')).toBeTruthy());
+      expect(doctor.textContent).toContain(
+        'v0.9.0 não corresponde ao hub v1.0.0; reinstale para que ambos venham da mesma versão'
+      );
+      expect(doctor.textContent).toContain('/app (presente)');
+      expect(doctor.textContent).not.toContain('does not match hub');
+    });
+
+    it('words a keyed row in English from the dictionary', async () => {
+      mountScenario(STATUS, UPDATE_STATUS, KEYED_DOCTOR);
+      render(<MachinePage />);
+
+      const doctor = await screen.findByTestId('machine-doctor');
+      await waitFor(() =>
+        expect(doctor.textContent).toContain(
+          'v0.9.0 does not match hub v1.0.0; reinstall so both come from one release'
+        )
+      );
+    });
+
+    it('shows the hub English for a key this build does not know, and for a row with no keys', async () => {
+      localStorage.setItem(LOCALE_STORAGE_KEY, 'pt-BR');
+      mountScenario(STATUS, UPDATE_STATUS, {
+        checks: [
+          // A newer hub's key: nothing in the dictionary to render it from.
+          {
+            label: 'Quantum flux',
+            labelKey: 'core.label.quantumFlux',
+            status: 'warn',
+            detail: 'flux drifted by 3 units',
+            detailKey: 'core.detail.quantumFlux',
+            params: { units: '3' },
+          },
+          // A section that has not been keyed yet.
+          { label: 'ChatGPT secrets', status: 'ok', detail: 'secret store reachable' },
+        ],
+        warnings: 1,
+        failures: 0,
+      });
+      render(<MachinePage />);
+
+      const doctor = await screen.findByTestId('machine-doctor');
+      await waitFor(() => expect(doctor.textContent).toContain('Quantum flux'));
+      expect(doctor.textContent).toContain('flux drifted by 3 units');
+      expect(doctor.textContent).toContain('ChatGPT secrets');
+      expect(doctor.textContent).toContain('secret store reachable');
+      expect(doctor.textContent).not.toContain('core.label');
+      expect(doctor.textContent).not.toContain('core.detail');
+    });
+
+    it('falls back to the hub English when a known key lacks a param its text needs', async () => {
+      localStorage.setItem(LOCALE_STORAGE_KEY, 'pt-BR');
+      mountScenario(STATUS, UPDATE_STATUS, {
+        checks: [
+          {
+            label: 'Runtime binary',
+            labelKey: 'core.label.runtimeBinary',
+            status: 'warn',
+            detail: 'v0.9.0 does not match hub v1.0.0; reinstall so both come from one release',
+            detailKey: 'core.detail.runtimeBinaryMismatch',
+            params: { version: '0.9.0' },
+          },
+        ],
+        warnings: 1,
+        failures: 0,
+      });
+      render(<MachinePage />);
+
+      const doctor = await screen.findByTestId('machine-doctor');
+      await waitFor(() => expect(within(doctor).getByText('Binário do runtime')).toBeTruthy());
+      expect(doctor.textContent).toContain('v0.9.0 does not match hub v1.0.0');
+      expect(doctor.textContent).not.toContain('{hubVersion}');
+    });
   });
 
   it('confirms a restart, posts it, and announces the hand-over', async () => {

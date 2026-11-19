@@ -220,6 +220,15 @@ o mantém vivo, resultados do doctor, configuração e ações de atualização.
 conectores e toggles de skills pertencem a um usuário, não à máquina, então a
 página de uma conta nunca cita as de outra. O `mangostudio doctor` não tem esse
 limite — ele roda no teclado da própria máquina e relata a instalação inteira.
+
+Cada linha do doctor é `{ label, status, detail }` em inglês, o texto que a CLI
+imprime. Uma linha de uma verificação com chaves também tem `labelKey`,
+`detailKey` e `params` (valores string): a página procura as chaves no próprio
+dicionário (`environments.machine.doctor.checks`) e preenche os `params`, e mostra
+o `label` / `detail` em inglês para uma chave que não conhece ou uma linha sem
+chaves. As verificações do núcleo têm chaves; as linhas de ChatGPT, skills, MCP,
+ambientes e biblioteca ainda são só em inglês. Uma chave é um identificador de
+protocolo: adicione uma nova em vez de renomear uma em uso.
 `logs` aceita `?tail=` entre 1 e 2000, com padrão 200. Ele lê um
 sufixo limitado do arquivo, não o arquivo inteiro, então um log com linhas
 excepcionalmente longas pode responder com menos linhas do que as pedidas;

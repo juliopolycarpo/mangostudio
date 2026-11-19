@@ -1,12 +1,15 @@
 /**
  * The doctor rows, as the CLI prints them: a status glyph, the label, the detail.
- * Worst first, since the reason to open the list is at its top.
+ * Worst first, since the reason to open the list is at its top. A row that
+ * carries keys is worded from this locale's dictionary; any other row, and a key
+ * the dictionary does not have (a newer hub), shows the English the hub sent.
  */
 
-import type {
-  MachineCheck,
-  MachineCheckStatus,
-  MachineDoctorReport,
+import {
+  type MachineCheck,
+  type MachineCheckStatus,
+  type MachineDoctorReport,
+  resolveMachineCheckText,
 } from '@mangostudio/shared/machine';
 import { CircleCheck } from 'lucide-react';
 
@@ -76,20 +79,24 @@ export function DoctorSection() {
               (a second MCP server with the same name and the same finding), and
               a duplicate key drops one of them. The list is fully replaced on
               every fetch, so there is no identity to preserve across renders. */}
-          {sortChecks(doctor.data?.checks ?? []).map((check, index) => (
-            <li
-              // eslint-disable-next-line react/no-array-index-key -- Checks can have duplicate labels and are replaced as a list.
-              key={`${index}:${check.label}`}
-              className="flex items-start gap-2 text-sm"
-              data-check-status={check.status}
-            >
-              <CheckIcon status={check.status} />
-              <div className="min-w-0">
-                <span className="font-medium text-fg">{check.label}</span>
-                <span className="text-fg-muted"> — {check.detail}</span>
-              </div>
-            </li>
-          ))}
+          {sortChecks(doctor.data?.checks ?? []).map((check, index) => {
+            // A row's own English stands in for a key this build has no text for.
+            const text = resolveMachineCheckText(check, m.checks);
+            return (
+              <li
+                // eslint-disable-next-line react/no-array-index-key -- Checks can have duplicate labels and are replaced as a list.
+                key={`${index}:${check.label}`}
+                className="flex items-start gap-2 text-sm"
+                data-check-status={check.status}
+              >
+                <CheckIcon status={check.status} />
+                <div className="min-w-0">
+                  <span className="font-medium text-fg">{text.label}</span>
+                  <span className="text-fg-muted"> — {text.detail}</span>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </MachineCard>

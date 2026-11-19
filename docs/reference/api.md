@@ -275,7 +275,16 @@ these two spawn probes, so a caller opts into them. An unknown section is `422`
 `VALIDATION`. Its rows are scoped to the signed-in account: MCP servers,
 connectors and skill toggles belong to a user, not to the machine, so one
 account's page never names another's. `mangostudio doctor` is unscoped — it runs
-at the machine's own keyboard and reports on the whole install. `logs` takes `?tail=` between 1 and 2000, defaulting to 200. It
+at the machine's own keyboard and reports on the whole install.
+
+Each doctor row is `{ label, status, detail }` in English, the text the CLI
+prints. A row from a keyed check also has `labelKey`, `detailKey` and `params`
+(string values): the page looks the keys up in its own dictionary
+(`environments.machine.doctor.checks`) and fills in `params`, and shows the
+English `label` / `detail` for a key it does not know or a row without keys.
+The core checks are keyed; the ChatGPT, skills, MCP, environments and library
+rows are English only for now. A key is a wire identifier: add a new one
+rather than renaming one in use. `logs` takes `?tail=` between 1 and 2000, defaulting to 200. It
 reads a bounded suffix of the file rather than the whole of it, so a log whose
 lines are unusually long can answer with fewer lines than were asked for;
 `truncated` says whether the file holds more.

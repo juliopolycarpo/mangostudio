@@ -92,6 +92,7 @@
     "./runtime-home/values": "./src/runtime-home/values.ts",
     "./machine": "./src/machine/index.ts",
     "./machine/limits": "./src/machine/limits.ts",
+    "./machine/check-text-en": "./src/machine/check-text-en.ts",
     "./machine/service": "./src/machine/user-service.ts",
     "./updates": "./src/updates/index.ts",
     "./backup": "./src/backup/index.ts",

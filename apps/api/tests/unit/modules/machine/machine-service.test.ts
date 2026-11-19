@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   MACHINE_CHECK_DETAIL_MAX,
   MACHINE_CHECK_LABEL_MAX,
+  MACHINE_CHECK_PARAMS_MAX,
   MACHINE_DOCTOR_CHECK_LIMIT,
   MACHINE_ERROR_MAX,
   MachineConfigWriteResponseSchema,
@@ -268,6 +269,39 @@ describe('machineService fits its own wire contract', () => {
     expect(report.checks).toHaveLength(MACHINE_DOCTOR_CHECK_LIMIT);
     expect(report.checks[0]?.detail).toHaveLength(MACHINE_CHECK_DETAIL_MAX);
     expect(report.checks[0]?.label).toHaveLength(MACHINE_CHECK_LABEL_MAX);
+  });
+
+  it('cuts keyed-row params to the value and entry caps, and keeps the keys', async () => {
+    const { service } = makeService({
+      collectDoctor: () =>
+        Promise.resolve([
+          {
+            label: 'Runtime binary',
+            labelKey: 'core.label.runtimeBinary',
+            status: 'warn' as const,
+            detail: 'x',
+            detailKey: 'core.detail.runtimeBinaryNoVersion',
+            params: {
+              path: '/opt/rt',
+              reason: 'R'.repeat(MACHINE_CHECK_DETAIL_MAX + 10),
+              ...Object.fromEntries(
+                Array.from({ length: MACHINE_CHECK_PARAMS_MAX + 4 }, (_, index) => [
+                  `extra${index}`,
+                  'v',
+                ])
+              ),
+            },
+          },
+        ]),
+    });
+    const report = await service.doctor([]);
+    const [row] = report.checks;
+
+    expect(Value.Check(MachineDoctorReportSchema, report)).toBe(true);
+    expect(row?.labelKey).toBe('core.label.runtimeBinary');
+    expect(row?.detailKey).toBe('core.detail.runtimeBinaryNoVersion');
+    expect(Object.keys(row?.params ?? {})).toHaveLength(MACHINE_CHECK_PARAMS_MAX);
+    expect(row?.params?.reason).toHaveLength(MACHINE_CHECK_DETAIL_MAX);
   });
 
   it('cuts a supervisor error and a probe error to what the status schema holds', async () => {
