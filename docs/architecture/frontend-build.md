@@ -300,6 +300,19 @@ build):
   wrongly. The options are validators generated at build time or a hand-written subset
   checker proven equal to `Value.Check` by differential tests; both are larger than the
   saving justifies today.
+- **`@mangostudio/shared` declares `sideEffects`, and Bun honours it.** A frontend import of one
+  name from a shared barrel used to keep every module the barrel re-exports, along with the
+  TypeBox objects each one builds at load. The package now lists the one module that runs code at
+  load (`library/registry.ts`); every other module is dropped whole when nothing it exports is
+  used. That took the eager total from 384,516 to 381,238 B Brotli (-3.3 KB; 25 of the 110 shared
+  modules in the entry left). What it cannot do is drop a schema inside a module the frontend still
+  uses, so a constant that lives beside schemas goes in a `limits` or `values` subpath:
+  `GIT_BATCH_STATE_MAX_CHAT_IDS` moved to `git/limits` (about 1.1 KB more, 380,226 B). What is left of
+  shared in the entry is mostly `i18n/en` (113 KB raw, the English dictionary), then the settings
+  defaults (9.7 KB) and schemas the frontend validates with at runtime. The
+  `shared-barrel-eager-guard` test and `scripts/tests/shared-side-effects-declaration.unit.test.ts`
+  keep both halves honest. The first terminal use fetches about 1.7 KB more raw, because the wire
+  parser left the entry for the terminal chunk.
 - **The first fenced code block loads one grammar and one theme.** The highlighter starts
   empty; `preloadCodeLanguages(languages, theme)` loads the fence's own grammar and the active
   theme, and a theme switch loads just the new theme. A `md` block is the one grammar that

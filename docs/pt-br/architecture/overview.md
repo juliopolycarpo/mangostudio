@@ -273,9 +273,9 @@ Imports entre workspaces usam nomes de pacote (`@mangostudio/shared`), nunca cam
 
 O código do browser importa constantes de UI e helpers puros pelos subpaths `environments/values`,
 `external-agents/values`, `library/values`, `runtime-home/values` e `generation/values`.
-Os limites de logs usam `machine/limits` e o limite de quadros SSE usa `streaming/limits`; o
-frontend importa só tipos do barrel `streaming`, pois importá-lo em runtime coloca todos os
-schemas de chunk no chunk de entrada. Por exemplo:
+Os limites de logs usam `machine/limits`, o limite de quadros SSE usa `streaming/limits` e o
+limite de lote do git usa `git/limits`; o frontend importa só tipos do barrel `streaming`, pois
+importá-lo em runtime coloca todos os schemas de chunk no chunk de entrada. Por exemplo:
 
 ```ts
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
@@ -285,6 +285,15 @@ Os entrypoints originais de cada contexto continuam exportando os schemas comple
 Os pequenos schemas de escolhas são compartilhados entre esses contratos e os valores leves;
 os validadores mantêm suas verificações TypeBox. `apps/shared/tests/unit/browser-values.test.ts`
 verifica os exports de compatibilidade e as escolhas derivadas dos schemas.
+
+`apps/shared/package.json` lista em `sideEffects` os módulos que executam código ao carregar (hoje
+só `library/registry.ts`, que verifica a própria consistência). O bundler do Bun respeita o campo:
+um módulo fora da lista é descartado por inteiro quando nada do que ele exporta é usado, então um
+barrel importado pelo frontend para uma constante não carrega mais todos os schemas reexportados.
+Ele não descarta um schema dentro de um módulo que o frontend usa, por isso as constantes ainda
+vão para um subpath `limits` ou `values`.
+`scripts/tests/shared-side-effects-declaration.unit.test.ts` falha quando um módulo compartilhado
+ganha um comando de nível superior que não está na lista.
 
 ## Banco De Dados
 
