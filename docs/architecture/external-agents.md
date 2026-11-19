@@ -527,9 +527,16 @@ or sent.
   home must derive the same value. Another host has its own secret and reports a different
   fingerprint for the same path.
 - **Creation is atomic**: a lock plus a temp-write-and-rename, so concurrent first starts end with
-  one secret.
-- **A missing, truncated or oversized file is replaced**, and on Unix so is one readable by group or
-  others, since that secret is already exposed.
+  one secret. The temp file is created empty and restricted to the owner before any byte is written
+  (on Windows the DACL rewrite lands first; on Unix the mode is set at open).
+- **A missing, truncated or oversized file is replaced**, and so is one other accounts could
+  read: on Unix any group or other mode bit, on Windows a DACL that is not the protected,
+  owner-only one the runtime writes (an inherited or extra entry counts), since that secret is
+  already exposed. Replacing a file logs a warning with the path and the reason, never the value.
+- **A read error is not a verdict.** If the file exists but cannot be read for a reason other than
+  absence (`EMFILE`, `EIO`, a Windows sharing violation), the secret is left alone and that call
+  gets no attestation; the next call reads the same secret. Only a definite answer about the file
+  rotates it.
 - **Replacing the secret changes every fingerprint.** The hub sees new credential homes, and a
   continuation bound to the old Codex account fingerprint starts a fresh vendor session instead of
   resuming. Deleting `host-secret` is the supported rotation. A container whose home is not on a
@@ -1714,8 +1721,11 @@ protocols to the SDK and are not repeated here.
 
 `external-agent-isolation.test.ts` is ported case for case in `isolation.rs`; the fingerprint
 cases pin the keyed derivation (`fingerprint_and_digest_key_are_pinned_hmacs_of_the_identity`) and
-`host_secret.rs` covers the secret's lifecycle. The qualification proves the compiled binary's
-fingerprint equals Local's on the same home. `external-agent-process.test.ts`
+`host_secret.rs` covers the secret's lifecycle. The qualification spawns the compiled binary three
+times and shows that two runtimes with different `MANGO_HOME` on one credential home report the same
+`hmac-sha256:` fingerprint and the hub registry contests the two users, that a runtime on another
+home reports a different one, and that the fingerprint is not the retired unkeyed hash of the
+identity. It no longer recomputes a TypeScript derivation. `external-agent-process.test.ts`
 maps to `launcher_tests.rs` (exact argv, cwd and env; bounded, redacted stderr; tree kill;
 interrupt), except its Windows `taskkill` escalation cases, which the kill-on-close Job replaces.
 `external-agent-runtime.test.ts` (a fake adapter through the real framed host) is superseded by the
