@@ -36,6 +36,7 @@ import {
   type TerminalSocketRelay,
 } from '../application/terminal-socket-relay';
 import type { TerminalRuntimeClient } from '../domain/terminal-runtime-client';
+import { classifyWriteRefusal, isSafeToRetryWrite } from '../domain/terminal-write-refusal';
 
 const logger = createDiagnosticLogger('terminals-ws');
 
@@ -79,7 +80,12 @@ export interface TerminalSocketRouteDependencies {
   readonly createRelay?: typeof createTerminalSocketRelay;
   readonly resolveUserId?: (headers: Headers) => Promise<string | null>;
   readonly allowedOrigins?: readonly string[];
+  /** Pause before the one retry of a transiently refused write; tests shorten it. */
+  readonly writeRetryDelayMs?: number;
 }
+
+/** Long enough for a stalled consent read to clear, short enough to stay under typing latency. */
+const DEFAULT_WRITE_RETRY_DELAY_MS = 250;
 
 function toClientBytes(message: string | Buffer): Uint8Array | null {
   // The client never sends a text frame; one arriving is a protocol error.
@@ -89,6 +95,7 @@ function toClientBytes(message: string | Buffer): Uint8Array | null {
 
 export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDependencies = {}) {
   const service = dependencies.service ?? terminalSessionService;
+  const writeRetryDelayMs = dependencies.writeRetryDelayMs ?? DEFAULT_WRITE_RETRY_DELAY_MS;
   const resolveHandshake = createBrowserSocketHandshake({
     resolveUserId: dependencies.resolveUserId,
     allowedOrigins: dependencies.allowedOrigins,
@@ -299,6 +306,48 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
     state.unsubscribeOutput = null;
   }
 
+  /**
+   * Delivers one `data` frame, then tells the browser when the runtime refused
+   * it. Runs inside the socket's serialized message chain, so the single retry
+   * of a transient refusal holds every later frame behind it and input cannot
+   * reorder. The failure is reported rather than rethrown: the generic handler
+   * below only logs, and keystrokes that vanish with no feedback look like a
+   * live shell that ignores the user.
+   */
+  async function writeInput(
+    state: TerminalSocketState,
+    client: TerminalRuntimeClient,
+    data: string
+  ): Promise<void> {
+    const write = () => client.terminal.write({ sessionId: state.sessionId, data });
+    try {
+      try {
+        await write();
+      } catch (error) {
+        if (!isSafeToRetryWrite(error) || state.socketClosed) throw error;
+        await Bun.sleep(writeRetryDelayMs);
+        if (state.socketClosed) return;
+        await write();
+      }
+      service.touchActivity(state.sessionId);
+    } catch (error) {
+      if (state.socketClosed) return;
+      const refusal = classifyWriteRefusal(error);
+      logger.warn('client_frame_failed', {
+        sessionId: state.sessionId,
+        type: 'data',
+        code: refusal.code,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      state.relay?.push(encodeTerminalServerMessage({ type: 'error', error: refusal }));
+      // Revoked consent ends the shell; closing after the frame drains lets the
+      // browser read why before the socket goes.
+      if (refusal.code === 'consent_revoked') {
+        state.relay?.closeAfterDrain(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Shell access revoked');
+      }
+    }
+  }
+
   async function handleClientMessage(socket: TerminalSocket, bytes: Uint8Array): Promise<void> {
     const state = socket.terminalSocket;
     const client = state.client;
@@ -323,11 +372,7 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
     try {
       switch (decoded.type) {
         case 'data':
-          await client.terminal.write({
-            sessionId: state.sessionId,
-            data: Buffer.from(decoded.data).toString('base64'),
-          });
-          service.touchActivity(state.sessionId);
+          await writeInput(state, client, Buffer.from(decoded.data).toString('base64'));
           return;
         case 'resize':
           await client.terminal.resize({

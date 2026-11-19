@@ -1,5 +1,9 @@
 import type { CoreMessages } from '@mangostudio/shared/i18n';
-import type { TerminalExit, TerminalNotice } from '@mangostudio/shared/terminal';
+import type {
+  TerminalExit,
+  TerminalNotice,
+  TerminalWriteError,
+} from '@mangostudio/shared/terminal';
 import { ClipboardAddon } from '@xterm/addon-clipboard';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
@@ -105,6 +109,11 @@ export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: Te
       const term = termRef.current;
       if (!term) return;
       writeDimLine(term, noticeMessage(tRef.current, notice));
+    },
+    onWriteError: (error: TerminalWriteError) => {
+      const term = termRef.current;
+      if (!term) return;
+      writeDimLine(term, writeErrorMessage(tRef.current, error));
     },
   });
   const socketRef = useRef(socket);
@@ -275,6 +284,17 @@ function closedStatusMessage(t: CoreMessages, status: TerminalSocketStatus): str
       return t.terminal.refused;
     default:
       return null;
+  }
+}
+
+function writeErrorMessage(t: CoreMessages, error: TerminalWriteError): string {
+  switch (error.code) {
+    case 'consent_unconfirmed':
+      return t.terminal.inputNotConfirmed;
+    case 'consent_revoked':
+      return t.terminal.exitedConsentRevoked;
+    case 'write_failed':
+      return t.terminal.inputRefused;
   }
 }
 

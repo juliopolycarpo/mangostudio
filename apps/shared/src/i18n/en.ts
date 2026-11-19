@@ -806,6 +806,9 @@ export const messages: CoreMessages = {
     exitedConsentRevoked: 'Terminal closed because shell access was revoked.',
     dropped: '{bytes} bytes of output were dropped because the viewer could not keep up.',
     runtimeDisconnected: 'The runtime went away; this session ended.',
+    inputNotConfirmed:
+      'Your input was not delivered: shell access could not be confirmed in time. Type it again.',
+    inputRefused: 'Your input was not delivered to the shell.',
     closeConfirmTitle: 'Close this terminal?',
     closeConfirmDescription: 'The shell and anything it is running will be stopped.',
     cancel: 'Cancel',

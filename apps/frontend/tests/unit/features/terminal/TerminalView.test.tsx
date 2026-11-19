@@ -199,6 +199,37 @@ describe('TerminalView', () => {
     }
   });
 
+  it.each([
+    [{ code: 'consent_unconfirmed', retryable: true }, 'Type it again.'],
+    [{ code: 'write_failed', retryable: false }, 'was not delivered to the shell.'],
+    [{ code: 'consent_revoked', retryable: false }, 'shell access was revoked.'],
+  ] as const)('draws one inline notice for a refused write %o', (error, expected) => {
+    const writes: string[] = [];
+    const writeln = spyOn(Terminal.prototype, 'writeln').mockImplementation(function (
+      this: Terminal,
+      data: string | Uint8Array
+    ) {
+      writes.push(String(data));
+    });
+    try {
+      render(
+        <TerminalView
+          sessionId="session-1"
+          createSocket={(url) => new FakeTerminalSocket(url) as unknown as WebSocket}
+          resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
+        />
+      );
+      const socket = FakeTerminalSocket.instances[0];
+      act(() => socket?.open());
+      act(() => socket?.emitServerMessage({ type: 'error', error }));
+
+      expect(writes).toHaveLength(1);
+      expect(writes[0]).toContain(expected);
+    } finally {
+      writeln.mockRestore();
+    }
+  });
+
   it('narrates GONE on its own when no exit frame preceded it', () => {
     const writes: string[] = [];
     const writeln = spyOn(Terminal.prototype, 'writeln').mockImplementation(function (

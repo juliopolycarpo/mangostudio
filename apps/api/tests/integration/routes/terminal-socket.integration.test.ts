@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { realpathSync } from 'node:fs';
 
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
+import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
 import {
   decodeTerminalServerMessage,
   encodeTerminalClientMessage,
@@ -22,6 +24,7 @@ import {
 } from '../../../src/modules/terminals/application/terminal-socket-relay';
 import type { TerminalRuntimeClient } from '../../../src/modules/terminals/domain/terminal-runtime-client';
 import { createTerminalSocketRoutes } from '../../../src/modules/terminals/http/terminal-socket-routes';
+import { RuntimeRequestNoReplyError } from '../../../src/services/runtime-client/request-not-sent';
 import { insertTestUser } from '../../support/factories';
 import { listenOnEphemeralPort } from '../../support/listen-ephemeral';
 import {
@@ -54,6 +57,7 @@ interface StartHubOptions {
   readonly createRelay?: typeof createTerminalSocketRelay;
   readonly resolveUserId?: (headers: Headers) => Promise<string | null>;
   readonly allowedOrigins?: readonly string[];
+  readonly writeRetryDelayMs?: number;
 }
 
 async function startHub(options: StartHubOptions = {}) {
@@ -65,6 +69,8 @@ async function startHub(options: StartHubOptions = {}) {
         ...(options.createRelay ? { createRelay: options.createRelay } : {}),
         ...(options.resolveUserId ? { resolveUserId: options.resolveUserId } : {}),
         ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
+        // Short by default so a retry test does not wait out the production pause.
+        writeRetryDelayMs: options.writeRetryDelayMs ?? 5,
       })
     )
   );
@@ -939,6 +945,98 @@ describe('terminal socket relay', () => {
     expect(Buffer.from(runtime.calls.write[0]?.data ?? '', 'base64').toString()).toBe(
       'printf hi\n'
     );
+  });
+
+  describe('a write the runtime refuses', () => {
+    const typed = (text: string) =>
+      encodeTerminalClientMessage({ type: 'data', data: new TextEncoder().encode(text) });
+    const consentUnconfirmed = () =>
+      new RemoteError(
+        RESERVED_ERROR_CODES.UNAVAILABLE,
+        'terminal.write was not delivered: shell consent could not be confirmed in time.'
+      );
+
+    async function attachedViewer(runtime: FakeTerminalRuntimeClient) {
+      const user = await insertTestUser();
+      const service = relayService(runtime);
+      const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+      const attached = runtime.waitForCall('attach');
+      const viewer = await openViewer(service, user.id, session.id);
+      await attached;
+      return viewer;
+    }
+
+    it('retries a transient refusal once and delivers the input without an error frame', async () => {
+      const runtime = new FakeTerminalRuntimeClient({ refuseWrites: [consentUnconfirmed()] });
+      const viewer = await attachedViewer(runtime);
+
+      viewer.socket.send(typed('ls\n'));
+      await Bun.sleep(100);
+
+      expect(
+        runtime.calls.write.map((call) => Buffer.from(call.data, 'base64').toString())
+      ).toEqual(['ls\n', 'ls\n']);
+      expect(viewer.messages.filter((message) => message.type === 'error')).toEqual([]);
+    });
+
+    it('reports a retryable error after the retry also fails, and keeps later writes in order', async () => {
+      const runtime = new FakeTerminalRuntimeClient({
+        refuseWrites: [consentUnconfirmed(), consentUnconfirmed()],
+      });
+      const viewer = await attachedViewer(runtime);
+
+      viewer.socket.send(typed('a'));
+      viewer.socket.send(typed('b'));
+
+      expect(await viewer.nextMessage((message) => message.type === 'error')).toEqual({
+        type: 'error',
+        error: { code: 'consent_unconfirmed', retryable: true },
+      });
+      await Bun.sleep(50);
+      // The retry of "a" held "b" back; the session stays open.
+      expect(
+        runtime.calls.write.map((call) => Buffer.from(call.data, 'base64').toString())
+      ).toEqual(['a', 'a', 'b']);
+      expect(viewer.socket.readyState).toBe(WebSocket.OPEN);
+    });
+
+    it('reports revoked consent as permanent and closes the session socket', async () => {
+      const runtime = new FakeTerminalRuntimeClient({
+        refuseWrites: [
+          new RuntimeConsentDeniedError('shell consent is off', { method: 'terminal.write' }),
+        ],
+      });
+      const viewer = await attachedViewer(runtime);
+
+      viewer.socket.send(typed('x'));
+
+      expect(await viewer.nextMessage((message) => message.type === 'error')).toEqual({
+        type: 'error',
+        error: { code: 'consent_revoked', retryable: false },
+      });
+      expect((await viewer.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.GONE);
+      expect(runtime.calls.write).toHaveLength(1);
+    });
+
+    it('does not retry an unavailable answer that may have reached the shell', async () => {
+      const runtime = new FakeTerminalRuntimeClient({
+        refuseWrites: [
+          new RuntimeRequestNoReplyError(
+            new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'closed after send'),
+            'connection-closed'
+          ),
+        ],
+      });
+      const viewer = await attachedViewer(runtime);
+
+      viewer.socket.send(typed('x'));
+
+      expect(await viewer.nextMessage((message) => message.type === 'error')).toEqual({
+        type: 'error',
+        error: { code: 'write_failed', retryable: false },
+      });
+      expect(runtime.calls.write).toHaveLength(1);
+    });
   });
 
   it('relays output the runtime emitted in the same read as the attach response', async () => {

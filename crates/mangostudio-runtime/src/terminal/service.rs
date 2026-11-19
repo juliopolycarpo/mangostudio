@@ -5,7 +5,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -40,6 +40,9 @@ const _: () = assert!(
 );
 const MAX_WRITE_BYTES: usize = 16 * 1024 - 1;
 const CONSENT_POLL: Duration = Duration::from_millis(100);
+/// How long a confirmed shell grant keeps carrying live-session input when a later read cannot
+/// answer in time. Fail-closed still holds once it lapses; an explicit denial ignores it.
+const CONSENT_GRANT_GRACE: Duration = Duration::from_secs(30);
 
 /// Reads whether shell consent is granted now; injected so a test can model a slow store.
 type ShellRead = Arc<dyn Fn() -> bool + Send + Sync>;
@@ -151,6 +154,10 @@ struct Service {
     shell_read: ShellRead,
     consent_read_timeout: Duration,
     consent_reader: ConsentReader,
+    /// When a fresh read last confirmed shell consent; cleared by an explicit denial.
+    last_shell_grant: Mutex<Option<Instant>>,
+    /// Bound on how stale `last_shell_grant` may be for an unknown read to still pass.
+    consent_grant_grace: Duration,
     spawner: Arc<dyn PtySpawner>,
     host: Arc<dyn Fn() -> PathEnv + Send + Sync>,
     sessions: Mutex<HashMap<String, Slot>>,
@@ -170,6 +177,8 @@ impl Service {
             shell_read: Arc::new(move || source.refresh().shell),
             consent_read_timeout: CONSENT_READ_TIMEOUT,
             consent_reader: ConsentReader::new("shell"),
+            last_shell_grant: Mutex::new(None),
+            consent_grant_grace: CONSENT_GRANT_GRACE,
             spawner,
             host,
             sessions: Mutex::new(HashMap::new()),
@@ -609,27 +618,58 @@ impl Service {
     /// unknown answer with the retryable `UNAVAILABLE`.
     async fn launch_shell_consent(&self) -> ConsentRead {
         let read = Arc::clone(&self.shell_read);
-        read_consent("shell", self.consent_read_timeout, move || read()).await
+        let outcome = read_consent("shell", self.consent_read_timeout, move || read()).await;
+        self.note_shell_read(&outcome);
+        outcome
+    }
+
+    /// Records what a fresh read proved: a grant stamps the time, a denial forgets it, and an
+    /// unknown answer leaves the last proof as it was.
+    fn note_shell_read(&self, outcome: &ConsentRead) {
+        let mut last = self
+            .last_shell_grant
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        match outcome {
+            ConsentRead::Granted => *last = Some(Instant::now()),
+            ConsentRead::Denied => *last = None,
+            ConsentRead::Unknown => {}
+        }
+    }
+
+    /// Whether a grant confirmed recently enough still stands for an unanswered read.
+    fn grant_still_fresh(&self) -> bool {
+        self.last_shell_grant
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .is_some_and(|at| at.elapsed() <= self.consent_grant_grace)
     }
 
     /// The coalesced read the watcher and live-session rechecks share, so a hung consent store
     /// holds one blocking permit however often they ask.
     async fn fresh_shell_consent(&self) -> ConsentRead {
         let read = Arc::clone(&self.shell_read);
-        self.consent_reader
+        let outcome = self
+            .consent_reader
             .read(self.consent_read_timeout, move || read())
-            .await
+            .await;
+        self.note_shell_read(&outcome);
+        outcome
     }
 
     /// The fresh check before writing to or resizing a live shell.
     ///
-    /// An explicit denial revokes the session, as the watcher would. An unknown read refuses
-    /// this one effect with `UNAVAILABLE` (fail closed) but leaves the session open: a slow
-    /// consent store is not a withdrawal, and the next call or watcher poll reads again.
+    /// An explicit denial revokes the session, as the watcher would. An unknown read passes
+    /// only while a grant confirmed within [`CONSENT_GRANT_GRACE`] still stands, so a slow
+    /// consent store does not drop typed input; with no recent proof it refuses this one effect
+    /// with `UNAVAILABLE` (fail closed) but leaves the session open, and the next call or
+    /// watcher poll reads again. A withdrawal still lands: the watcher and every recheck read
+    /// afresh, and a denial ignores the grace.
     async fn recheck(&self, entry: &Arc<Entry>, method: &str) -> Result<(), RemoteError> {
         match self.fresh_shell_consent().await {
             ConsentRead::Granted => Ok(()),
             ConsentRead::Denied => Err(self.revoke(entry, method).await),
+            ConsentRead::Unknown if self.grant_still_fresh() => Ok(()),
             ConsentRead::Unknown => Err(consent_unconfirmed(method)),
         }
     }

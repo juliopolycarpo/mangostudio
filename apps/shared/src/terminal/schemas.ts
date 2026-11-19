@@ -137,6 +137,26 @@ export const TerminalNoticeSchema = Type.Object(
 );
 export type TerminalNotice = Static<typeof TerminalNoticeSchema>;
 
+/**
+ * Why the runtime refused a `data` frame the browser sent, so the keystrokes
+ * that went nowhere are not silent. `retryable` says whether typing again can
+ * work: `consent_unconfirmed` is a slow consent read the hub already retried
+ * once; `consent_revoked` ends the session (the socket closes right after);
+ * `write_failed` is any other refusal.
+ */
+export const TerminalWriteErrorSchema = Type.Object(
+  {
+    code: Type.Union([
+      Type.Literal('consent_unconfirmed'),
+      Type.Literal('consent_revoked'),
+      Type.Literal('write_failed'),
+    ]),
+    retryable: Type.Boolean(),
+  },
+  { additionalProperties: false }
+);
+export type TerminalWriteError = Static<typeof TerminalWriteErrorSchema>;
+
 export const TerminalSessionSchema = Type.Object({
   id: Type.String({ minLength: 1, maxLength: 128 }),
   environmentId: Type.String({ minLength: 1 }),

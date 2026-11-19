@@ -39,8 +39,15 @@ nunca o recebe.
 
 O navegador conversa com `/api/terminal/:id`, uma rota WebSocket própria. `/api/ws` continua
 apenas para invalidações. Os frames são binários com um byte de tipo como prefixo: cliente
-`data`, `resize`, `ack`, `ping`; servidor `data`, `exit`, `notice`, `pong`. O codec vive em
+`data`, `resize`, `ack`, `ping`; servidor `data`, `exit`, `notice`, `pong`, `error`. O codec vive em
 `@mangostudio/shared/terminal`.
+
+Um frame `error` informa um frame `data` que o runtime recusou: um `code` e se é `retryable`. O hub
+tenta de novo uma vez uma recusa transitória (leitura de consentimento que estourou o prazo),
+mantendo a entrada seguinte na fila, antes de reportar `consent_unconfirmed`. `consent_revoked` é
+permanente, então o socket fecha depois do frame. O runtime mantém um consentimento de shell
+confirmado nos últimos 30 segundos para a entrada quando uma leitura posterior está lenta; uma
+negação ainda revoga a sessão na hora.
 
 ## Controle de fluxo
 

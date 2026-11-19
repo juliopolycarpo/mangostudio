@@ -478,6 +478,96 @@ async fn slow_consent_on_write_refuses_the_write_without_closing_the_terminal() 
     );
 }
 
+/// Answers the first read at once and every later one past the read timeout.
+fn grant_then_stall() -> super::ShellRead {
+    let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    Arc::new(move || {
+        if reads.fetch_add(1, std::sync::atomic::Ordering::AcqRel) > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+        }
+        true
+    })
+}
+
+fn write_one() -> WriteParams {
+    WriteParams {
+        session_id: "one".into(),
+        data: "YQ==".into(),
+    }
+}
+
+#[tokio::test]
+async fn a_recently_confirmed_grant_carries_a_write_through_a_slow_consent_read() {
+    let closes = Arc::new(Mutex::new(0));
+    let mut service = service_with_live_entry(Arc::clone(&closes));
+    service.shell_read = grant_then_stall();
+    service.consent_read_timeout = SHORT_READ_TIMEOUT;
+
+    service
+        .write(write_one())
+        .await
+        .expect("expected the first write to pass on a fresh grant");
+    let second = service.write(write_one()).await;
+
+    assert!(
+        second.is_ok(),
+        "expected a write after a confirmed grant to pass a slow read | received {:?}",
+        second.err().map(|error| error.code)
+    );
+}
+
+#[tokio::test]
+async fn a_lapsed_grant_no_longer_covers_a_slow_consent_read() {
+    let closes = Arc::new(Mutex::new(0));
+    let mut service = service_with_live_entry(Arc::clone(&closes));
+    service.shell_read = grant_then_stall();
+    service.consent_read_timeout = SHORT_READ_TIMEOUT;
+    service.consent_grant_grace = std::time::Duration::ZERO;
+
+    service.write(write_one()).await.unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    let refused = service
+        .write(write_one())
+        .await
+        .expect_err("expected a write past the grant grace to be refused");
+
+    assert_eq!(
+        refused.code.as_str(),
+        codes::UNAVAILABLE,
+        "expected error code UNAVAILABLE after the grace lapsed | received {}",
+        refused.code
+    );
+}
+
+#[tokio::test]
+async fn a_denial_after_a_confirmed_grant_still_revokes_the_session() {
+    let closes = Arc::new(Mutex::new(0));
+    let mut service = service_with_live_entry(Arc::clone(&closes));
+    let entry = service.require("one").unwrap();
+    let granted = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let still_granted = Arc::clone(&granted);
+    service.shell_read = Arc::new(move || still_granted.load(std::sync::atomic::Ordering::Acquire));
+
+    service.write(write_one()).await.unwrap();
+    granted.store(false, std::sync::atomic::Ordering::Release);
+    let refused = service
+        .write(write_one())
+        .await
+        .expect_err("expected a denied read to refuse the write despite the cached grant");
+
+    let closed = *closes.lock().unwrap();
+    let revoked = entry
+        .consent_revoked
+        .load(std::sync::atomic::Ordering::Acquire);
+    assert_eq!(
+        (refused.code.as_str() != codes::UNAVAILABLE, closed, revoked),
+        (true, 1, true),
+        "expected (denied, closes, consent_revoked): (true, 1, true) | received code {} \
+         ({closed}, {revoked})",
+        refused.code
+    );
+}
+
 #[tokio::test]
 async fn slow_consent_at_terminal_open_refuses_the_launch() {
     let (_scratch, service, state) = prepared_service_with(|service| {

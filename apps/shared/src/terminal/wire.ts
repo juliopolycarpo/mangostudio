@@ -22,6 +22,8 @@ import {
   TerminalNoticeSchema,
   type TerminalSize,
   TerminalSizeSchema,
+  type TerminalWriteError,
+  TerminalWriteErrorSchema,
 } from './schemas';
 
 /** Type byte of each browser→hub message. */
@@ -38,6 +40,8 @@ export const TERMINAL_SERVER_FRAME = {
   EXIT: 1,
   NOTICE: 2,
   PONG: 3,
+  /** A refused `data` frame; see `TerminalWriteErrorSchema`. */
+  ERROR: 4,
 } as const;
 
 export type TerminalClientMessage =
@@ -50,7 +54,8 @@ export type TerminalServerMessage =
   | { readonly type: 'data'; readonly data: Uint8Array }
   | { readonly type: 'exit'; readonly exit: TerminalExit }
   | { readonly type: 'notice'; readonly notice: TerminalNotice }
-  | { readonly type: 'pong' };
+  | { readonly type: 'pong' }
+  | { readonly type: 'error'; readonly error: TerminalWriteError };
 
 /** A frame that does not follow this framing. The message names what was expected. */
 export class TerminalWireError extends Error {
@@ -138,6 +143,11 @@ export function encodeTerminalServerMessage(message: TerminalServerMessage): Uin
       );
     case 'pong':
       return withTypeByte(TERMINAL_SERVER_FRAME.PONG, new Uint8Array(0));
+    case 'error':
+      return withTypeByte(
+        TERMINAL_SERVER_FRAME.ERROR,
+        encoder.encode(JSON.stringify(message.error))
+      );
   }
 }
 
@@ -157,9 +167,14 @@ export function decodeTerminalServerMessage(bytes: Uint8Array): TerminalServerMe
       };
     case TERMINAL_SERVER_FRAME.PONG:
       return { type: 'pong' };
+    case TERMINAL_SERVER_FRAME.ERROR:
+      return {
+        type: 'error',
+        error: parseJsonBody<TerminalWriteError>(body, TerminalWriteErrorSchema, 'error'),
+      };
     default:
       throw new TerminalWireError(
-        `Terminal server frame type must be 0..3; received ${String(type)}.`
+        `Terminal server frame type must be 0..4; received ${String(type)}.`
       );
   }
 }
