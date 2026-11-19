@@ -57,6 +57,7 @@ let user: UserFixture;
 let chatId: string;
 let boundWorkdir: string;
 let agentsDir: string;
+let skillsDir: string;
 let previousProvider: AIProvider | null = null;
 
 async function insertConnectorForModel(): Promise<void> {
@@ -97,10 +98,11 @@ async function allowAllToolsForDefaultAgent(): Promise<void> {
 beforeEach(async () => {
   agentsDir = mkdtempSync(join(tmpdir(), 'mango-workdir-scope-agents-'));
   boundWorkdir = mkdtempSync(join(tmpdir(), 'mango-bound-workdir-'));
+  skillsDir = mkdtempSync(join(tmpdir(), 'mango-workdir-scope-skills-'));
   loadConfigForTest({
     auth: { secret: 'test-secret-at-least-32-characters-long', url: 'http://localhost:3001' },
     database: { path: ':memory:' },
-    skills: { dir: mkdtempSync(join(tmpdir(), 'mango-workdir-scope-skills-')) },
+    skills: { dir: skillsDir },
   });
   setThirdPartySkillDirsForTest({ agents: agentsDir });
   resetSkillsCache();
@@ -131,6 +133,7 @@ afterEach(() => {
   resetSkillsCache();
   rmSync(agentsDir, { recursive: true, force: true });
   rmSync(boundWorkdir, { recursive: true, force: true });
+  rmSync(skillsDir, { recursive: true, force: true });
 });
 
 describe('resolveTurnContext workdir scope', () => {

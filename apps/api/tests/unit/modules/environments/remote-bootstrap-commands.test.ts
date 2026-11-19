@@ -13,18 +13,21 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { DEFAULT_SSH_RUNTIME_PATH } from '@mangostudio/shared/environments';
 
+import { useScratchDirs } from '../../../../../../scripts/tests/support/scratch-dirs';
 import {
   buildConnectBootstrapCommand,
   buildServiceInstallCommand,
 } from '../../../../src/modules/environments/domain/remote-bootstrap-commands';
 
 const describePosix = process.platform === 'win32' ? describe.skip : describe;
+
+// Every fake runtime home is removed after its test.
+const makeHome = useScratchDirs();
 
 const HUB_ENDPOINT = 'wss://hub.example.com/api/runtime';
 const TOKEN = 'mrt_selector.secret-value';
@@ -75,7 +78,7 @@ function fakeRuntime(behaviour: string): {
   readonly argvPath: string;
   readonly stdinPath: string;
 } {
-  const home = mkdtempSync(join(tmpdir(), 'mango-bootstrap-'));
+  const home = makeHome('mango-bootstrap-');
   const binary = join(home, '.mango/runtime/remote/current/mangostudio-runtime');
   const argvPath = join(home, 'argv');
   const stdinPath = join(home, 'stdin');
