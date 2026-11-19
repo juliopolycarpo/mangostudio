@@ -396,9 +396,14 @@ describe('gh command facade', () => {
     const cli = createGhCli({
       runner: (_args, options) => {
         probedEnvironments.push(options.environmentId ?? 'unknown');
-        return options.environmentId === 'devbox'
-          ? Promise.resolve({ stdout: AUTHENTICATED_STDOUT, stderr: '', exitCode: 0 })
-          : Promise.reject(new Error('not logged in'));
+        return Promise.resolve({
+          stdout:
+            options.environmentId === 'devbox'
+              ? AUTHENTICATED_STDOUT
+              : JSON.stringify({ hosts: {} }),
+          stderr: '',
+          exitCode: 0,
+        });
       },
       probeCwd: () => Promise.resolve('/remote/home'),
     });
@@ -409,6 +414,39 @@ describe('gh command facade', () => {
     expect(probedEnvironments).toEqual(['devbox', 'container']);
   });
 
+  /**
+   * A probe that could not run to completion — the 5s timeout on a slow SSH
+   * host, a dropped connection, a cancelled request — says nothing about
+   * credentials. Folding it into a cached `false` told every GitHub read on
+   * that machine "not signed in, run `gh auth login`" for the next minute.
+   */
+  it.each([
+    ['times out', new GhCliError(['auth', 'status'], 143, 'GitHub CLI command timed out.')],
+    ['is cut off by a connection failure', new Error('socket hang up')],
+  ])('rejects instead of reporting signed out when the probe %s', async (_label, failure) => {
+    let probes = 0;
+    let probeFails = true;
+    const cli = createGhCli({
+      runner: () => {
+        probes += 1;
+        return probeFails
+          ? Promise.reject(failure)
+          : Promise.resolve({ stdout: AUTHENTICATED_STDOUT, stderr: '', exitCode: 0 });
+      },
+      probeCwd: () => Promise.resolve('/remote/home'),
+      now: () => 1_000,
+    });
+    const selection = { userId: 'user-1', environmentId: 'devbox' };
+
+    await expect(cli.isAuthenticated(selection)).rejects.toBe(failure);
+
+    // Same clock, well inside the TTL: a cached verdict would answer `false`
+    // here without ever asking again.
+    probeFails = false;
+    expect(await cli.isAuthenticated(selection)).toBe(true);
+    expect(probes).toBe(2);
+  });
+
   it('re-probes authentication after the TTL so gh auth login needs no restart', async () => {
     let now = 1_000;
     let authenticated = false;
@@ -416,9 +454,11 @@ describe('gh command facade', () => {
     const cli = createGhCli({
       runner: () => {
         probes += 1;
-        return authenticated
-          ? Promise.resolve({ stdout: AUTHENTICATED_STDOUT, stderr: '', exitCode: 0 })
-          : Promise.reject(new Error('not logged in'));
+        return Promise.resolve({
+          stdout: authenticated ? AUTHENTICATED_STDOUT : JSON.stringify({ hosts: {} }),
+          stderr: '',
+          exitCode: 0,
+        });
       },
       probeCwd: () => Promise.resolve('/remote/home'),
       now: () => now,

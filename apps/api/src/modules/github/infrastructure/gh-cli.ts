@@ -285,10 +285,11 @@ export function createGhCli(options: CreateGhCliOptions = {}): GithubCli {
   // directory — a path the manifest already proves exists over there — rather
   // than once per workdir against a cwd the caller happened to supply.
   //
-  // The probe cache turns a rejected promise into a cached `false`, so a
-  // healthy-or-not verdict has to come from *throwing* here, not from the
-  // command's own exit code: the `--json` shape gh auth status runs with
-  // exits 0 even when no account is authenticated at all.
+  // The verdict comes from the output, not from the command's exit code: the
+  // `--json` shape gh auth status runs with exits 0 even when no account is
+  // authenticated at all. A probe that never produced output — the timeout, a
+  // dropped connection, a cancelled request — rejects, and the cache neither
+  // stores that nor answers "signed out" for it (see the cache's own docs).
   const isAuthenticated = createEnvironmentProbeCache({
     probe: async (selection) => {
       const result = await execute(buildGhCommandArgv('auth.status', {}), {
@@ -297,16 +298,7 @@ export function createGhCli(options: CreateGhCliOptions = {}): GithubCli {
         environmentId: selection.environmentId,
         timeoutMs: PROBE_TIMEOUT_MS,
       });
-      if (!isGhAccountHealthy(result.stdout)) {
-        throw new GhCliError(
-          ['auth', 'status'],
-          result.exitCode,
-          result.stderr,
-          false,
-          result.stdout
-        );
-      }
-      return result;
+      return isGhAccountHealthy(result.stdout);
     },
     now: options.now ?? Date.now,
     ttlMs: options.probeCacheTtlMs ?? PROBE_CACHE_TTL_MS,
