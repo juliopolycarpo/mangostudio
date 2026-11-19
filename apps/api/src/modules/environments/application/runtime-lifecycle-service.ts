@@ -26,7 +26,11 @@ import {
   sshRuntimePath,
 } from '@mangostudio/shared/environments';
 import { directoryHashDomainOf } from '@mangostudio/shared/library';
-import { RUNTIME_UPDATE_REFUSED } from '@mangostudio/shared/runtime-contract';
+import {
+  RUNTIME_UPDATE_REFUSED,
+  RuntimeConsentDeniedError,
+  RuntimePolicyDeniedError,
+} from '@mangostudio/shared/runtime-contract';
 import {
   parsePlatformProbe,
   PLATFORM_PROBE_SCRIPT,
@@ -1134,20 +1138,22 @@ async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
       done: false,
     });
   } catch (error) {
-    // Only these two codes prove the peer both answered and kept no session:
-    // every `RUNTIME_UPDATE_REFUSED` path either never staged or discarded on
-    // its way out, and `DENIED` refuses before the first byte. A
-    // cancel, a timeout or a dead transport all come back typed too, and none
-    // of them says what the far side did with the transfer.
-    const refused =
-      error instanceof RemoteError &&
-      (error.code === RUNTIME_UPDATE_REFUSED || error.code === RESERVED_ERROR_CODES.DENIED);
-    if (expectedDisconnect && refused) {
+    // Two answers prove the commit did not land. `RUNTIME_UPDATE_REFUSED` also
+    // proves the peer kept no session: every path of it either never staged or
+    // discarded on its way out. A `DENIED` is the runtime's guard refusing
+    // before any handler runs, so it proves no commit but not an empty slot: a
+    // withdrawal that lands mid-transfer leaves the staged file and its session
+    // in place. The client has already translated it, so it is never a
+    // `RemoteError` here. A cancel, a timeout or a dead transport also come
+    // back typed, and none of them says what the far side did with the transfer.
+    const discardedByPeer = error instanceof RemoteError && error.code === RUNTIME_UPDATE_REFUSED;
+    const commitMayHaveLanded = expectedDisconnect && !discardedByPeer && !isDeniedRefusal(error);
+    if (expectedDisconnect && !commitMayHaveLanded) {
       // The commit demonstrably did not land, so no handoff is coming and a
       // stale expectation would swallow the next real crash's backoff.
       input.manager.clearExpectedUpdateDisconnect(input.userId, input.environmentId);
     }
-    if (transferStarted && !refused && !expectedDisconnect) {
+    if (transferStarted && !discardedByPeer && !commitMayHaveLanded) {
       // There is deliberately no fourth protocol method. Dropping the
       // connection releases the runtime's definition, which discards the
       // staged file, so a transfer that died mid-stream does not leave a
@@ -1157,6 +1163,20 @@ async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
     }
     throw error;
   }
+}
+
+/**
+ * Whether a failed update call is the runtime answering `DENIED`, whatever the
+ * reason: consent withdrawn, or any other policy. `RuntimeClient` translates a
+ * wire `DENIED` into one of the two errors; a raw `RemoteError` is the shape a
+ * client that skips the translation would throw.
+ */
+function isDeniedRefusal(error: unknown): boolean {
+  return (
+    error instanceof RuntimeConsentDeniedError ||
+    error instanceof RuntimePolicyDeniedError ||
+    (error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.DENIED)
+  );
 }
 
 async function waitForRuntimeDisconnect(

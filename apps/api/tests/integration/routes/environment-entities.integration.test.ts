@@ -4,6 +4,7 @@ import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { RemoteError } from '@mangostudio/protocol';
 import type {
   CreateEnvironmentBody,
   Environment,
@@ -203,6 +204,12 @@ interface FakeUpdateOptions {
   readonly beforeChunk?: (seq: number) => Promise<void>;
   /** Runs once the commit answer has had time to leave, the way a supervised peer exits. */
   readonly onRestart?: () => void;
+  /**
+   * Answers one step with this wire error instead of running it, the way the
+   * runtime's guard does before any handler: nothing the step would have done
+   * happens, and the staged session stays.
+   */
+  readonly refuse?: { readonly step: 'chunk' | 'commit'; readonly error: RemoteError };
 }
 
 /** What the fake update endpoint was asked to do. */
@@ -229,11 +236,13 @@ function fakeUpdateHandlers(options: FakeUpdateOptions) {
       return { sessionId: `fake-update-${record.begun}`, maxChunkBytes: 32 * 1024 };
     },
     'runtime.update.chunk': async (params: { seq: number; bytesBase64: string }) => {
+      if (options.refuse?.step === 'chunk') throw options.refuse.error;
       await options.beforeChunk?.(params.seq);
       const size = Buffer.from(params.bytesBase64, 'base64').byteLength;
       return { acceptedBytes: size, receivedBytes: size };
     },
     'runtime.update.commit': (): RuntimeUpdateCommitResult => {
+      if (options.refuse?.step === 'commit') throw options.refuse.error;
       if (!begin) throw new Error('runtime.update.commit arrived before runtime.update.begin');
       record.committed += 1;
       if (options.onRestart) setTimeout(options.onRestart, 20);
@@ -1896,6 +1905,121 @@ describe('environment entity routes', () => {
     expect(loadedPlatformId).toBe('linux-x64-musl');
     await manager.closeAll();
   });
+
+  // A `DENIED` is the runtime's guard refusing before any handler runs, so a
+  // withdrawal that lands mid-transfer leaves the staged session in place. The
+  // hub must not keep claiming a handoff for a commit that was refused, and
+  // must drop the connection so the runtime discards what it staged. The error
+  // reaches the lifecycle already translated by the real `RuntimeClient`, as a
+  // consent or a policy error, never as a `RemoteError`.
+  const guardRefusals = [
+    [
+      'commit',
+      'consent',
+      new RemoteError('DENIED', '"runtime.update.commit" is refused', {
+        kind: 'consent_denied',
+        method: 'runtime.update.commit',
+        missing: ['update'],
+        slot: 'host',
+        capability: 'update',
+      }),
+    ],
+    [
+      'commit',
+      'policy',
+      new RemoteError('DENIED', 'update refused by policy', { kind: 'update_policy' }),
+    ],
+    [
+      'chunk',
+      'consent',
+      new RemoteError('DENIED', '"runtime.update.chunk" is refused', {
+        kind: 'consent_denied',
+        method: 'runtime.update.chunk',
+        missing: ['update'],
+        slot: 'host',
+        capability: 'update',
+      }),
+    ],
+  ] as const;
+  for (const [step, reason, refusal] of guardRefusals) {
+    it(`drops the connection and clears the handoff when a live update ${step} is denied for ${reason}`, async () => {
+      const bytes = new TextEncoder().encode('runtime-binary');
+      const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+      let runtimeClosed = false;
+      const update = fakeUpdateHandlers({
+        restart: 'scheduled',
+        refuse: { step, error: refusal },
+      });
+      const definition = provisionedFakeRuntime({
+        runtimeVersion: '0.0.1-old',
+        slot: 'host',
+        update: update.handlers,
+      });
+      const { app, repository, manager } = createTestApp(
+        {
+          http: fakeConnector(definition, (connection) =>
+            connection.runtime.onClose(() => {
+              runtimeClosed = true;
+            })
+          ),
+        },
+        undefined,
+        undefined,
+        (runtimeManager) =>
+          createRuntimeLifecycleService({
+            manager: runtimeManager,
+            loadRuntimeAsset: () =>
+              Promise.resolve({
+                bytes,
+                digest,
+                fromArchive: false as const,
+                cached: true,
+                offlineCache: false,
+              }),
+          })
+      );
+      await repository.create({
+        id: 'http-denied-update',
+        userId: TEST_USER.id,
+        name: 'Denied runtime update',
+        transportKind: 'http',
+        config: { baseUrl: 'http://runtime.test' },
+        enabled: true,
+      });
+      await manager.connect(TEST_USER.id, 'http-denied-update');
+      await manager.refreshManifest(TEST_USER.id, 'http-denied-update');
+
+      const started = await app.handle(
+        new Request(
+          'http://localhost/environments/http-denied-update/runtime/install',
+          jsonRequest('POST', { action: 'upgrade' })
+        )
+      );
+      expect(started.status).toBe(200);
+      const { runId } = (await started.json()) as { runId: string };
+      const log = await app.handle(
+        new Request(`http://localhost/environments/http-denied-update/runtime/runs/${runId}/log`)
+      );
+      expect(await log.text()).toContain('"status":"failed"');
+
+      // The release lands after the log has said failed, so poll for it.
+      for (
+        let attempt = 0;
+        attempt < 50 && manager.getStatus(TEST_USER.id, 'http-denied-update').state === 'connected';
+        attempt += 1
+      ) {
+        await Bun.sleep(20);
+      }
+      const status = manager.getStatus(TEST_USER.id, 'http-denied-update');
+      expect({ state: status.state, updating: status.updating, runtimeClosed }).toEqual({
+        state: 'disconnected',
+        updating: undefined,
+        runtimeClosed: true,
+      });
+      expect(update.record.committed).toBe(0);
+      await manager.closeAll();
+    });
+  }
 
   // A runtime that answered is a runtime that is still serving. Dropping it
   // would turn a refused upgrade into an outage, and leaving `updating` behind
