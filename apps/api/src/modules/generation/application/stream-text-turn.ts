@@ -8,7 +8,6 @@ import {
   finalizeSuccessfulTurn,
   finalizeToolLoopExhausted,
   finalizeTurnError,
-  getAbortInterruptionReason,
   prepareStreamTextTurn,
   resolveTurnAttachments,
   runAgentToolLoop,
@@ -16,6 +15,7 @@ import {
   runSingleShotTextGeneration,
 } from './stream-text-turn-stages';
 import type { StreamEvent, StreamTextTurnInput } from './stream-text-turn-types';
+import { getAbortInterruptionReason } from './turn-failure';
 
 export type { StreamEvent, StreamTextTurnInput };
 

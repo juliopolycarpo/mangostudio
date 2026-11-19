@@ -1,6 +1,5 @@
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { MAX_TOOL_ITERATIONS_DEFAULT } from '@mangostudio/shared/app-settings';
-import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { appendMergedMessagePart, mergeMessageParts } from '@mangostudio/shared/generation';
 import type {
   ContinuationReasonCode,
@@ -11,11 +10,6 @@ import type {
 import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
-import {
-  environmentUnavailableText,
-  isEnvironmentUnavailable,
-} from '../../../lib/environment-unavailable';
-import { getErrorCode } from '../../../lib/error-code';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import {
   type AgentTurnExecutionState,
@@ -74,6 +68,7 @@ import {
   createTurnCheckpointPart,
   TurnCheckpointWriter,
 } from './turn-checkpoint';
+import { describeTurnFailure, getAbortInterruptionReason } from './turn-failure';
 import { reconcileInterruptedMessageParts, sealUnresolvedToolCalls } from './turn-recovery';
 
 const TOOL_LOOP_EXHAUSTED_MESSAGE = 'The model exceeded the maximum number of tool interactions.';
@@ -1123,12 +1118,7 @@ export async function* finalizeTurnError(
     return;
   }
 
-  const rawMessage = error instanceof Error ? error.message : 'Stream generation failed';
-  // An unreachable environment is persisted and streamed with the fixed text the
-  // HTTP routes use; the diagnostic (paths, usernames) stays in the hub log.
-  const unavailable = isEnvironmentUnavailable(error) ? error : undefined;
-  const message = unavailable ? environmentUnavailableText(unavailable) : rawMessage;
-  const code = unavailable ? ERROR_CODES.ENVIRONMENT_UNAVAILABLE : getErrorCode(error);
+  const { rawMessage, message, code } = describeTurnFailure(error);
   streamTextTurnLogger.error('turn_failed', { chatId, message: rawMessage });
 
   if (!executionState.durableProviderState) {
@@ -1216,12 +1206,4 @@ export async function finalizeInterruptedTurn(
   await updateChatAfterTurn(chatId, userId, Date.now(), db, {
     bestEffort: Boolean(session.input.admittedChat),
   });
-}
-
-export function getAbortInterruptionReason(
-  signal: AbortSignal
-): 'client_disconnect' | 'user_cancelled' | 'unknown' {
-  const reason = signal.reason;
-  if (reason === 'client_disconnect' || reason === 'user_cancelled') return reason;
-  return 'unknown';
 }
