@@ -154,11 +154,43 @@ export function carriesFeatureKeys<Feature extends AnyFeatureMessages>(
   messages: CoreMessages,
   feature: Feature
 ): messages is LoadedMessages<FeatureNamespaceOf<Feature>> {
-  const held: Record<string, object | undefined> = messages;
-  return Object.entries<object>(feature).every(([namespace, added]) => {
-    const present = held[namespace];
-    return present !== undefined && Object.keys(added).every((key) => key in present);
+  return holdsEveryKey(messages, feature);
+}
+
+/** A message tree node: strings are the leaves, every other value is a record of more nodes. */
+function isMessageRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/**
+ * Whether `present` has every key of `added`, descending into a key both sides
+ * hold as a record: a split key (`environments.entities`) is half in each, so
+ * "present" there means every sub-key of the other half, not just the key.
+ */
+function holdsEveryKey(present: Record<string, unknown>, added: Record<string, unknown>): boolean {
+  return Object.entries(added).every(([key, addedValue]) => {
+    if (!(key in present)) return false;
+    const presentValue = present[key];
+    return isMessageRecord(presentValue) && isMessageRecord(addedValue)
+      ? holdsEveryKey(presentValue, addedValue)
+      : true;
   });
+}
+
+/** `present` with the keys of `added` laid over it, joining a key both sides hold as a record instead of replacing it. */
+function joinMessages(
+  present: Record<string, unknown> | undefined,
+  added: Record<string, unknown>
+): Record<string, unknown> {
+  const joined: Record<string, unknown> = { ...present };
+  for (const [key, addedValue] of Object.entries(added)) {
+    const presentValue = joined[key];
+    joined[key] =
+      isMessageRecord(presentValue) && isMessageRecord(addedValue)
+        ? joinMessages(presentValue, addedValue)
+        : addedValue;
+  }
+  return joined;
 }
 
 /** Merged dictionaries by the base object they extend and the feature messages added, so one pair keeps one identity. */
@@ -177,29 +209,26 @@ export function withFeatureMessages<Base extends CoreMessages, Feature extends A
   messages: Base,
   feature: Feature
 ): Base & LoadedMessages<FeatureNamespaceOf<Feature>> {
-  if (carriesFeatureKeys(messages, feature)) return messages;
+  // The answer for a pair is remembered, a complete dictionary's too: `useI18n` asks on every
+  // render, and walking every key of a complete locale each time would be wasted work.
   const known = featureMerges.get(messages)?.get(feature);
   // Every merge is a copy of the `messages` it came from, so it keeps all of `Base`.
-  if (known && carriesFeatureKeys(known, feature)) {
-    return known as Base & LoadedMessages<FeatureNamespaceOf<Feature>>;
-  }
+  if (known) return known as Base & LoadedMessages<FeatureNamespaceOf<Feature>>;
 
-  const held: Record<string, object | undefined> = messages;
-  const combined: Record<string, unknown> = { ...messages };
-  for (const [namespace, added] of Object.entries<object>(feature)) {
-    combined[namespace] = { ...held[namespace], ...added };
-  }
-  // `combined` is `messages` plus the feature keys, which the check below proves.
-  const merged = combined as unknown as CoreMessages;
-  if (!carriesFeatureKeys(merged, feature)) {
-    throw new Error(
-      `expected the English keys of ${Object.keys(feature).join(', ')} merged into the dictionary | received: keys missing after the merge`
-    );
+  let result: CoreMessages = messages;
+  if (!carriesFeatureKeys(messages, feature)) {
+    // `joinMessages` lays the feature keys over `messages`, which the check below proves.
+    result = joinMessages(messages, feature) as unknown as CoreMessages;
+    if (!carriesFeatureKeys(result, feature)) {
+      throw new Error(
+        `expected the English keys of ${Object.keys(feature).join(', ')} merged into the dictionary | received: keys missing after the merge`
+      );
+    }
   }
   const byFeature = featureMerges.get(messages) ?? new WeakMap<object, CoreMessages>();
-  byFeature.set(feature, merged);
+  byFeature.set(feature, result);
   featureMerges.set(messages, byFeature);
-  return merged as Base & LoadedMessages<FeatureNamespaceOf<Feature>>;
+  return result as Base & LoadedMessages<FeatureNamespaceOf<Feature>>;
 }
 
 /**

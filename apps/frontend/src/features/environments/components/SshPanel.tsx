@@ -20,6 +20,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Input } from '@/components/ui/Input';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
@@ -46,7 +47,7 @@ function formStateOf(environment: Environment): SshFormFields {
 }
 
 export function SshPanel({ environment }: SshPanelProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.entities.ssh;
   const update = useUpdateEnvironmentMutation();
   const stored = formStateOf(environment);
@@ -162,7 +163,7 @@ export function SshPanel({ environment }: SshPanelProps) {
 }
 
 function SshPreflight({ config }: { readonly config: SshEnvironmentConfig }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.entities.ssh;
   const preflight = sshPreflightCommands(config);
 

@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import { en, ptBR } from '@mangostudio/shared/i18n';
+import { messages as environmentsMessages } from '@mangostudio/shared/i18n/en-environments';
 import { messages as gitMessages } from '@mangostudio/shared/i18n/en-git';
 import { messages as libraryMessages } from '@mangostudio/shared/i18n/en-library';
 
@@ -76,6 +77,46 @@ describe('withFeatureMessages', () => {
     expect(loaded).toBe(ptBR);
     expect(loaded.library.removal).toEqual(ptBR.library.removal);
     expect(loaded.library.removal).not.toEqual(en.library.removal);
+  });
+
+  describe('a key split one level down (environments.entities)', () => {
+    it('holds the first-paint sub-keys and leaves the lazy-only ones out', () => {
+      expect(eager.environments.entities.status).toBe(en.environments.entities.status);
+      expect(
+        'ssh' in eager.environments.entities,
+        'expected the eager dictionary to leave environments.entities.ssh to the Environments chunk | received: present'
+      ).toBe(false);
+      expect('hub' in eager.environments.machine).toBe(false);
+      expect(eager.environments.machine.update).toBe(en.environments.machine.update);
+    });
+
+    it('joins the lazy sub-keys into the eager half instead of replacing it', () => {
+      const loaded = withFeatureMessages(eager, environmentsMessages);
+
+      expect(loaded.environments.entities.ssh).toEqual(en.environments.entities.ssh);
+      expect(loaded.environments.entities.status).toBe(eager.environments.entities.status);
+      expect(loaded.environments.machine.hub).toEqual(en.environments.machine.hub);
+      expect(loaded.environments.machine.update).toBe(eager.environments.machine.update);
+      expect(loaded.environments).toEqual(en.environments);
+    });
+
+    it('does not take a dictionary for complete when only the top-level keys are there', () => {
+      // Every top-level key of the namespace, but `entities` still the eager half: a shallow
+      // check would call this complete and the `ssh` panel would read `undefined`.
+      const halfJoined = {
+        ...eager,
+        environments: { ...en.environments, entities: eager.environments.entities },
+      };
+
+      expect(carriesFeatureKeys(halfJoined, environmentsMessages)).toBe(false);
+    });
+
+    it('returns a complete dictionary as is, so a lazy locale keeps its own text', () => {
+      const loaded = withFeatureMessages(ptBR, environmentsMessages);
+
+      expect(loaded).toBe(ptBR);
+      expect(loaded.environments.entities.ssh).toEqual(ptBR.environments.entities.ssh);
+    });
   });
 
   it('reports a complete dictionary as carrying the keys', () => {
