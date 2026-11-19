@@ -65,6 +65,7 @@ import { chatsUserUpdatedIndex } from './064_chats_user_updated_index';
 import { messageCheckpointDeltas } from './065_message_checkpoint_deltas';
 import { chatSearchText } from './066_chat_search_text';
 import { messageExpandedText } from './067_message_expanded_text';
+import { fileCheckpointSource } from './067_file_checkpoint_source';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -134,4 +135,5 @@ export const allMigrations = {
   '065_message_checkpoint_deltas': messageCheckpointDeltas,
   '066_chat_search_text': chatSearchText,
   '067_message_expanded_text': messageExpandedText,
+  '067_file_checkpoint_source': fileCheckpointSource,
 };

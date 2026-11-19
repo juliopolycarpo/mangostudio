@@ -588,7 +588,8 @@ async function recordWorkspaceChanges(
         mutations.push(toMutation(change, final.hash));
       }
       return { result: undefined, mutations };
-    }
+    },
+    'shell'
   );
   return complete;
 }

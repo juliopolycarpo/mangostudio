@@ -32,6 +32,7 @@ import { isShellAvailable } from '@mangostudio/shared/process/host';
 import { fixtures } from '@mangostudio/shared/test-utils';
 
 import { getDb } from '../../../../src/db/database';
+import { listChatFileCheckpointSummaries } from '../../../../src/modules/file-checkpoints/application/list-chat-checkpoints';
 import { revertMessageFileCheckpoints } from '../../../../src/modules/file-checkpoints/application/revert-message-checkpoints';
 import { executeStandardToolCallsWithProgress } from '../../../../src/modules/generation/application/standard-tool-execution';
 import { insertMessage } from '../../../../src/modules/messages/infrastructure/message-repository';
@@ -318,6 +319,57 @@ describe.skipIf(!runnable)('shell workspace checkpoints', () => {
 
     expect(await revert()).toEqual({ revertedFiles: 1, uncheckpointedSources: [] });
     expect(read('a.txt')).toBe('a-original\n');
+  });
+
+  // The revert dialog warns about concurrent writers only for turns whose rows
+  // came from a before/after comparison; a builtin-only turn has no such row.
+  describe('includesShellCapture in the revert preview', () => {
+    async function previewFlag(): Promise<boolean | undefined> {
+      const summaries = await listChatFileCheckpointSummaries(getDb(), chat.id);
+      return summaries.find((summary) => summary.messageId === messageId)?.includesShellCapture;
+    }
+
+    it('is true when a row came from a shell workspace capture', async () => {
+      initRepository({ 'a.txt': 'a-original\n' });
+      await runBash("printf 'a-shell\\n' > a.txt");
+
+      expect(await previewFlag()).toBe(true);
+    });
+
+    it('is false when only builtin tools wrote', async () => {
+      initRepository({ 'a.txt': 'a-original\n' });
+      const path = join(workdir, 'a.txt');
+      await runCalls([readFileCall('call-1', path), writeFileCall('call-2', path, 'built in\n')]);
+
+      expect(await previewFlag()).toBe(false);
+    });
+
+    it('is false when the shell ran without workspace checkpoints', async () => {
+      initRepository({ 'a.txt': 'a-original\n' });
+      const path = join(workdir, 'a.txt');
+      await runCalls(
+        [
+          readFileCall('call-1', path),
+          writeFileCall('call-2', path, 'built in\n'),
+          bashCall('call-3', "printf 'a-shell\\n' > a.txt"),
+        ],
+        false
+      );
+
+      expect(await previewFlag()).toBe(false);
+    });
+
+    it('is true when a shell capture widens a row a builtin call opened', async () => {
+      initRepository({ 'a.txt': 'a-original\n' });
+      const path = join(workdir, 'a.txt');
+      await runCalls([
+        readFileCall('call-1', path),
+        writeFileCall('call-2', path, 'built in\n'),
+        bashCall('call-3', "printf 'from bash\\n' > a.txt"),
+      ]);
+
+      expect(await previewFlag()).toBe(true);
+    });
   });
 
   // A file that predates the command is never the command's to lose, whatever
