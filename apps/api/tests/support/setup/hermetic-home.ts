@@ -13,8 +13,7 @@
  * A run is accepted when it started under the launcher, or when its `homedir()`
  * already is a `mangostudio-test-home-*` directory (the launcher's shape, for a
  * hand-built wrapper). Anything else is a bare `bun test` on the real home and
- * is refused. `MANGOSTUDIO_TEST_ALLOW_REAL_HOME=1` vouches for a home that is
- * disposable by other means, such as a throwaway CI container.
+ * is refused. There is deliberately no opt-out.
  */
 
 import { homedir } from 'node:os';
@@ -26,15 +25,11 @@ const REAL_HOME_ENV = 'MANGOSTUDIO_REAL_HOME';
 /** Mirrors `TEST_HOME_PREFIX` in `scripts/lib/test-home.ts`. */
 const TEST_HOME_PREFIX = 'mangostudio-test-home-';
 
-/** The one value that vouches for a disposable home; any other value is ignored. */
-const ALLOW_REAL_HOME_ENV = 'MANGOSTUDIO_TEST_ALLOW_REAL_HOME';
-
 const WRAPPER_ADVICE =
   'Start the lane through its package script (`bun run test:unit` / `test:integration` in ' +
   'apps/api), or for one file run ' +
   '`(cd apps/api && bun ../../scripts/with-test-home.ts bun test <file>)`; both launch Bun with a ' +
-  'temporary HOME, and a runtime assignment to process.env.HOME is ignored by Bun. ' +
-  `Set ${ALLOW_REAL_HOME_ENV}=1 only when this home is disposable.`;
+  'temporary HOME, and a runtime assignment to process.env.HOME is ignored by Bun.';
 
 function homeError(home: string, reason: string): Error {
   return new Error(
@@ -61,8 +56,6 @@ export function assertHermeticHome(
   env: Record<string, string | undefined> = process.env,
   home: string = homedir()
 ): void {
-  if (env[ALLOW_REAL_HOME_ENV] === '1') return;
-
   const realHome = env[REAL_HOME_ENV]?.trim();
   if (!realHome) {
     if (basename(home).startsWith(TEST_HOME_PREFIX)) return;

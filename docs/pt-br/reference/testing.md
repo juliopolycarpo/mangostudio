@@ -266,8 +266,7 @@ um `process.env.HOME` alterado em tempo de execução, então o preload não con
 home e aborta com o home recebido e o launcher a usar, em vez de escrever no seu `~/.mango` real.
 Ele aceita uma execução com `MANGOSTUDIO_REAL_HOME` definido (o launcher) ou cujo `homedir()` já
 seja um diretório `mangostudio-test-home-*`; um `MANGO_HOME` exportado dentro do `~/.mango` real
-também é recusado. `MANGOSTUDIO_TEST_ALLOW_REAL_HOME=1` atesta um home descartável por outros
-meios. Use os scripts do pacote a partir da raiz: `bun run --filter @mangostudio/api test:unit` ou
+também é recusado. Não há opção para desativar a recusa. Use os scripts do pacote a partir da raiz: `bun run --filter @mangostudio/api test:unit` ou
 `bun run --filter @mangostudio/api test:integration`. Eles também entram no workspace da API,
 onde `bunfig.toml` fornece o preload. Para selecionar um arquivo, preserve os dois limites:
 

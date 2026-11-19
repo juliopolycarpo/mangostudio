@@ -62,15 +62,9 @@ describe('assertHermeticHome without the launcher', () => {
     expect(() => assertHermeticHome({}, TEST_HOME)).not.toThrow();
   });
 
-  test('passes when the caller vouches for a disposable home', () => {
+  test('offers no environment opt-out for a real-looking home', () => {
     expect(() =>
-      assertHermeticHome({ MANGOSTUDIO_TEST_ALLOW_REAL_HOME: '1' }, '/home/ci')
-    ).not.toThrow();
-  });
-
-  test('does not read any other value as the opt-out', () => {
-    expect(() =>
-      assertHermeticHome({ MANGOSTUDIO_TEST_ALLOW_REAL_HOME: 'true' }, '/home/dev')
+      assertHermeticHome({ MANGOSTUDIO_TEST_ALLOW_REAL_HOME: '1' }, '/home/dev')
     ).toThrow('received: "/home/dev"');
   });
 });
@@ -78,8 +72,6 @@ describe('assertHermeticHome without the launcher', () => {
 describe('this lane process', () => {
   test('resolves the home it runs under to a scratch directory, not the real user home', () => {
     const realHome = process.env.MANGOSTUDIO_REAL_HOME?.trim();
-    const allowed = process.env.MANGOSTUDIO_TEST_ALLOW_REAL_HOME === '1';
-    if (allowed) return;
 
     expect(
       realHome,

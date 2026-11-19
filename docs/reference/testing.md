@@ -1504,8 +1504,7 @@ ignores a runtime `process.env.HOME`, so the preload cannot redirect the home an
 received home and the launcher to use instead of writing to your real `~/.mango`. It accepts a run
 whose `MANGOSTUDIO_REAL_HOME` is set (the launcher), or whose `homedir()` already is a
 `mangostudio-test-home-*` directory; an exported `MANGO_HOME` inside the real `~/.mango` is refused
-too. `MANGOSTUDIO_TEST_ALLOW_REAL_HOME=1` vouches for a home that is disposable by other means. Use
-the package scripts. To select one file, run the launcher from the API workspace so the preload
+too. There is no opt-out. Use the package scripts. To select one file, run the launcher from the API workspace so the preload
 and disposable home both apply:
 
 ```bash
