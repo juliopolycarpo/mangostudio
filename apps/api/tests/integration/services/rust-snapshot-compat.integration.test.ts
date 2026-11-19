@@ -274,9 +274,11 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
     const expectedDirectoryHash = { hash: null };
 
     expect(await rust.snapshot.capture({ path })).toEqual(expectedCapture);
-    expect(await rust.snapshot.hash({ path })).toEqual({ hash: hashOf(bytes) });
+    expect(await rust.snapshot.hash({ path })).toMatchObject({ hash: hashOf(bytes) });
     expect(await rust.snapshot.capture({ path: linkedPath })).toEqual(expectedCapture);
-    expect(await rust.snapshot.hash({ path: linkedPath })).toEqual({ hash: hashOf(bytes) });
+    expect(await rust.snapshot.hash({ path: linkedPath })).toMatchObject({
+      hash: hashOf(bytes),
+    });
     expect(await rust.snapshot.capture({ path: absent })).toEqual({ exists: false });
     expect(await rust.snapshot.hash({ path: absent })).toEqual({ hash: null });
     expect(await rust.snapshot.capture({ path: missingParent })).toEqual({ exists: false });
@@ -285,6 +287,35 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
       expectedDirectoryCapture
     );
     expect(await rust.snapshot.hash({ path: targetDirectory })).toEqual(expectedDirectoryHash);
+  });
+
+  it('reports the size, modification time and link-ness of the entry a hash describes', async () => {
+    const directory = await mkdtemp(join(root, 'stat-'));
+    const path = join(directory, 'regular.bin');
+    const bytes = new Uint8Array([1, 2, 3]);
+    await writeFile(path, bytes);
+
+    const regular = await rust.snapshot.hash({ path });
+    expect(regular).toMatchObject({ hash: hashOf(bytes), size: 3, symlink: false });
+    const modifiedAtMs = regular.modifiedAtMs ?? Number.NaN;
+    const onDisk = (await stat(path)).mtimeMs;
+    expect(
+      Math.abs(modifiedAtMs - onDisk),
+      `expected modifiedAtMs within 5 ms of the file's mtime ${onDisk} | received ${modifiedAtMs}`
+    ).toBeLessThan(5);
+
+    // The hash follows a link; the flag is how a caller tells it did.
+    if (process.platform !== 'win32') {
+      const linkPath = join(directory, 'link.bin');
+      await symlink(path, linkPath);
+      expect(await rust.snapshot.hash({ path: linkPath })).toMatchObject({
+        hash: hashOf(bytes),
+        symlink: true,
+      });
+    }
+    expect(await rust.snapshot.hash({ path: join(directory, 'absent.bin') })).toEqual({
+      hash: null,
+    });
   });
 
   it('rejects a snapshot above the requested byte limit, naming its size and the limit', async () => {
