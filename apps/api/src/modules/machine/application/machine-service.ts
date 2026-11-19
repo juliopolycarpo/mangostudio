@@ -47,7 +47,11 @@ import {
   type UpgradeStreamEvent,
 } from '@mangostudio/shared/updates';
 
-import { restartExecutableOptions, spawnServeChild } from '../../../cli/detach';
+import {
+  restartExecutableOptions,
+  spawnServeChild,
+  spawnServiceRestartCommand,
+} from '../../../cli/detach';
 import { canProbeHealth, probeHealth, probeHubHealth } from '../../../cli/health';
 import {
   latestHubLogFile,
@@ -105,12 +109,15 @@ import {
   buildHubServiceDefinition,
   createHubServiceManager,
   currentHubExecutable,
+  currentHubExecutableProbe,
   currentInstallOriginProbe,
   currentLauncherPath,
   hubServiceLogPath,
   hubServiceTargetFor,
   isAuthSecretPersisted,
   realPathOrSelf,
+  restartHubService,
+  staleHubServiceMove,
 } from './hub-service';
 
 /** A mutating action was refused by the local-surface guard. */
@@ -192,6 +199,14 @@ export interface MachineServiceDeps {
   readonly executable: () => HubExecutable;
   /** The package manager's launcher that follows its upgrades, when this install has one. */
   readonly launcherPath: () => string | undefined;
+  /** Whether a path exists; the launcher a stale unit moves to must be one the manager left. */
+  readonly pathExists: (path: string) => boolean;
+  /**
+   * Run `<launcher> restart` outside this process's job. launchd ends the hub's
+   * own job at a bootout, so the restart that has to boot it out to load a
+   * rewritten plist cannot be finished from in here.
+   */
+  readonly spawnServiceRestart: (launcherPath: string) => void;
   readonly serviceLogFile: () => string;
   readonly secretPersisted: () => boolean;
   /** The canonical user config.toml path; never a hard-coded `~/.mango`. */
@@ -664,7 +679,7 @@ async function* upgradeEvents(
  */
 function scheduleRestart(state: ServerState, launch: HubLaunchMode, d: MachineServiceDeps): void {
   if (launch === 'service') {
-    d.schedule(() => d.manager.restart());
+    d.schedule(() => restartServiceUnit(d));
     return;
   }
   d.schedule(() => {
@@ -673,6 +688,40 @@ function scheduleRestart(state: ServerState, launch: HubLaunchMode, d: MachineSe
     d.spawnSuccessor(state);
     d.shutdown();
   });
+}
+
+/**
+ * Ask the supervisor to bounce this hub's unit, moving a unit that still names
+ * a replaced version onto the package manager's launcher on the way (the
+ * restart a CLI `restart` or upgrade already does).
+ *
+ * On launchd the hub is the job being rewritten: loading the new plist means a
+ * bootout, which ends this process and the `launchctl bootstrap` it would run
+ * next. A stale unit there is therefore moved by a detached `<launcher>
+ * restart` that outlives the job; a unit that is not stale keeps the in-place
+ * `kickstart -k`. If that command cannot start, the unit is restarted as
+ * installed, which is what every restart did before it could be moved.
+ */
+async function restartServiceUnit(d: MachineServiceDeps): Promise<void> {
+  const launcherPath = d.launcherPath();
+  const probe = { platform: d.environment().platform, pathExists: d.pathExists };
+  const warn = (message: string): void => logger.warn('service_unit_retarget_failed', { message });
+  if (probe.platform !== 'darwin') {
+    await restartHubService(d.manager, launcherPath, { probe, warn });
+    return;
+  }
+  const stale = await staleHubServiceMove(d.manager, launcherPath, probe);
+  if (stale) {
+    try {
+      d.spawnServiceRestart(stale.to);
+      return;
+    } catch (error) {
+      warn(
+        `Could not start "${stale.to} restart" to move the service unit off ${stale.from} (${error instanceof Error ? error.message : String(error)}); restarting it as installed. Run "mangostudio service install" to repair the unit.`
+      );
+    }
+  }
+  await d.manager.restart();
 }
 
 async function scheduleRestartIfNeeded(
@@ -755,6 +804,12 @@ function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
     environment,
     executable,
     launcherPath: deps.launcherPath ?? currentLauncherPath,
+    pathExists: deps.pathExists ?? currentHubExecutableProbe().pathExists,
+    spawnServiceRestart:
+      deps.spawnServiceRestart ??
+      ((launcherPath) => {
+        spawnServiceRestartCommand(launcherPath, getServerLogPath(Date.now()));
+      }),
     serviceLogFile: deps.serviceLogFile ?? hubServiceLogPath,
     secretPersisted: deps.secretPersisted ?? (() => isAuthSecretPersisted()),
     configFilePath: deps.configFilePath ?? (() => getConfig().configFilePath),

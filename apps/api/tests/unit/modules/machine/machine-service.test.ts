@@ -319,6 +319,117 @@ describe('machineService.restart', () => {
     expect(recorder.shutdowns).toBe(0);
   });
 
+  describe('of a service whose unit still names a replaced version', () => {
+    /** Homebrew's layout for the platform: the versioned path a stale unit names, and the launcher. */
+    const HOMEBREW = {
+      linux: {
+        cellar: '/home/linuxbrew/.linuxbrew/Cellar/mangostudio/0.1.1/libexec/mangostudio',
+        launcher: '/home/linuxbrew/.linuxbrew/bin/mangostudio',
+      },
+      darwin: {
+        cellar: '/opt/homebrew/Cellar/mangostudio/0.1.1/libexec/mangostudio',
+        launcher: '/opt/homebrew/bin/mangostudio',
+      },
+    } as const;
+
+    /** What the supervisor was asked to do; status reads (the page's and the stale check's) are not verbs. */
+    const verbs = (manager: FakeServiceManager): string[] =>
+      manager.calls.filter((call) => call !== 'status');
+
+    function staleServiceHub(
+      platform: 'linux' | 'darwin',
+      extra: Partial<MachineServiceDeps> = {}
+    ) {
+      const { cellar: CELLAR, launcher: LAUNCHER } = HOMEBREW[platform];
+      const spawnedRestarts: string[] = [];
+      const made = makeService(
+        {
+          environment: () => ({
+            platform,
+            standalone: true,
+            container: false,
+            serverHost: '127.0.0.1',
+            serverPort: 3001,
+            homeDir: '/home/j/.mango',
+            logsDir: '/home/j/.mango/logs',
+            configFile: '/home/j/.mango/config.toml',
+            version: '0.1.1',
+            hostSlotDir: '/home/j/.mango/runtime/host',
+            pid: 42,
+          }),
+          launcherPath: () => LAUNCHER,
+          pathExists: () => true,
+          spawnServiceRestart: (launcher) => {
+            spawnedRestarts.push(launcher);
+          },
+          ...extra,
+        },
+        SERVICE
+      );
+      made.manager.setStatus({ ...installedAndRunning(), execPath: CELLAR });
+      return { ...made, spawnedRestarts, launcher: LAUNCHER };
+    }
+
+    // The web restart ran `manager.restart()` against the stale unit, so a hub
+    // started from a Cellar entry that `brew upgrade` removed never came back.
+    it('moves the unit onto the launcher as part of the restart', async () => {
+      const { service, manager, recorder, spawnedRestarts, launcher } = staleServiceHub('linux');
+
+      await service.restart(LOCAL);
+      await recorder.flush();
+
+      expect(verbs(manager)).toEqual(['restartRetargeted']);
+      expect(manager.retargeted).toEqual([launcher]);
+      expect(spawnedRestarts).toEqual([]);
+    });
+
+    it('still restarts the unit as installed when the move fails', async () => {
+      const { service, manager, recorder } = staleServiceHub('linux');
+      manager.restartRetargetedFailWith = new Error('read-only unit directory');
+
+      await service.restart(LOCAL);
+      await recorder.flush();
+
+      expect(verbs(manager)).toEqual(['restartRetargeted', 'restart']);
+    });
+
+    // launchd ends the hub's own job at the bootout, and the bootstrap that
+    // follows would die with it: a process outside the job has to finish it.
+    it('on launchd hands the move to a detached `restart` outside the unit', async () => {
+      const { service, manager, recorder, spawnedRestarts, launcher } = staleServiceHub('darwin');
+
+      await service.restart(LOCAL);
+      await recorder.flush();
+
+      expect(spawnedRestarts).toEqual([launcher]);
+      expect(verbs(manager)).toEqual([]);
+    });
+
+    it('on launchd falls back to a plain restart when the detached command cannot start', async () => {
+      const { service, manager, recorder } = staleServiceHub('darwin', {
+        spawnServiceRestart: () => {
+          throw new Error('spawn EACCES');
+        },
+      });
+
+      await service.restart(LOCAL);
+      await recorder.flush();
+
+      expect(verbs(manager)).toEqual(['restart']);
+    });
+
+    it('on launchd restarts in place when the unit is not stale', async () => {
+      const { service, manager, recorder, spawnedRestarts, launcher } = staleServiceHub('darwin');
+      manager.setStatus({ execPath: launcher });
+
+      await service.restart(LOCAL);
+      await recorder.flush();
+
+      expect(verbs(manager)).toEqual(['restart']);
+      expect(spawnedRestarts).toEqual([]);
+    });
+  });
+
   it('refuses a remote browser with the guard, and a foreground hub with the command', async () => {
     const { service } = makeService();
     await expect(service.restart({ clientIp: '10.0.0.7' })).rejects.toBeInstanceOf(
