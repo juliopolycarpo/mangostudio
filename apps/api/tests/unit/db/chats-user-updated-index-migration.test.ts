@@ -24,8 +24,7 @@ import {
   getOwnedChat,
   listByIdsForUser,
   listByUserId,
-  listChatIdsByWorkdir,
-  listChatIdsUnderWorktreeRoot,
+  listOtherChatBindings,
   verifyChatOwnership,
 } from '../../../src/modules/chats/infrastructure/chat-repository';
 import { updateChatAfterTurn } from '../../../src/modules/generation/infrastructure/conversation-persistence';
@@ -266,11 +265,7 @@ describe('chats statements without idx_chats_updated_at', () => {
     ['getByIdWithState', () => getByIdWithState(OTHER_ID, typedDb())],
     ['getOwnedChat', () => getOwnedChat(OTHER_ID, OWNER, typedDb())],
     ['listByIdsForUser', () => listByIdsForUser([OTHER_ID], OWNER, typedDb())],
-    ['listChatIdsByWorkdir', () => listChatIdsByWorkdir(OWNER, 'local', '/work/0', typedDb())],
-    [
-      'listChatIdsUnderWorktreeRoot',
-      () => listChatIdsUnderWorktreeRoot(OWNER, 'local', '/work', typedDb()),
-    ],
+    ['listOtherChatBindings', () => listOtherChatBindings(OWNER, 'local', OTHER_ID, typedDb())],
     ['verifyChatOwnership', () => verifyChatOwnership(OTHER_ID, OWNER, typedDb())],
     // The image turn and createMessage write recency through the same statement.
     [
