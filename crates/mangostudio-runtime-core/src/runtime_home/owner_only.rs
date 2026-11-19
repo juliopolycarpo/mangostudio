@@ -48,3 +48,32 @@ pub fn restrict_to_owner(path: &Path) -> bool {
         platform::restrict_to_owner(path).is_ok()
     }
 }
+
+/// Whether `path` is closed to every account but its owner.
+///
+/// On Unix that is "no group or other permission bits". On Windows it is
+/// stricter: the DACL must be protected and hold only allow entries for this
+/// process's own account, which is exactly what [`restrict_to_owner`] writes.
+///
+/// Unlike [`restrict_to_owner`] this returns a `Result`: a caller deciding
+/// whether to keep a secret must tell "readable by others" (`Ok(false)`) from
+/// "could not tell" (`Err`), and treating the second as the first would
+/// discard a good secret on a transient failure.
+///
+/// # Errors
+/// The `io::Error` from reading the file's permissions or security
+/// descriptor, a missing file included.
+///
+/// # Example
+/// ```
+/// use mangostudio_runtime_core::runtime_home::owner_only::{is_owner_only, restrict_to_owner};
+///
+/// let path = std::env::temp_dir().join(format!("mango-is-owner-only-doctest-{}", std::process::id()));
+/// std::fs::write(&path, b"example").unwrap();
+/// assert!(restrict_to_owner(&path));
+/// assert!(is_owner_only(&path).unwrap());
+/// std::fs::remove_file(&path).ok();
+/// ```
+pub fn is_owner_only(path: &Path) -> std::io::Result<bool> {
+    platform::is_owner_only(path)
+}

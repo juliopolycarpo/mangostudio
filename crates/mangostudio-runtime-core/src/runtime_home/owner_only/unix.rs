@@ -15,12 +15,52 @@ pub(super) fn restrict_to_owner(path: &Path) -> bool {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).is_ok()
 }
 
+/// Whether `path` grants nothing to its group or to others.
+///
+/// # Errors
+/// The `io::Error` from reading `path`'s metadata, a missing file included.
+pub(super) fn is_owner_only(path: &Path) -> std::io::Result<bool> {
+    use std::os::unix::fs::PermissionsExt as _;
+    Ok(std::fs::metadata(path)?.permissions().mode() & 0o077 == 0)
+}
+
 #[cfg(test)]
 mod tests {
     use std::os::unix::fs::PermissionsExt as _;
 
-    use super::restrict_to_owner;
+    use super::{is_owner_only, restrict_to_owner};
     use crate::test_support::scratch_path;
+
+    #[test]
+    fn a_group_or_world_accessible_file_is_not_owner_only() {
+        let path = scratch_path("owner-only-unix-loose");
+        std::fs::write(&path, b"secret").unwrap();
+        let mut verdicts = Vec::new();
+        for mode in [0o600, 0o640, 0o604, 0o644, 0o700] {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+            verdicts.push((mode, is_owner_only(&path).unwrap()));
+        }
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(
+            verdicts,
+            vec![
+                (0o600, true),
+                (0o640, false),
+                (0o604, false),
+                (0o644, false),
+                (0o700, true)
+            ],
+            "expected only modes with no group or other bits to be owner-only"
+        );
+    }
+
+    #[test]
+    fn a_missing_file_is_an_error_not_an_answer() {
+        let path = scratch_path("owner-only-unix-check-missing");
+        let error = is_owner_only(&path).expect_err("expected an error for a missing file");
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    }
 
     #[test]
     fn restricts_an_existing_file_to_owner_only() {

@@ -511,7 +511,38 @@ environment. The enum stays closed wherever the hub produces the value: the mani
 
 The attestation carries a `credentialHomeFingerprint`: a non-reversible digest of the credential
 home's identity, never its contents and never a path that would leak a username. It exists so the
-hub can notice that the identity behind a session changed.
+hub can notice that the identity behind a session changed. The wire value is an opaque string
+(`hmac-sha256:<64 hex>`).
+
+The digest is an HMAC-SHA256 under a **host secret**: 32 random bytes the runtime generates on first
+use and stores at `<credential home>/.mango/host-secret`, owner-only (`0600`; a DACL rewrite on
+Windows). The identity it keys (platform, uid, resolved home path, device and inode) is guessable,
+so without the secret an observer holding a descriptor could confirm candidate values offline.
+The Codex `account.fingerprint` key and the published fingerprint come from the same secret under
+different domain prefixes, so the published value is never key material. The secret is never logged
+or sent.
+
+- **One secret per credential home**, not per runtime slot or `MANGO_HOME`. The registry above
+  detects one home claimed by two users by comparing fingerprints, so every runtime reading the same
+  home must derive the same value. Another host has its own secret and reports a different
+  fingerprint for the same path.
+- **Creation is atomic**: a lock plus a temp-write-and-rename, so concurrent first starts end with
+  one secret. The temp file is created empty and restricted to the owner before any byte is written
+  (on Windows the DACL rewrite lands first; on Unix the mode is set at open).
+- **A missing, truncated or oversized file is replaced**, and so is one other accounts could
+  read: on Unix any group or other mode bit, on Windows a DACL that is not the protected,
+  owner-only one the runtime writes (an inherited or extra entry counts), since that secret is
+  already exposed. Replacing a file logs a warning with the path and the reason, never the value.
+- **A read error is not a verdict.** If the file exists but cannot be read for a reason other than
+  absence (`EMFILE`, `EIO`, a Windows sharing violation), the secret is left alone and that call
+  gets no attestation; the next call reads the same secret. Only a definite answer about the file
+  rotates it.
+- **Replacing the secret changes every fingerprint.** The hub sees new credential homes, and a
+  continuation bound to the old Codex account fingerprint starts a fresh vendor session instead of
+  resuming. Deleting `host-secret` is the supported rotation. A container whose home is not on a
+  persistent volume rotates on every start.
+- **An unwritable home yields no secret**, so no attestation and no account fingerprint; the hub
+  reads that as `isolation-unproven`. There is no unkeyed fallback.
 
 Every attestation is derived by the process making it, from its own credential home — including
 Local's. Local used to run inside the hub and report `single-user-host`; it is now a spawned Rust
@@ -1244,11 +1275,10 @@ These product facts come from SDK operations inside the adapter:
 
 - **Codex account fingerprint.** Discovery goes through `AgentBackend::discover`; its private
   factory makes Codex run `CodexHarness::discover_with_account`. The key is
-  `host_local_digest_key`'s hex text as bytes, read again for every Codex discovery, so
-  `account.fingerprint` is the value `codex/adapter.ts` stored on continuations, and
-  `account.planType` comes with it. The email is only the HMAC input inside the SDK. When the home
-  cannot be read, discovery runs under a fixed plan-only key and drops its fingerprint: the plan
-  still arrives and no fingerprint is sent.
+  `host_local_digest_key`'s hex text as bytes (an HMAC of the home identity under the host secret),
+  read again for every Codex discovery, and `account.planType` comes with it. The email is only the
+  HMAC input inside the SDK. When the home or the secret cannot be read, discovery runs under a
+  fixed plan-only key and drops its fingerprint: the plan still arrives and no fingerprint is sent.
 - **Account limits.** `credits`, `spendControl` and `resetCredits` are relayed with times in
   epoch milliseconds and at most 64 reset-credit rows. Per-limit buckets and `reachedType` have
   no SDK source and stay absent.
@@ -1701,9 +1731,13 @@ protocols to the SDK and are not repeated here.
 | refuses a review on a session whose open reported no nativeReview                                                  | `a_review_on_a_target_without_native_review_is_refused_before_any_reservation`                                                                                                                                                                                                                                                                  | covered                                                               |
 | review streams through the turn's session, sequence, topic, receipt and slot rules                                 | `a_review_follows_the_session_sequence_topic_receipt_and_slot_rules`, `a_review_on_another_thread_is_refused_and_stopped_before_the_hub_sees_it`                                                                                                                                                                                                | covered                                                               |
 
-`external-agent-isolation.test.ts` is ported case for case in `isolation.rs`, including
-`fingerprint_matches_the_typescript_derivation_byte_for_byte`, and the qualification proves the
-compiled binary's fingerprint equals Local's on the same home. `external-agent-process.test.ts`
+`external-agent-isolation.test.ts` is ported case for case in `isolation.rs`; the fingerprint
+cases pin the keyed derivation (`fingerprint_and_digest_key_are_pinned_hmacs_of_the_identity`) and
+`host_secret.rs` covers the secret's lifecycle. The qualification spawns the compiled binary three
+times and shows that two runtimes with different `MANGO_HOME` on one credential home report the same
+`hmac-sha256:` fingerprint and the hub registry contests the two users, that a runtime on another
+home reports a different one, and that the fingerprint is not the retired unkeyed hash of the
+identity. It no longer recomputes a TypeScript derivation. `external-agent-process.test.ts`
 maps to `launcher_tests.rs` (exact argv, cwd and env; bounded, redacted stderr; tree kill;
 interrupt), except its Windows `taskkill` escalation cases, which the kill-on-close Job replaces.
 `external-agent-runtime.test.ts` (a fake adapter through the real framed host) is superseded by the
