@@ -12,6 +12,7 @@ import {
   executeMcpTool,
   listMcpBridgeTools,
   MCP_TOOL_EXECUTE_TIMEOUT_MS,
+  resolveMcpCallTimeoutMs,
 } from '../../../../src/services/mcp/tool-bridge';
 import type { McpClientHandle, McpRequestOptions } from '../../../../src/services/mcp/types';
 import { McpConnectionError } from '../../../../src/services/mcp/types';
@@ -365,5 +366,12 @@ describe('executeMcpTool', () => {
     await expect(executeMcpTool(getDb(), intruder, 'mcp__shared-slug__ping', {})).rejects.toThrow(
       'not configured'
     );
+  });
+});
+
+describe('resolveMcpCallTimeoutMs', () => {
+  it('uses the server row’s own timeout and falls back to the bridge default', () => {
+    expect(resolveMcpCallTimeoutMs({ timeoutMs: 12_000 })).toBe(12_000);
+    expect(resolveMcpCallTimeoutMs({ timeoutMs: null })).toBe(MCP_TOOL_EXECUTE_TIMEOUT_MS);
   });
 });

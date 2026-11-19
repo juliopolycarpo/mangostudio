@@ -77,11 +77,25 @@ export class ToolExecutionLifecycle {
     this.emit?.(this.toEvent());
   }
 
-  transition(status: ToolExecutionStatus, reasonCode?: ToolExecutionReasonCode): void {
+  /**
+   * Moves the call to `running`, recording the wall-clock budget it is held to
+   * when a timer governs it. The budget is resolved by the caller from the same
+   * source that arms the timer, so the snapshot cannot drift from enforcement.
+   */
+  start(timeoutMs?: number): void {
+    this.transition('running', undefined, timeoutMs);
+  }
+
+  transition(
+    status: ToolExecutionStatus,
+    reasonCode?: ToolExecutionReasonCode,
+    timeoutMs?: number
+  ): void {
     const terminal = isTerminalToolExecutionStatus(status);
     const next = applyToolExecutionTransition(this.snapshot, {
       status,
       at: Date.now(),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       ...(terminal
         ? { durationMs: performance.now() - (this.runningMonotonic ?? this.queuedMonotonic) }
         : {}),
