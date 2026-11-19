@@ -75,6 +75,24 @@ export const ToolExecutionReasonCodeSchema = Type.Union([
 
 export type ToolExecutionReasonCode = Static<typeof ToolExecutionReasonCodeSchema>;
 
+export const TOOL_RETRY_SAFETY_VALUES = ['safe_read', 'confirmation_required', 'unknown'] as const;
+
+// Written as a literal tuple rather than mapped from the array above:
+// TypeBox infers a union by walking a tuple, and a mapped array widens to
+// `TSchema[]`, which infers as `never` and silently erases the type.
+/**
+ * The one vocabulary for whether running a call again is safe: `safe_read`
+ * changes nothing, `confirmation_required` may change something the reader
+ * should approve, `unknown` is a tool the hub cannot vouch for. Turn recovery
+ * and the tool card's Retry both speak it.
+ */
+export const ToolRetrySafetySchema = Type.Union([
+  Type.Literal('safe_read'),
+  Type.Literal('confirmation_required'),
+  Type.Literal('unknown'),
+]);
+export type ToolRetrySafety = Static<typeof ToolRetrySafetySchema>;
+
 /**
  * Provider-independent lifecycle snapshot of one tool call, persisted on the
  * `tool_call` message part and streamed on every transition. Timestamps are
@@ -96,6 +114,12 @@ export const ToolExecutionSnapshotSchema = Type.Object({
    * parts persisted before this field existed.
    */
   timeoutMs: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
+  /**
+   * What the hub knew about running this call again when it started, so a settled
+   * card can offer Retry without asking the registry. Absent on calls that never
+   * started and on parts persisted before this field existed; those offer no retry.
+   */
+  retrySafety: Type.Optional(ToolRetrySafetySchema),
   reasonCode: Type.Optional(ToolExecutionReasonCodeSchema),
 });
 

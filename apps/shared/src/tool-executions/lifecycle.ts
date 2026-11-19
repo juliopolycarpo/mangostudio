@@ -3,6 +3,7 @@ import type {
   ToolExecutionSnapshot,
   ToolExecutionSource,
   ToolExecutionStatus,
+  ToolRetrySafety,
 } from './schemas';
 
 const TERMINAL_STATUSES: ReadonlySet<ToolExecutionStatus> = new Set([
@@ -48,6 +49,8 @@ export interface ToolExecutionTransition {
   reasonCode?: ToolExecutionReasonCode;
   /** Only meaningful on the first `running` transition: the budget the call starts under. */
   timeoutMs?: number;
+  /** Only meaningful on the first `running` transition: what the hub knows about running the call again. */
+  retrySafety?: ToolRetrySafety;
 }
 
 /** Creates the initial `queued` snapshot for a scheduled tool call. */
@@ -78,6 +81,8 @@ export function applyToolExecutionTransition(
     // The budget belongs to the start: resuming from awaiting_user does not
     // get to rewrite the limit the call began under.
     if (transition.timeoutMs !== undefined) next.timeoutMs = transition.timeoutMs;
+    // Same rule as the budget: the policy a call started under is the one it keeps.
+    if (transition.retrySafety !== undefined) next.retrySafety = transition.retrySafety;
   }
   if (transition.status === 'awaiting_user') {
     next.awaitingUserAt = transition.at;
