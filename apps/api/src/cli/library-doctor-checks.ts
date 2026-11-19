@@ -10,8 +10,8 @@ import {
   describeLocation,
 } from '../modules/library/infrastructure/location-probe';
 import { findStagedRemovalsForLocations } from '../modules/library/infrastructure/tree-removal';
-import type { CheckResult } from './doctor-checks';
-import { fail, ok, warn } from './doctor-checks';
+import type { CheckResult, CheckStatus } from './doctor-checks';
+import { keyedCheck } from './doctor-checks';
 
 export interface LibraryDoctorDeps {
   readonly listLocations: () => ReturnType<typeof describeLocation>[];
@@ -27,20 +27,37 @@ export async function collectLibraryDoctorSection(
   const present = supported.filter((location) => location.exists);
   const writable = present.filter((location) => location.writable);
 
-  const locationLabel = 'locations';
-  const locationDetail = `${present.length} of ${supported.length} present, ${writable.length === present.length && present.length > 0 ? 'all writable' : `${writable.length} writable`}`;
-  const locationStatus: CheckResult =
+  const allWritable = writable.length === present.length && present.length > 0;
+  const locationStatus: CheckStatus =
     present.length === supported.length && writable.length === present.length
-      ? ok(locationLabel, locationDetail)
+      ? 'ok'
       : present.length === 0
-        ? fail(locationLabel, locationDetail)
-        : warn(locationLabel, locationDetail);
+        ? 'fail'
+        : 'warn';
 
-  const rows: CheckResult[] = [locationStatus];
+  const rows: CheckResult[] = [
+    allWritable
+      ? keyedCheck(
+          locationStatus,
+          'library.label.locations',
+          'library.detail.locationsAllWritable',
+          { present: present.length, supported: supported.length }
+        )
+      : keyedCheck(
+          locationStatus,
+          'library.label.locations',
+          'library.detail.locationsSomeWritable',
+          { present: present.length, supported: supported.length, writable: writable.length }
+        ),
+  ];
 
   const unwritable = present.filter((location) => !location.writable);
   for (const location of unwritable) {
-    rows.push(warn(location.id, 'not writable'));
+    rows.push(
+      keyedCheck('warn', 'library.label.location', 'library.detail.notWritable', {
+        id: location.id,
+      })
+    );
   }
 
   // Reported, never swept. A staged tree still holds the only in-place copy of
@@ -49,19 +66,14 @@ export async function collectLibraryDoctorSection(
   const leftovers = await (deps.listStagedRemovals ?? defaultListStagedRemovals)();
   for (const leftover of leftovers) {
     rows.push(
-      warn(
-        leftover.locationId,
-        `an interrupted removal left "${leftover.path}" behind; inspect it, then delete it by hand`
-      )
+      keyedCheck('warn', 'library.label.location', 'library.detail.stagedRemoval', {
+        id: leftover.locationId,
+        path: leftover.path,
+      })
     );
   }
 
-  rows.push(
-    ok(
-      'divergence',
-      'run `mangostudio library --divergent` to list resources that differ across locations'
-    )
-  );
+  rows.push(keyedCheck('ok', 'library.label.divergence', 'library.detail.divergenceHint'));
 
   return rows;
 }

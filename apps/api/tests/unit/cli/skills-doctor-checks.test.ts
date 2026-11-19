@@ -57,7 +57,7 @@ describe('collectSkillsDoctorChecks', () => {
     const results = run({ configOrigin: 'env' });
 
     expect(find(results, 'Skills config').detail).toContain('(from env)');
-    expect(find(results, 'Skills mango').detail).toContain('1 skill(s)');
+    expect(find(results, 'Skills mango').detail).toContain('— 1 skill');
     // A healthy active skill gets no dedicated row.
     expect(results.some((row) => row.label === 'Skill mango:alpha')).toBe(false);
   });

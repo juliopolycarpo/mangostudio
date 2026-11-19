@@ -12,6 +12,7 @@ import {
   resolveMachineCheckText,
 } from '@mangostudio/shared/machine';
 import { CircleCheck } from 'lucide-react';
+import { useMemo } from 'react';
 
 import { Badge } from '@/components/ui/Badge';
 import { environmentsMessages } from '@/features/environments/environments-i18n';
@@ -47,6 +48,14 @@ export function DoctorSection() {
   const { t } = useI18n(environmentsMessages);
   const m = t.environments.machine.doctor;
   const doctor = useMachineDoctor();
+  // An environments row is keyed by the runtime finding's code, so its sentence
+  // is the one the Environments page already shows; the finding templates sit
+  // beside the doctor's own for the resolver to look both up.
+  const templates = useMemo(
+    () => ({ ...m.checks, ...t.environments.findings }),
+    [m.checks, t.environments.findings]
+  );
+  const valueLabels = useMemo(() => ({ ltsStatus: t.environments.lts }), [t.environments.lts]);
 
   return (
     <MachineCard
@@ -81,7 +90,7 @@ export function DoctorSection() {
               every fetch, so there is no identity to preserve across renders. */}
           {sortChecks(doctor.data?.checks ?? []).map((check, index) => {
             // A row's own English stands in for a key this build has no text for.
-            const text = resolveMachineCheckText(check, m.checks);
+            const text = resolveMachineCheckText(check, templates, valueLabels);
             return (
               <li
                 // eslint-disable-next-line react/no-array-index-key -- Checks can have duplicate labels and are replaced as a list.

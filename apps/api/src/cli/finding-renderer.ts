@@ -4,7 +4,6 @@
  */
 
 import type {
-  LtsStatus,
   RuntimeFinding,
   RuntimeFindingCode,
   RuntimeHealth,
@@ -54,8 +53,9 @@ function pathPosition(pathIndex: number): number {
   return pathIndex + 1;
 }
 
-function ltsLabel(status: LtsStatus): string {
-  return environmentLtsLabelsEn[status];
+/** The English label of an LTS status code; undefined for a code this build does not know. */
+function ltsLabel(status: string): string | undefined {
+  return (environmentLtsLabelsEn as Record<string, string | undefined>)[status];
 }
 
 /** True when a rendered line still contains `{placeholder}` tokens. */
@@ -63,12 +63,13 @@ export function hasUnfilledPlaceholders(line: string): boolean {
   return /\{\w+\}/.test(line);
 }
 
-/** Render one finding as a single English sentence for terminal output. */
-export function renderFinding(finding: RenderableFinding): string {
-  if (finding.code === LEGACY_DETAIL_CODE) {
-    return finding.params.detail;
-  }
-
+/**
+ * A finding's params as its template reads them: identifiers become product
+ * names, PATH indices one-based, and a version manager's `manager` stands in
+ * for the `{runtime}` the shared `not-found` template names. An `ltsStatus`
+ * stays the status code, since its words depend on the language it is shown in.
+ */
+export function findingParams(finding: RuntimeFinding): Record<string, string> {
   const params: Record<string, string> = {};
   for (const [key, value] of Object.entries(finding.params ?? {})) {
     if (IDENTIFIER_PARAMS.has(key)) {
@@ -76,8 +77,6 @@ export function renderFinding(finding: RenderableFinding): string {
     } else if (PATH_INDEX_PARAMS.has(key)) {
       const parsed = Number(value);
       params[key] = Number.isFinite(parsed) ? String(pathPosition(parsed)) : value;
-    } else if (key === 'ltsStatus') {
-      params[key] = ltsLabel(value as LtsStatus);
     } else {
       params[key] = value;
     }
@@ -88,6 +87,22 @@ export function renderFinding(finding: RenderableFinding): string {
   // `manager` instead, so that name is the subject when no runtime is given.
   if (params.runtime === undefined && params.manager !== undefined) {
     params.runtime = params.manager;
+  }
+  return params;
+}
+
+/** Render one finding as a single English sentence for terminal output. */
+export function renderFinding(finding: RenderableFinding): string {
+  if (finding.code === LEGACY_DETAIL_CODE) {
+    return finding.params.detail;
+  }
+
+  const params = findingParams(finding);
+  if (params.ltsStatus !== undefined) {
+    const label = ltsLabel(params.ltsStatus);
+    // An unknown status keeps its placeholder, as a missing param always has.
+    if (label === undefined) delete params.ltsStatus;
+    else params.ltsStatus = label;
   }
 
   const template = environmentFindingTemplatesEn[finding.code];

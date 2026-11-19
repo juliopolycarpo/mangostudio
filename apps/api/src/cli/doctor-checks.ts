@@ -3,12 +3,12 @@
  * CheckResult; pure functions over injected config/fs probes so they are
  * trivially testable.
  *
- * The core checks in this file are keyed: a row names its label and detail by
- * a stable key and carries the values as params, and its English `label` and
- * `detail` are rendered from the shared template for that key. The CLI prints
- * that English; the machine page renders its own language from the same keys.
- * Sections that still build rows from English prose use `ok`, `warn` and
- * `fail`, which leave the keys off.
+ * Every check is keyed: a row names its label and detail by a stable key and
+ * carries the values as params, and its English `label` and `detail` are
+ * rendered from the shared template for that key. The CLI prints that
+ * English; the machine page renders its own language from the same keys.
+ * `keyedCheck` is the only way to build a row, so a new check cannot ship as
+ * English prose alone.
  */
 
 import { dirname, join } from 'node:path';
@@ -50,18 +50,6 @@ export interface BuildIdentityInput {
   checkoutBuild: BuildInfo;
   frontendBuild: BuildInfo | null;
   frontendDir: string;
-}
-
-export function ok(label: string, detail: string): CheckResult {
-  return { label, status: 'ok', detail };
-}
-
-export function warn(label: string, detail: string): CheckResult {
-  return { label, status: 'warn', detail };
-}
-
-export function fail(label: string, detail: string): CheckResult {
-  return { label, status: 'fail', detail };
 }
 
 /** Values a keyed row's message is built from; numbers are sent as their decimal text. */

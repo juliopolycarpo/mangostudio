@@ -231,9 +231,12 @@ imprime. Uma linha de uma verificação com chaves também tem `labelKey`,
 `detailKey` e `params` (valores string): a página procura as chaves no próprio
 dicionário (`environments.machine.doctor.checks`) e preenche os `params`, e mostra
 o `label` / `detail` em inglês para uma chave que não conhece ou uma linha sem
-chaves. As verificações do núcleo têm chaves; as linhas de ChatGPT, skills, MCP,
-ambientes e biblioteca ainda são só em inglês. Uma chave é um identificador de
-protocolo: adicione uma nova em vez de renomear uma em uso.
+chaves (um hub mais antigo não envia chaves, então os campos continuam opcionais
+no protocolo). Toda verificação que este hub monta tem chaves. Alguns valores
+ficam como o hub os escreveu, porque ele não tem um código para redigi-los: o
+nome do gerenciador de instalação, a frase de resultado da sonda MCP e as frases
+unidas de um gerenciador de versões com vários achados. Uma chave é um
+identificador de protocolo: adicione uma nova em vez de renomear uma em uso.
 `logs` aceita `?tail=` entre 1 e 2000, com padrão 200. Ele lê um
 sufixo limitado do arquivo, não o arquivo inteiro, então um log com linhas
 excepcionalmente longas pode responder com menos linhas do que as pedidas;

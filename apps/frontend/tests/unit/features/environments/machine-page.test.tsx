@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 
 import { en } from '@mangostudio/shared/i18n';
 import type {
+  MachineCheck,
   MachineDoctorReport,
   MachineLogTail,
   MachineStatus,
@@ -359,6 +360,220 @@ describe('MachinePage', () => {
       expect(doctor.textContent).toContain('v0.9.0 does not match hub v1.0.0');
       expect(doctor.textContent).not.toContain('{hubVersion}');
     });
+
+    it('words a row keyed by a runtime finding code, and its LTS status, in the reader locale', async () => {
+      localStorage.setItem(LOCALE_STORAGE_KEY, 'pt-BR');
+      mountScenario(STATUS, UPDATE_STATUS, {
+        checks: [
+          {
+            label: 'Node.js',
+            status: 'warn',
+            detail: 'Version 20.1.0 is superseded LTS and will stop receiving fixes.',
+            detailKey: 'outdated-lts',
+            params: { version: '20.1.0', ltsStatus: 'lts-superseded' },
+          },
+        ],
+        warnings: 1,
+        failures: 0,
+      });
+      render(<MachinePage />);
+
+      const doctor = await screen.findByTestId('machine-doctor');
+      await waitFor(() =>
+        expect(doctor.textContent).toContain(
+          'A versão 20.1.0 está em LTS substituído e deixará de receber correções.'
+        )
+      );
+      expect(doctor.textContent).not.toContain('superseded LTS');
+    });
+  });
+
+  describe('doctor rows of the sections beyond the core, in Portuguese', () => {
+    // One row per section as the hub sends it: English beside the keys. Each
+    // expectation is what the pt-BR templates make of the row's params.
+    const SECTION_ROWS: ReadonlyArray<{
+      readonly section: string;
+      readonly check: MachineCheck;
+      readonly label: string;
+      readonly detail: string;
+    }> = [
+      {
+        section: 'Installed via',
+        check: {
+          label: 'Installed via',
+          labelKey: 'install.label.installedVia',
+          status: 'ok',
+          detail:
+            'install script · channel stable · legacy layout, run mangostudio upgrade to migrate',
+          detailKey: 'install.detail.installedViaLegacy',
+          params: { manager: 'install script', channel: 'stable' },
+        },
+        label: 'Instalado via',
+        detail:
+          'install script · canal stable · layout legado, execute mangostudio upgrade para migrar',
+      },
+      {
+        section: 'Update',
+        check: {
+          label: 'Update',
+          labelKey: 'update.label.update',
+          status: 'warn',
+          detail: '0.2.0 available — run: mangostudio upgrade',
+          detailKey: 'update.detail.available',
+          params: { version: '0.2.0', command: 'mangostudio upgrade' },
+        },
+        label: 'Atualização',
+        detail: '0.2.0 disponível — execute: mangostudio upgrade',
+      },
+      {
+        section: 'Cursor connector',
+        check: {
+          label: 'Cursor connector',
+          labelKey: 'cursor.label.connector',
+          status: 'warn',
+          detail: 'Deprecated provider.',
+          detailKey: 'cursor.detail.deprecated',
+        },
+        label: 'Conector Cursor',
+        detail:
+          'Provedor descontinuado. Use o runner Cursor CLI no seletor de runner do chat; esta chave não executa mais turnos.',
+      },
+      {
+        section: 'ChatGPT tokens',
+        check: {
+          label: 'ChatGPT tokens',
+          labelKey: 'chatgpt.label.tokens',
+          status: 'warn',
+          detail: '****.com (plus) — access token expired 5m ago (refreshes on next use)',
+          detailKey: 'chatgpt.detail.tokensExpired',
+          params: { account: '****.com (plus)', duration: '5m' },
+        },
+        label: 'Tokens do ChatGPT',
+        detail: '****.com (plus) — o token de acesso expirou há 5m (renova no próximo uso)',
+      },
+      {
+        section: 'ChatGPT port',
+        check: {
+          label: 'ChatGPT port',
+          labelKey: 'chatgpt.label.port',
+          status: 'ok',
+          detail: '1455 free (OAuth sign-in callback)',
+          detailKey: 'chatgpt.detail.portFree',
+          params: { port: '1455' },
+        },
+        label: 'Porta do ChatGPT',
+        detail: '1455 livre (callback de login OAuth)',
+      },
+      {
+        section: 'Skills source',
+        check: {
+          label: 'Skills agents',
+          labelKey: 'skills.label.agents',
+          status: 'ok',
+          detail: '/home/u/.agents/skills — 3 skills (source disabled)',
+          detailKey: 'skills.detail.sourceCountDisabledMany',
+          params: { dir: '/home/u/.agents/skills', count: '3' },
+        },
+        label: 'Skills agents',
+        detail: '/home/u/.agents/skills — 3 skills (fonte desativada)',
+      },
+      {
+        section: 'Skill',
+        check: {
+          label: 'Skill agents:shared',
+          labelKey: 'skills.label.skill',
+          status: 'warn',
+          detail: 'shadowed by mango source (higher precedence)',
+          detailKey: 'skills.detail.shadowed',
+          params: { key: 'agents:shared', source: 'mango' },
+        },
+        label: 'Skill agents:shared',
+        detail: 'sobreposta pela fonte mango (maior precedência)',
+      },
+      {
+        section: 'MCP command',
+        check: {
+          label: 'MCP github command',
+          labelKey: 'mcp.label.command',
+          status: 'fail',
+          detail: 'npx not found on PATH (spawn would ENOENT)',
+          detailKey: 'mcp.detail.commandNotFound',
+          params: { slug: 'github', command: 'npx' },
+        },
+        label: 'Comando do MCP github',
+        detail: 'npx não encontrado no PATH (o início falharia com ENOENT)',
+      },
+      {
+        section: 'MCP server',
+        check: {
+          label: 'MCP github',
+          labelKey: 'mcp.label.server',
+          status: 'ok',
+          detail: 'stdio, disabled',
+          detailKey: 'mcp.detail.serverDisabled',
+          params: { slug: 'github', transport: 'stdio' },
+        },
+        label: 'MCP github',
+        detail: 'stdio, desativado',
+      },
+      {
+        section: 'Library locations',
+        check: {
+          label: 'locations',
+          labelKey: 'library.label.locations',
+          status: 'warn',
+          detail: '2 of 3 present, 1 writable',
+          detailKey: 'library.detail.locationsSomeWritable',
+          params: { present: '2', supported: '3', writable: '1' },
+        },
+        label: 'locais',
+        detail: '2 de 3 presentes, 1 graváveis',
+      },
+      {
+        section: 'Environments, a finding',
+        check: {
+          label: 'Node.js',
+          labelKey: 'env.label.tool',
+          status: 'fail',
+          detail: 'Node.js was not found on PATH or in any well-known location.',
+          detailKey: 'not-found',
+          params: { runtime: 'Node.js', tool: 'Node.js' },
+        },
+        label: 'Node.js',
+        detail: 'Node.js não foi encontrado no PATH nem nos locais conhecidos.',
+      },
+      {
+        section: 'Environments, versions managed',
+        check: {
+          label: 'Volta',
+          labelKey: 'env.label.tool',
+          status: 'ok',
+          detail: '2.0.0  2 versions managed',
+          detailKey: 'env.detail.managerVersionManagedMany',
+          params: { tool: 'Volta', version: '2.0.0', count: '2' },
+        },
+        label: 'Volta',
+        detail: '2.0.0  2 versões gerenciadas',
+      },
+    ];
+
+    it.each(SECTION_ROWS.map((entry) => [entry.section, entry] as const))(
+      'words the %s row from the pt-BR templates',
+      async (_section, entry) => {
+        localStorage.setItem(LOCALE_STORAGE_KEY, 'pt-BR');
+        mountScenario(STATUS, UPDATE_STATUS, {
+          checks: [entry.check],
+          warnings: entry.check.status === 'warn' ? 1 : 0,
+          failures: entry.check.status === 'fail' ? 1 : 0,
+        });
+        render(<MachinePage />);
+
+        const doctor = await screen.findByTestId('machine-doctor');
+        await waitFor(() => expect(within(doctor).getByText(entry.label)).toBeTruthy());
+        expect(doctor.textContent).toContain(entry.detail);
+        expect(doctor.textContent).not.toContain(entry.check.detail);
+      }
+    );
   });
 
   it('confirms a restart, posts it, and announces the hand-over', async () => {

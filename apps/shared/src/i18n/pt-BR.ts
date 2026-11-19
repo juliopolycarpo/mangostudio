@@ -2869,6 +2869,125 @@ export const messages = {
           'core.detail.frontendBuildMissing':
             '{path} ausente; recompile os assets do frontend para comparar',
           'core.detail.frontendBuildDiffers': 'o frontend {frontend} difere do servidor {server}',
+          'install.label.installedVia': 'Instalado via',
+          'install.detail.installedVia': '{manager} · canal {channel}',
+          'install.detail.installedViaLegacy':
+            '{manager} · canal {channel} · layout legado, execute mangostudio upgrade para migrar',
+          'update.label.update': 'Atualização',
+          'update.detail.disabled': 'verificações desativadas',
+          'update.detail.skippedEnv': 'ignorado (NO_UPDATE_NOTIFIER|DO_NOT_TRACK|CI)',
+          'update.detail.skippedDev': 'ignorado (build de desenvolvimento)',
+          'update.detail.notChecked': 'ainda não verificado',
+          'update.detail.checkFailed': 'falha na verificação ({error})',
+          'update.detail.available': '{version} disponível — execute: {command}',
+          'update.detail.availableUnnamed': 'um build mais novo disponível — execute: {command}',
+          'update.detail.upToDate': 'atualizado ({version}, verificado há {hours}h)',
+          'cursor.label.connector': 'Conector Cursor',
+          'cursor.detail.deprecated':
+            'Provedor descontinuado. Use o runner Cursor CLI no seletor de runner do chat; esta chave não executa mais turnos.',
+          'chatgpt.label.secrets': 'Segredos do ChatGPT',
+          'chatgpt.label.tokens': 'Tokens do ChatGPT',
+          'chatgpt.label.refresh': 'Renovação do ChatGPT',
+          'chatgpt.label.port': 'Porta do ChatGPT',
+          'chatgpt.label.auth': 'Autenticação do ChatGPT',
+          'chatgpt.label.backend': 'Backend do ChatGPT',
+          'chatgpt.detail.secretStoreUnavailable':
+            'armazenamento de segredos indisponível — os tokens salvos do ChatGPT não podem ser lidos',
+          'chatgpt.detail.secretStoreCorrupted':
+            'o armazenamento de segredos devolveu dados corrompidos em uma gravação do tamanho de um token',
+          'chatgpt.detail.secretStoreReachable':
+            'armazenamento de segredos acessível (gravação do tamanho de um token verificada)',
+          'chatgpt.detail.secretStoreWriteFailed':
+            'a gravação do tamanho de um token falhou — {error}',
+          'chatgpt.detail.connectorError': '{connector}: {error}',
+          'chatgpt.detail.tokensReauthRequired':
+            '{account} — a sessão expirou; entre com o ChatGPT novamente',
+          'chatgpt.detail.tokensExpired':
+            '{account} — o token de acesso expirou há {duration} (renova no próximo uso)',
+          'chatgpt.detail.tokensValid': '{account} — o token de acesso expira em {duration}',
+          'chatgpt.detail.refreshSkipped':
+            '{connector}: ignorado — nenhum pacote de tokens legível',
+          'chatgpt.detail.refreshRotated':
+            '{account} — token de renovação rotacionado; o novo token de acesso expira em {duration}',
+          'chatgpt.detail.refreshRejected':
+            '{connector}: renovação recusada (invalid_grant) — entre com o ChatGPT novamente',
+          'chatgpt.detail.portFree': '{port} livre (callback de login OAuth)',
+          'chatgpt.detail.portInUse':
+            '{port} em uso — novos logins do ChatGPT falharão até que seja liberada (o Codex CLI usa a mesma porta)',
+          'chatgpt.detail.endpointReachable': '{url} (HTTP {status})',
+          'chatgpt.detail.endpointFailed': '{url} ({error})',
+          'skills.label.config': 'Config de skills',
+          'skills.label.mango': 'Skills mango',
+          'skills.label.agents': 'Skills agents',
+          'skills.label.claude': 'Skills claude',
+          'skills.label.skill': 'Skill {key}',
+          'skills.detail.configFromDefault': '{dir} (padrão)',
+          'skills.detail.configFromToml': '{dir} (do toml)',
+          'skills.detail.configFromEnv': '{dir} (do ambiente)',
+          'skills.detail.sourceUnreadable': '{dir} (não legível)',
+          'skills.detail.sourceUnreadableDisabled': '{dir} (não legível, fonte desativada)',
+          'skills.detail.sourceMissing': '{dir} (ainda sem diretório de skills)',
+          'skills.detail.sourceMissingDisabled':
+            '{dir} (ainda sem diretório de skills) (fonte desativada)',
+          'skills.detail.sourceCountOne': '{dir} — 1 skill',
+          'skills.detail.sourceCountMany': '{dir} — {count} skills',
+          'skills.detail.sourceCountDisabledOne': '{dir} — 1 skill (fonte desativada)',
+          'skills.detail.sourceCountDisabledMany': '{dir} — {count} skills (fonte desativada)',
+          'skills.detail.invalid': '{error}',
+          'skills.detail.shadowed': 'sobreposta pela fonte {source} (maior precedência)',
+          'skills.detail.disabled': 'desativada nas configurações',
+          'skills.detail.precedenceUnverified':
+            'não foi possível varrer um local de skills de maior prioridade',
+          'mcp.label.probeNote': 'Sonda MCP',
+          'mcp.label.server': 'MCP {slug}',
+          'mcp.label.command': 'Comando do MCP {slug}',
+          'mcp.label.probe': 'Sonda do MCP {slug}',
+          'mcp.label.tools': 'Ferramentas do MCP {slug}',
+          'mcp.detail.probeNote':
+            'um servidor MangoStudio está em execução; a sonda inicia um segundo processo stdio por servidor (seguro para servidores por cliente)',
+          'mcp.detail.serverEnabled': '{transport}, ativado',
+          'mcp.detail.serverDisabled': '{transport}, desativado',
+          'mcp.detail.commandMissing':
+            'nenhum comando configurado (servidores MCP stdio exigem um comando)',
+          'mcp.detail.commandMissingDisabled':
+            'nenhum comando configurado (servidores MCP stdio exigem um comando, servidor desativado)',
+          'mcp.detail.commandFound': '{command} encontrado no PATH',
+          'mcp.detail.commandNotFound':
+            '{command} não encontrado no PATH (o início falharia com ENOENT)',
+          'mcp.detail.commandNotFoundDisabled':
+            '{command} não encontrado no PATH (servidor desativado)',
+          'mcp.detail.probeResult': '{result}',
+          'mcp.detail.longToolNamesOne':
+            '1 nome de ferramenta excede {max} caracteres e foi ignorado: {names}',
+          'mcp.detail.longToolNamesMany':
+            '{count} nomes de ferramenta excedem {max} caracteres e foram ignorados: {names}',
+          'library.label.locations': 'locais',
+          'library.label.location': '{id}',
+          'library.label.divergence': 'divergência',
+          'library.detail.locationsAllWritable':
+            '{present} de {supported} presentes, todos graváveis',
+          'library.detail.locationsSomeWritable':
+            '{present} de {supported} presentes, {writable} graváveis',
+          'library.detail.notWritable': 'sem permissão de escrita',
+          'library.detail.stagedRemoval':
+            'uma remoção interrompida deixou "{path}" para trás; inspecione e depois apague manualmente',
+          'library.detail.divergenceHint':
+            'execute `mangostudio library --divergent` para listar os recursos que diferem entre os locais',
+          'env.label.tool': '{tool}',
+          'env.label.wslExecutable': 'Executável do WSL',
+          'env.detail.versionAndPath': '{version}  {path}',
+          'env.detail.detected': 'detectado',
+          'env.detail.notDetected': 'não detectado',
+          'env.detail.needsAttention': 'precisa de atenção',
+          'env.detail.notInstalled': 'não instalado',
+          'env.detail.installed': 'instalado',
+          'env.detail.installedManagedOne': 'instalado  1 versão gerenciada',
+          'env.detail.installedManagedMany': 'instalado  {count} versões gerenciadas',
+          'env.detail.managerVersion': '{version}',
+          'env.detail.managerVersionManagedOne': '{version}  1 versão gerenciada',
+          'env.detail.managerVersionManagedMany': '{version}  {count} versões gerenciadas',
+          'env.detail.findingsJoined': '{findings}',
+          'env.detail.wslExecutable': '{path} ({source})',
         },
       },
       logs: {

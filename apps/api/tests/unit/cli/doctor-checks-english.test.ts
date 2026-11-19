@@ -8,7 +8,10 @@
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
 
-import { MACHINE_CHECK_TEMPLATES_EN } from '@mangostudio/shared/machine/check-text-en';
+import {
+  MACHINE_CHECK_TEMPLATES_EN,
+  MACHINE_DOCTOR_TEMPLATES_EN,
+} from '@mangostudio/shared/machine/check-text-en';
 import { RUNTIME_CAPABILITY_KEYS } from '@mangostudio/shared/runtime-home';
 
 import {
@@ -560,10 +563,13 @@ describe('core doctor checks, keys', () => {
     }
   });
 
-  it('exercises every template, so none is dead and none goes unpinned', () => {
+  it('exercises every core template, so none is dead and none goes unpinned', () => {
     const sent = new Set(EVERY_ROW.flatMap((row) => [row.labelKey, row.detailKey]));
-    const unsent = Object.keys(MACHINE_CHECK_TEMPLATES_EN).filter((key) => !sent.has(key));
-    expect(unsent, '(templates no row sends)').toEqual([]);
+    // The other sections' templates are exercised by doctor-sections-english.test.ts.
+    const unsent = Object.keys(MACHINE_DOCTOR_TEMPLATES_EN).filter(
+      (key) => key.startsWith('core.') && !sent.has(key)
+    );
+    expect(unsent, '(core templates no row sends)').toEqual([]);
   });
 
   it('names the directory rows by the same label key whatever the outcome', () => {
