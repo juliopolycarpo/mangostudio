@@ -4,7 +4,7 @@
  */
 
 import { getRuntimeClient } from '../../runtime-client';
-import { withMutationPersistence } from '../file-mutation-snapshot';
+import { snapshotCaptureParams, withMutationPersistence } from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -74,7 +74,7 @@ export async function executeDeleteFile(
         chatId: context.chatId,
         inputPath: args.path,
         resolvedPath,
-        captureSnapshot: Boolean(context.assistantMessageId),
+        ...snapshotCaptureParams(context),
         ...runtimePathPolicy(options),
       },
       context.signal ? { signal: context.signal } : undefined

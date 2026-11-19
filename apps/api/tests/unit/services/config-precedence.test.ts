@@ -47,6 +47,7 @@ const WATCHED_ENV_KEYS = [
   'MANGO_LIBRARY_BACKUP_DIR',
   'MANGO_LIBRARY_BACKUP_RETENTION_COUNT',
   'MANGO_LIBRARY_BACKUP_RETENTION_BYTES',
+  'MANGO_CHECKPOINTS_MAX_FILE_BYTES',
   'MANGO_ENV_LTS_REFRESH',
   'MANGO_ENV_INSTALLS_ENABLED',
   'MANGO_CONTAINER',
@@ -528,6 +529,32 @@ describe('config precedence', () => {
 
     expect(cfg.library.backupRetentionCount).toBe(7);
     expect(cfg.library.backupRetentionBytes).toBe(512 * 1024 * 1024);
+  });
+
+  test('defaults the checkpoint file limit to 128 MiB', () => {
+    writeFileSync(TMP_TOML, '');
+
+    expect(loadConfig(TMP_TOML).checkpoints.maxFileBytes).toBe(128 * 1024 * 1024);
+  });
+
+  test('loads the checkpoint file limit from config.toml', () => {
+    writeFileSync(TMP_TOML, '[checkpoints]\nmax_file_bytes = 4096\n');
+
+    expect(loadConfig(TMP_TOML).checkpoints.maxFileBytes).toBe(4096);
+  });
+
+  test('MANGO_CHECKPOINTS_MAX_FILE_BYTES overrides config.toml', () => {
+    writeFileSync(TMP_TOML, '[checkpoints]\nmax_file_bytes = 4096\n');
+    process.env.MANGO_CHECKPOINTS_MAX_FILE_BYTES = '8192';
+
+    expect(loadConfig(TMP_TOML).checkpoints.maxFileBytes).toBe(8192);
+  });
+
+  test('ignores an invalid checkpoint file limit', () => {
+    writeFileSync(TMP_TOML, '[checkpoints]\nmax_file_bytes = -5\n');
+    process.env.MANGO_CHECKPOINTS_MAX_FILE_BYTES = 'lots';
+
+    expect(loadConfig(TMP_TOML).checkpoints.maxFileBytes).toBe(128 * 1024 * 1024);
   });
 
   test('keeps test library backups inside the managed test sandbox', () => {

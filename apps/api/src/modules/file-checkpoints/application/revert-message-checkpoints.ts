@@ -5,6 +5,8 @@ import {
   RUNTIME_ABSENT_HASH,
   RuntimeSnapshotConflictError,
   type RuntimeSnapshotRevertParams,
+  SNAPSHOT_CHUNK_MAX_BYTES,
+  SNAPSHOT_INLINE_MAX_BYTES,
 } from '@mangostudio/shared/runtime-contract';
 import type { Kysely } from 'kysely';
 
@@ -15,7 +17,12 @@ import {
   buildWorkdirPolicy,
   resolveEffectiveRestrictToolsToWorkdir,
 } from '../../workspaces/application/workdir-policy';
-import { readCheckpointBlob } from '../infrastructure/checkpoint-blob-store';
+import {
+  checkpointBlobExists,
+  checkpointBlobSize,
+  readCheckpointBlob,
+  readCheckpointBlobChunks,
+} from '../infrastructure/checkpoint-blob-store';
 import {
   listActiveCheckpointsForMessage,
   markMessageCheckpointsReverted,
@@ -51,7 +58,6 @@ export async function revertMessageFileCheckpoints(
   const rows = await listActiveCheckpointsForMessage(db, chatId, messageId);
   if (rows.length === 0) return { revertedFiles: 0, uncheckpointedSources };
 
-  const operations = await buildRevertOperations(rows);
   const reverted = revertedStateByPath(rows);
   const expected = [...finalStateByPath(rows)].map(([path, afterHash]) => {
     const revertedHash = reverted.get(path);
@@ -63,8 +69,12 @@ export async function revertMessageFileCheckpoints(
     checkpointEnvironmentId(rows)
   );
   const runtime = await getRuntimeClient(runtimeContext.userId, runtimeContext.environmentId);
+  // Blobs too large for one frame are uploaded to the runtime first and named in
+  // the operation; the finally below frees those uploads however the revert ends.
+  const uploadedIds: string[] = [];
   let result: { revertedFiles: number };
   try {
+    const operations = await buildRevertOperations(runtime, rows, uploadedIds);
     result = await runtime.snapshot.revert({
       chatId,
       expected,
@@ -78,6 +88,10 @@ export async function revertMessageFileCheckpoints(
       throw new FileCheckpointConflictError(error.resolvedPath);
     }
     throw error;
+  } finally {
+    await Promise.all(
+      uploadedIds.map((stagedId) => runtime.snapshot.release({ stagedId }).catch(() => undefined))
+    );
   }
 
   await markMessageCheckpointsReverted(db, chatId, messageId, Date.now());
@@ -139,8 +153,20 @@ async function resolveRevertRuntimeContext(
   return policy?.restricted ? { ...base, containmentRoot: policy.root } : base;
 }
 
+type RevertRuntime = Awaited<ReturnType<typeof getRuntimeClient>>;
+
+/** Where a restore's bytes come from: inline in the operation, or an upload the runtime holds. */
+type RestoreContent =
+  { readonly contentBase64: string } | { readonly stagedId: string; readonly hash: string };
+
+/**
+ * `uploadedIds` receives every upload as soon as it is created, so the caller can
+ * release them even when a later row fails to build.
+ */
 async function buildRevertOperations(
-  rows: readonly FileCheckpointSelect[]
+  runtime: RevertRuntime,
+  rows: readonly FileCheckpointSelect[],
+  uploadedIds: string[]
 ): Promise<RuntimeSnapshotRevertParams['operations']> {
   const operations: RuntimeSnapshotRevertParams['operations'][number][] = [];
   for (const row of [...rows].reverse()) {
@@ -153,7 +179,7 @@ async function buildRevertOperations(
         operations.push({
           type: 'restore',
           path: row.path,
-          contentBase64: await readRequiredBlob(row),
+          ...(await restoreContent(runtime, row, uploadedIds)),
         });
         break;
       case 'move':
@@ -162,7 +188,7 @@ async function buildRevertOperations(
           type: 'move',
           path: row.path,
           movedTo: row.movedTo,
-          contentBase64: await readRequiredBlob(row),
+          ...(await restoreContent(runtime, row, uploadedIds)),
         });
         break;
       default:
@@ -172,7 +198,17 @@ async function buildRevertOperations(
   return operations;
 }
 
-async function readRequiredBlob(row: FileCheckpointSelect): Promise<string> {
+/**
+ * A blob up to {@link SNAPSHOT_INLINE_MAX_BYTES} rides in the operation. A
+ * bigger one is streamed to the runtime in bounded chunks and named by id and
+ * hash; the runtime verifies the hash before it changes any file, so a corrupt
+ * or truncated upload refuses the whole revert instead of half applying it.
+ */
+async function restoreContent(
+  runtime: RevertRuntime,
+  row: FileCheckpointSelect,
+  uploadedIds: string[]
+): Promise<RestoreContent> {
   if (!row.blobKey) {
     throw new FileCheckpointConflictError(
       row.path,
@@ -180,15 +216,40 @@ async function readRequiredBlob(row: FileCheckpointSelect): Promise<string> {
         'so there is nothing to restore.'
     );
   }
-  const bytes = await readCheckpointBlob(row.blobKey);
-  if (!bytes) {
-    throw new FileCheckpointConflictError(
-      row.path,
-      `Cannot revert "${row.path}": its stored content from before this assistant message is no ` +
-        'longer available.'
-    );
+  if (!(await checkpointBlobExists(row.blobKey))) throw blobUnavailableError(row);
+
+  if (checkpointBlobSize(row.blobKey) <= SNAPSHOT_INLINE_MAX_BYTES) {
+    const bytes = await readCheckpointBlob(row.blobKey);
+    if (!bytes) throw blobUnavailableError(row);
+    return { contentBase64: Buffer.from(bytes).toString('base64') };
   }
-  return Buffer.from(bytes).toString('base64');
+
+  const stagedId = crypto.randomUUID();
+  uploadedIds.push(stagedId);
+  let offset = 0;
+  try {
+    for await (const chunk of readCheckpointBlobChunks(row.blobKey, SNAPSHOT_CHUNK_MAX_BYTES)) {
+      await runtime.snapshot.stageChunk({
+        stagedId,
+        offset,
+        contentBase64: Buffer.from(chunk).toString('base64'),
+      });
+      offset += chunk.byteLength;
+    }
+  } catch (error) {
+    // The blob vanishing mid-read is the same condition as it being gone up front.
+    if (!(await checkpointBlobExists(row.blobKey))) throw blobUnavailableError(row);
+    throw error;
+  }
+  return { stagedId, hash: row.blobKey };
+}
+
+function blobUnavailableError(row: FileCheckpointSelect): FileCheckpointConflictError {
+  return new FileCheckpointConflictError(
+    row.path,
+    `Cannot revert "${row.path}": its stored content from before this assistant message is no ` +
+      'longer available.'
+  );
 }
 
 /**

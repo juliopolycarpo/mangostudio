@@ -8,6 +8,7 @@ import { getRequiredTextArg } from '../arg-parsing';
 import {
   attachBeforeFields,
   type BeforeOmittedReason,
+  snapshotCaptureParams,
   withMutationPersistence,
 } from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
@@ -90,7 +91,7 @@ export async function executeWriteFile(
         inputPath: args.path,
         resolvedPath,
         content: args.content,
-        captureSnapshot: Boolean(context.assistantMessageId),
+        ...snapshotCaptureParams(context),
         ...runtimePathPolicy(options),
       },
       context.signal ? { signal: context.signal } : undefined

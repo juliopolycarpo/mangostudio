@@ -5,7 +5,7 @@
 
 import { getRuntimeClient } from '../../runtime-client';
 import { getRequiredTextArg } from '../arg-parsing';
-import { withMutationPersistence } from '../file-mutation-snapshot';
+import { snapshotCaptureParams, withMutationPersistence } from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -82,7 +82,7 @@ export async function executeCreateFile(
         inputPath: args.path,
         resolvedPath,
         content: args.content,
-        captureSnapshot: Boolean(context.assistantMessageId),
+        ...snapshotCaptureParams(context),
         ...runtimePathPolicy(options),
       },
       context.signal ? { signal: context.signal } : undefined

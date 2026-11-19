@@ -13,6 +13,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 
+import { SNAPSHOT_DEFAULT_MAX_BYTES } from '@mangostudio/shared/runtime-contract';
 import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
 import { TERMINAL_SCROLLBACK_MAX_BYTES } from '@mangostudio/shared/terminal';
 import type { UpdateChannel } from '@mangostudio/shared/updates';
@@ -102,6 +103,12 @@ export interface MangoConfig {
   };
   checkpoints: {
     dir: string;
+    /**
+     * Largest file a file mutation may checkpoint. A mutation of a bigger file
+     * is refused before it changes anything, so no edit lands that undo could
+     * not reverse. The runtime clamps it to its own hard ceiling (1 GiB).
+     */
+    maxFileBytes: number;
   };
   auth: {
     secret: string;
@@ -196,7 +203,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   agents: { dir: '' },
   skills: { dir: '' },
   library: { backupDir: '', backupRetentionCount: 10, backupRetentionBytes: 512 * 1024 * 1024 },
-  checkpoints: { dir: '' },
+  checkpoints: { dir: '', maxFileBytes: SNAPSHOT_DEFAULT_MAX_BYTES },
   auth: { secret: '', url: '' },
   security: { trustProxy: false, allowDirectLoopback: true },
   updates: { check: true, channel: null },
@@ -294,6 +301,12 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   CHECKPOINTS_DIR: (cfg, v) => {
     cfg.checkpoints.dir = v;
+  },
+  MANGO_CHECKPOINTS_MAX_FILE_BYTES: (cfg, v) => {
+    const bytes = Number(v);
+    if (Number.isSafeInteger(bytes) && bytes > 0) {
+      cfg.checkpoints.maxFileBytes = bytes;
+    }
   },
   BETTER_AUTH_SECRET: (cfg, v) => {
     cfg.auth.secret = v;
@@ -766,6 +779,13 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
   const checkpoints = parsed.checkpoints as Record<string, unknown> | undefined;
   if (checkpoints) {
     if (typeof checkpoints.dir === 'string') cfg.checkpoints.dir = checkpoints.dir;
+    if (
+      typeof checkpoints.max_file_bytes === 'number' &&
+      Number.isSafeInteger(checkpoints.max_file_bytes) &&
+      checkpoints.max_file_bytes > 0
+    ) {
+      cfg.checkpoints.maxFileBytes = checkpoints.max_file_bytes;
+    }
   }
 
   const auth = parsed.auth as Record<string, unknown> | undefined;

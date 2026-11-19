@@ -49,7 +49,7 @@ async function capturePaths() {
     toolImages: { dir: join(root, 'avatars') },
     agents: { dir: join(root, 'agents') },
     skills: { dir: join(root, 'skills') },
-    checkpoints: { dir: join(root, 'checkpoints') },
+    checkpoints: { dir: join(root, 'checkpoints'), maxFileBytes: 1024 },
   };
   await mkdir(config.uploads.dir);
   await mkdir(config.checkpoints.dir);

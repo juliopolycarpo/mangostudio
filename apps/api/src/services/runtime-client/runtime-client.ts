@@ -119,8 +119,14 @@ import {
   RuntimeSnapshotConflictError,
   type RuntimeSnapshotHashParams,
   type RuntimeSnapshotHashResult,
+  type RuntimeSnapshotReadChunkParams,
+  type RuntimeSnapshotReadChunkResult,
+  type RuntimeSnapshotReleaseParams,
+  type RuntimeSnapshotReleaseResult,
   type RuntimeSnapshotRevertParams,
   type RuntimeSnapshotRevertResult,
+  type RuntimeSnapshotStageChunkParams,
+  type RuntimeSnapshotStageChunkResult,
   type RuntimeTerminalAckParams,
   type RuntimeTerminalAttachParams,
   type RuntimeTerminalAttachResult,
@@ -234,6 +240,21 @@ interface RuntimeSnapshotClient {
     params: RuntimeSnapshotRevertParams,
     options?: RequestOptions
   ): Promise<RuntimeSnapshotRevertResult>;
+  /** Reads one bounded slice of a capture the runtime staged (`before.stagedId`). */
+  readChunk(
+    params: RuntimeSnapshotReadChunkParams,
+    options?: RequestOptions
+  ): Promise<RuntimeSnapshotReadChunkResult>;
+  /** Appends one in-order slice to an upload a later `snapshot.revert` names. */
+  stageChunk(
+    params: RuntimeSnapshotStageChunkParams,
+    options?: RequestOptions
+  ): Promise<RuntimeSnapshotStageChunkResult>;
+  /** Drops a staged capture or upload; idempotent. */
+  release(
+    params: RuntimeSnapshotReleaseParams,
+    options?: RequestOptions
+  ): Promise<RuntimeSnapshotReleaseResult>;
 }
 
 interface RuntimeWorkspaceClient {
@@ -617,6 +638,9 @@ export class RuntimeClient {
       capture: (params, options) => this.request('snapshot.capture', params, options),
       hash: (params, options) => this.request('snapshot.hash', params, options),
       revert: (params, options) => this.request('snapshot.revert', params, options),
+      readChunk: (params, options) => this.request('snapshot.read-chunk', params, options),
+      stageChunk: (params, options) => this.request('snapshot.stage-chunk', params, options),
+      release: (params, options) => this.request('snapshot.release', params, options),
     };
     this.workspace = {
       browse: (params = {}, options) => this.request('workspace.browse', params, options),

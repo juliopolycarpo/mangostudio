@@ -60,7 +60,7 @@ function makeConfig(): MangoConfig {
     toolImages: { dir: join(dir, 'tool-images') },
     agents: { dir: join(dir, 'agents') },
     skills: { dir: join(dir, 'skills') },
-    checkpoints: { dir: join(dir, 'checkpoints') },
+    checkpoints: { dir: join(dir, 'checkpoints'), maxFileBytes: 1024 },
     auth: { secret: 'x'.repeat(32), url: 'http://localhost:3001' },
     security: { trustProxy: false, allowDirectLoopback: true },
     updates: { check: true, channel: null },

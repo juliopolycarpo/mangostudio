@@ -7,7 +7,7 @@ import type { RuntimePatchOperation } from '@mangostudio/shared/runtime-contract
 
 import { getRuntimeClient } from '../../runtime-client';
 import { getRequiredTextArg, ToolArgumentError } from '../arg-parsing';
-import { withMutationPersistence } from '../file-mutation-snapshot';
+import { snapshotCaptureParams, withMutationPersistence } from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -93,7 +93,7 @@ export async function executeApplyPatch(
       {
         chatId: context.chatId,
         operations,
-        captureSnapshot: Boolean(context.assistantMessageId),
+        ...snapshotCaptureParams(context),
         ...runtimePathPolicy(validationOptions),
       },
       context.signal ? { signal: context.signal } : undefined

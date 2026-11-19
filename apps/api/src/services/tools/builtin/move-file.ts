@@ -4,7 +4,7 @@
  */
 
 import { getRuntimeClient } from '../../runtime-client';
-import { withMutationPersistence } from '../file-mutation-snapshot';
+import { snapshotCaptureParams, withMutationPersistence } from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -90,7 +90,7 @@ export async function executeMoveFile(
         inputTo: args.to,
         resolvedFrom: from,
         resolvedTo: to,
-        captureSnapshot: Boolean(context.assistantMessageId),
+        ...snapshotCaptureParams(context),
         ...runtimePathPolicy(validationOptions),
       },
       context.signal ? { signal: context.signal } : undefined
