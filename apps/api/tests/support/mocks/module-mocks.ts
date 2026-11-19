@@ -15,7 +15,10 @@
  *   which re-registers the snapshot of every module faked since the last drain.
  *
  * `tests/unit/support/module-mock-guard.test.ts` fails on any `mock.module(` in
- * `apps/api/tests` outside this file, so a new fake cannot skip the registry.
+ * `apps/api/tests` outside this file, and on any other way a file that imports
+ * `mock` from `bun:test` can reach `module` through it (`mock['module']`,
+ * `const { module } = mock`, an alias or re-export of `mock`), so a new fake cannot
+ * skip the registry.
  *
  * ## Consequences for a suite
  *
@@ -40,6 +43,12 @@ import { mock } from 'bun:test';
 
 /** Same shape `mock.module` accepts: a factory returning the fake namespace. */
 type ModuleFactory = () => object;
+
+/** Installs `factory` as the module registered under `id`: `mock.module` by default. */
+export type ModuleRegistrar = (id: string, factory: ModuleFactory) => unknown;
+
+/** The real registrar. A test hands `restoreMockedModules` a fake one to make a restore fail. */
+export const registerWithBun: ModuleRegistrar = (id, factory) => mock.module(id, factory);
 
 /** Snapshots of the real namespaces, keyed by the id handed to `mock.module`. */
 const realNamespaces = new Map<string, object>();
@@ -82,13 +91,31 @@ export function moduleMockerFor(baseDir: string) {
  * Re-registers the real namespace of every module faked since the previous call.
  * The global `afterEach` calls it; a test that needs the real module mid-test
  * can too. // Usage: await restoreMockedModules()
+ *
+ * An id leaves the pending set only after its re-registration succeeded, and every
+ * id is attempted even when an earlier one failed, so one bad module cannot leave
+ * the rest faked and forgotten. Failures are reported together as an
+ * `AggregateError`; the failed ids stay pending for the next call.
  */
-export async function restoreMockedModules(): Promise<void> {
-  const ids = [...fakedSinceDrain];
-  fakedSinceDrain.clear();
-  for (const id of ids) {
-    const real = realNamespaces.get(id);
-    if (!real) throw new Error(`restoreMockedModules: expected a snapshot for ${id} | none taken`);
-    await mock.module(id, () => real);
+export async function restoreMockedModules(
+  registerModule: ModuleRegistrar = registerWithBun
+): Promise<void> {
+  const failures: Error[] = [];
+  for (const id of [...fakedSinceDrain]) {
+    try {
+      const real = realNamespaces.get(id);
+      if (!real) throw new Error('expected a snapshot | none taken');
+      await registerModule(id, () => real);
+      fakedSinceDrain.delete(id);
+    } catch (cause) {
+      const reason = cause instanceof Error ? cause.message : String(cause);
+      failures.push(new Error(`${id}: ${reason}`, { cause }));
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures,
+      `restoreMockedModules: expected every faked module to be re-registered | failed: ${failures.map((failure) => failure.message).join('; ')}`
+    );
   }
 }

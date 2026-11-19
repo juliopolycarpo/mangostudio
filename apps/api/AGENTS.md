@@ -38,7 +38,7 @@ For per-task file maps, use `docs/reference/agent-playbooks.md`.
   `gitFixtureEnv()` from `tests/support/git-fixture-env.ts`. See `docs/reference/testing.md`.
 - Fake a module with `moduleMockerFor(import.meta.dir)` from `tests/support/mocks/module-mocks.ts`,
   not a raw `mock.module(`: it restores the real module after each test, and
-  `tests/unit/support/module-mock-guard.test.ts` fails on a raw call.
+  `tests/unit/support/module-mock-guard.test.ts` fails on a raw call, in any spelling.
 - Integration tests must use `apps/api/tests/support/harness/create-api-test-app.ts`.
 - Integration test URLs use the plugin group path directly, without `/api`.
 - Validate public response shapes with `Value.Check(Schema, payload)` when the contract matters.
