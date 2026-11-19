@@ -75,6 +75,7 @@ export async function executeCreateFile(
   };
   const resolvedPath = resolveAndValidatePath(args.path, options);
 
+  const snapshotParams = await snapshotCaptureParams(context);
   const { result } = await withMutationPersistence(context, [resolvedPath], () =>
     runtime.fs.createFile(
       {
@@ -82,7 +83,7 @@ export async function executeCreateFile(
         inputPath: args.path,
         resolvedPath,
         content: args.content,
-        ...snapshotCaptureParams(context),
+        ...snapshotParams,
         ...runtimePathPolicy(options),
       },
       context.signal ? { signal: context.signal } : undefined

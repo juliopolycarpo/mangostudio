@@ -99,6 +99,7 @@ export async function executeReplaceRange(
   };
   const resolvedPath = resolveAndValidatePath(args.path, options);
 
+  const snapshotParams = await snapshotCaptureParams(context);
   const { result, captured } = await withMutationPersistence(context, [resolvedPath], () =>
     runtime.fs.replaceRange(
       {
@@ -108,7 +109,7 @@ export async function executeReplaceRange(
         startLine: args.startLine,
         endLine: args.endLine,
         content: args.content,
-        ...snapshotCaptureParams(context),
+        ...snapshotParams,
         ...runtimePathPolicy(options),
       },
       context.signal ? { signal: context.signal } : undefined

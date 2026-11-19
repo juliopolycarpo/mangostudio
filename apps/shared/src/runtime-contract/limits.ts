@@ -70,3 +70,11 @@ export const SNAPSHOT_HARD_MAX_BYTES = 1024 * 1024 * 1024;
 
 /** Limit a mutation uses when it does not name `snapshotMaxBytes`. */
 export const SNAPSHOT_DEFAULT_MAX_BYTES = 128 * 1024 * 1024;
+
+/**
+ * Largest snapshot a runtime that predates the staging methods captures, and so
+ * the largest blob the hub still restores inline to one. Such a runtime has no
+ * `snapshot.stage-chunk`, so a bigger blob (captured earlier by a newer runtime)
+ * cannot be restored to it.
+ */
+export const SNAPSHOT_LEGACY_INLINE_MAX_BYTES = 8 * 1024 * 1024;

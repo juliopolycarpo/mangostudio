@@ -88,6 +88,7 @@ export async function executeEditFile(
   };
   const resolvedPath = resolveAndValidatePath(args.path, options);
 
+  const snapshotParams = await snapshotCaptureParams(context);
   const { result } = await withMutationPersistence(context, [resolvedPath], () =>
     runtime.fs.editFile(
       {
@@ -97,7 +98,7 @@ export async function executeEditFile(
         oldString: args.oldString,
         newString: args.newString,
         ...(args.replaceAll !== undefined ? { replaceAll: args.replaceAll } : {}),
-        ...snapshotCaptureParams(context),
+        ...snapshotParams,
         ...runtimePathPolicy(options),
       },
       context.signal ? { signal: context.signal } : undefined

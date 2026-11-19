@@ -556,6 +556,16 @@ process buffer grows with the file:
   limit, so no edit lands that undo could not reverse. The 128 MiB default stays under the
   256 MiB per-chat blob budget retention enforces.
 
+- **Older runtimes.** SSH and HTTP environments connect without requiring the hub's release,
+  so a runtime may predate all of this. The hub reads the runtime's method list
+  (`runtime.discover`, cached per build fingerprint) and uses `snapshotMaxBytes` and the
+  staging methods only when `snapshot.read-chunk`, `snapshot.stage-chunk` and
+  `snapshot.release` are all there. Otherwise a capture keeps the runtime's own 8 MiB inline
+  ceiling, and a revert sends every blob inline up to that size
+  (`SNAPSHOT_LEGACY_INLINE_MAX_BYTES`). A bigger blob, captured earlier by a newer runtime,
+  is refused before the revert sends anything, with a message that names its size. A runtime
+  that cannot answer `runtime.discover` counts as an older one.
+
 Edit, write and delete still require a complete earlier read, which caps a text file at
 10 MiB and a binary one at 256 KiB, so in practice `move_file` and revert are what reach
 files this large.

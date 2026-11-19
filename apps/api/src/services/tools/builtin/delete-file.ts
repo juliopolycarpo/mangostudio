@@ -68,13 +68,14 @@ export async function executeDeleteFile(
   };
   const resolvedPath = resolveAndValidatePath(args.path, options);
 
+  const snapshotParams = await snapshotCaptureParams(context);
   const { result } = await withMutationPersistence(context, [resolvedPath], () =>
     runtime.fs.deleteFile(
       {
         chatId: context.chatId,
         inputPath: args.path,
         resolvedPath,
-        ...snapshotCaptureParams(context),
+        ...snapshotParams,
         ...runtimePathPolicy(options),
       },
       context.signal ? { signal: context.signal } : undefined

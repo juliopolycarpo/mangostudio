@@ -88,12 +88,13 @@ export async function executeApplyPatch(
     paths: runtime.paths,
   };
   const operations = resolveOperations(parsed.operations, validationOptions);
+  const snapshotParams = await snapshotCaptureParams(context);
   const { result } = await withMutationPersistence(context, lockedPaths(operations), () =>
     runtime.fs.applyPatch(
       {
         chatId: context.chatId,
         operations,
-        ...snapshotCaptureParams(context),
+        ...snapshotParams,
         ...runtimePathPolicy(validationOptions),
       },
       context.signal ? { signal: context.signal } : undefined

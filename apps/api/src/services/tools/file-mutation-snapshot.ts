@@ -26,7 +26,7 @@ import {
   updateCheckpointAfterHash,
 } from '../../modules/file-checkpoints/infrastructure/checkpoint-repository';
 import { scheduleGitFileMutationInvalidation } from '../../modules/git/application/git-realtime-service';
-import { getRuntimeClient } from '../runtime-client';
+import { getRuntimeClient, runtimeStagesSnapshots } from '../runtime-client';
 import type { ToolContext } from './types';
 
 const BINARY_SNIFF_BYTES = 8192;
@@ -60,13 +60,20 @@ export interface CapturedBefore {
  * the runtime refuse the mutation before it changes anything, so no edit lands
  * that undo could not reverse.
  *
- * // Usage: runtime.fs.writeFile({ ...params, ...snapshotCaptureParams(context) })
+ * The limit is sent only to a runtime that advertises the staging methods. One
+ * that predates them keeps its own inline ceiling (8 MiB) and never sees the
+ * field, so a remote runtime running an older release behaves as it did before.
+ *
+ * // Usage: runtime.fs.writeFile({ ...params, ...(await snapshotCaptureParams(context)) })
  */
-export function snapshotCaptureParams(context: ToolContext): {
+export async function snapshotCaptureParams(context: ToolContext): Promise<{
   captureSnapshot: boolean;
   snapshotMaxBytes?: number;
-} {
+}> {
   if (!context.assistantMessageId) return { captureSnapshot: false };
+  if (!(await runtimeStagesSnapshots(context.userId, context.environmentId))) {
+    return { captureSnapshot: true };
+  }
   return { captureSnapshot: true, snapshotMaxBytes: getConfig().checkpoints.maxFileBytes };
 }
 
