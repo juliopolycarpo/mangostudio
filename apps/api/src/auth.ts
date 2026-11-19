@@ -68,9 +68,12 @@ export function createAuthInstance(db: Kysely<Database> = getDb()) {
         maximumNameLength: API_KEY_NAME_MAX_LENGTH,
         // The scope (read-only | full) is carried in key metadata.
         enableMetadata: true,
-        // Load-bearing: installs a `before` hook that resolves the key header
-        // into a session and short-circuits /get-session, so requireAuth's
-        // existing getSession call authenticates key-bearing requests as-is.
+        // Installs a `before` hook that resolves the key header into a session
+        // and short-circuits /get-session. requireAuth no longer goes through it:
+        // it builds a key's session from the shared per-request verification
+        // (plugins/auth-middleware.ts), because this hook validates the key, and
+        // consumes quota, a second time. Left on so a stray getSession call that
+        // carries a key header still authenticates the key instead of ignoring it.
         enableSessionForAPIKeys: true,
         // Defaults to on at 10 requests/day, which would break keys
         // immediately. plugins/rate-limit.ts's IP-based limiter stays the

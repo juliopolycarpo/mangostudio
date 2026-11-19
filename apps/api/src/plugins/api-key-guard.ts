@@ -7,15 +7,14 @@
  * Registered once on the `/api` instance rather than folded into
  * authMiddleware's derive (which re-runs per route module and never sees
  * `/api/auth/**`), so this runs exactly once per request and covers every
- * path uniformly. Does not derive `user`/`session` itself: with
- * `enableSessionForAPIKeys` on, Better Auth's own `getSession` (already
- * called by requireAuth's derive) resolves the key header into a session, so
- * a request that passes this guard authenticates through the existing path
- * unmodified. Elysia always runs the derive phase before onBeforeHandle
- * (regardless of plugin registration order), so requireAuth's session lookup
- * has already run by the time this guard's own checks execute — this guard
- * only adds the toggle/scope checks Better Auth's session resolution doesn't
- * know about.
+ * path uniformly. Does not derive `user`/`session` itself: requireAuth's
+ * derive resolves a key-bearing request to its owner through the same
+ * per-request verification this guard reads (api-key-verification.ts), so the
+ * key is validated once between them. Elysia always runs the derive phase
+ * before onBeforeHandle (regardless of plugin registration order), so that
+ * lookup has already run by the time this guard's own checks execute — this
+ * guard only adds the toggle/scope checks the session resolution doesn't know
+ * about.
  *
  * A plain function-style plugin — matching rate-limit.ts, not a named
  * `new Elysia({ name })` instance like errorHandler/requireAuth. It is only

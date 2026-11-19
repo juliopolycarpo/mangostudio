@@ -21,7 +21,7 @@ import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { Elysia } from 'elysia';
 
-import { getAuth } from '../../../src/auth';
+import { getApiKeyApi, getAuth } from '../../../src/auth';
 import { apiKeyGuard } from '../../../src/plugins/api-key-guard';
 import { requireAuth } from '../../../src/plugins/auth-middleware';
 import { errorHandler } from '../../../src/plugins/error-handler';
@@ -126,8 +126,12 @@ describe('derive publishes auth context before the guard runs', () => {
 
   it('reports api-key authentication when the key header is present', async () => {
     const user = await insertTestUser();
+    // A real key: the derive resolves it through the shared key verification, so
+    // an unverifiable header would be unauthenticated. getSession is stubbed to
+    // prove it is not what answers a key-bearing request.
     const spy = spyOnGetSession(sessionFor(user.id));
     cleanup = spy.restore;
+    const { key } = await getApiKeyApi().createApiKey({ body: { userId: user.id } });
 
     const app = createApiTestApp(
       new Elysia().use(requireAuth).get('/whoami', ({ authenticationMethod }) => ({
@@ -136,10 +140,11 @@ describe('derive publishes auth context before the guard runs', () => {
     );
 
     const response = await app.handle(
-      new Request('http://localhost/whoami', { headers: { [API_KEY_HEADER]: 'mango_probe' } })
+      new Request('http://localhost/whoami', { headers: { [API_KEY_HEADER]: key } })
     );
 
     expect(await response.json()).toEqual({ authenticationMethod: 'api-key' });
+    expect(spy.calls).toBe(0);
   });
 
   it('resolves the session once per request however many modules mount the guard', async () => {
