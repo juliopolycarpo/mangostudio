@@ -319,6 +319,7 @@ pub fn location_ids_for_target(target: AgentTargetId) -> &'static [&'static str]
             "agents-skills",
             "claude-skills",
             "mango-agents",
+            "mango-commands",
             "mango-instructions",
             "mango-settings",
         ],
@@ -441,6 +442,10 @@ fn mango_skills_path(env: &PathEnv) -> Option<String> {
 
 fn mango_agents_path(env: &PathEnv) -> Option<String> {
     mango_configured_dir(env, "AGENTS_DIR", "agents")
+}
+
+fn mango_commands_path(env: &PathEnv) -> Option<String> {
+    mango_path(env, &["commands"])
 }
 
 fn agents_skills_path(env: &PathEnv) -> Option<String> {
@@ -733,6 +738,17 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         read_by: &[AgentTargetId::Cursor],
     },
     LocationDefinition {
+        id: "mango-commands",
+        kind: "command",
+        scope: "home",
+        resolve_path: mango_commands_path,
+        access: "read-write",
+        layout: LocationLayout::DirectoryOfFiles,
+        format: ResourceFormat::MarkdownFrontmatter,
+        resource_slug: None,
+        read_by: &[AgentTargetId::Mangostudio],
+    },
+    LocationDefinition {
         id: "claude-commands",
         kind: "command",
         scope: "home",
@@ -1018,6 +1034,7 @@ mod tests {
         for id in [
             "mango-skills",
             "mango-agents",
+            "mango-commands",
             "mango-instructions",
             "mango-settings",
         ] {

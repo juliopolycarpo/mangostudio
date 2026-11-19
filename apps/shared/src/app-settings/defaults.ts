@@ -134,6 +134,7 @@ export const DEFAULT_MULTI_AGENT_SETTINGS: MultiAgentSettings = {
 export const DEFAULT_LIBRARY_LOCATION_SETTINGS: LibraryLocationSettings = {
   home: {
     'mango-agents': true,
+    'mango-commands': true,
     'mango-skills': true,
   },
   workspace: {},
@@ -435,6 +436,7 @@ export function normalizeLibraryLocationSettings(
   const home = normalizeLibraryLocationToggles(homeSource, defaults.home);
   // MangoStudio's native resource locations are non-toggleable sources.
   home['mango-agents'] = true;
+  home['mango-commands'] = true;
   home['mango-skills'] = true;
 
   // Only `home` is materialised today. The schema admits every scope so

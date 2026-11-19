@@ -3,15 +3,16 @@ import type { LibraryLocationId, LibraryScope } from './schemas';
 /**
  * Locations MangoStudio always reads, whatever the user has toggled.
  *
- * These two are its own directories. Disabling them would make the app blind to
+ * These are its own directories. Disabling them would make the app blind to
  * the resources it is itself responsible for, so the setting simply does not
- * reach them. Both are home-scoped, so the override applies to `home` only:
+ * reach them. All are home-scoped, so the override applies to `home` only:
  * forcing them on under another scope would enable a location that has no
  * definition there.
  */
 export const ALWAYS_ENABLED_LIBRARY_LOCATIONS: readonly LibraryLocationId[] = [
   'mango-skills',
   'mango-agents',
+  'mango-commands',
 ];
 
 /**

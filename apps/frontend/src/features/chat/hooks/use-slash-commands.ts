@@ -17,8 +17,12 @@
  *    every skill under `/` — `externalAgentVendor(targetId).skillsAreSlashCommands`
  *    is the declared fact that answers that per vendor, so this file never
  *    guesses it from a directory listing on its own.
- * 4. **The user's skills**, for MangoStudio's own runner, which has no commands
- *    of its own (issue #961). Filtered and capped the way
+ * 4. **MangoStudio's own commands and the user's skills**, for the native
+ *    runner. Commands are `~/.mango/commands/*.md`, listed from the same library
+ *    scan as the sources above but always read on the hub's machine, because the
+ *    hub is what expands `/name args` before the turn is built (issue #961). They
+ *    come ahead of skills so a name both claim resolves the way the hub does.
+ *    Skills are filtered and capped the way
  *    `buildSkillsPromptSection` filters and caps, so the palette offers what the
  *    turn will advertise. Read user-scoped rather than through the chat's
  *    capabilities because the composer on the home screen has no chat behind it
@@ -129,9 +133,15 @@ export function useSlashCommands({
     gcTime: SESSION_CATALOG_GC_MS,
   });
 
+  // An external chat reads the machine it runs on; a native chat's commands are
+  // expanded by the hub, so they are always the hub's own (`local`) directory,
+  // whichever environment the chat's tools run in.
   const libraryQuery = useQuery({
-    ...libraryResourcesQueryOptions('command', environmentId ?? undefined),
-    enabled: active && targetId !== null,
+    ...libraryResourcesQueryOptions(
+      'command',
+      targetId === null ? undefined : (environmentId ?? undefined)
+    ),
+    enabled: active,
   });
 
   // Only for a vendor whose own catalog already lists every skill under `/` —
@@ -208,17 +218,27 @@ export function useSlashCommands({
     // hub catalogs are. Anything but `absent`: `shadowed` means this target
     // *does* read a copy, from `effectiveLocationId`, and merely has others
     // behind it — the same predicate `presentTargetCount` in
-    // `features/library/format.ts` uses.
+    // `features/library/format.ts` uses. The native runner is the
+    // `mangostudio` target.
+    const coverageTargetId = targetId ?? 'mangostudio';
     const toLibraryEntries = (
       resources: readonly LibraryResource[] | undefined
     ): SlashCommandEntry[] =>
-      (resources ?? [])
-        .filter((resource) =>
-          resource.coverage.some(
-            (coverage) => coverage.targetId === targetId && coverage.state !== 'absent'
-          )
-        )
-        .map((resource) => ({ name: resource.ref.slug, origin: 'library' as const }));
+      (resources ?? []).flatMap((resource) => {
+        const coverage = resource.coverage.find((entry) => entry.targetId === coverageTargetId);
+        if (!coverage || coverage.state === 'absent') return [];
+        // The description of the copy this target actually reads.
+        const description = resource.instances.find(
+          (instance) => instance.locationId === coverage.effectiveLocationId
+        )?.description;
+        return [
+          {
+            name: resource.ref.slug,
+            ...(description ? { description } : {}),
+            origin: 'library' as const,
+          },
+        ];
+      });
 
     // Gated on the runner like the other two sources. The catalog outlives the
     // session that announced it — nothing invalidates the key — so a chat moved
@@ -232,8 +252,7 @@ export function useSlashCommands({
     const hubCatalogEntries: SlashCommandEntry[] =
       targetId === null ? [] : toSessionEntries(hubCatalog?.commands);
 
-    const libraryEntries: SlashCommandEntry[] =
-      targetId === null ? [] : toLibraryEntries(library?.resources);
+    const libraryEntries: SlashCommandEntry[] = toLibraryEntries(library?.resources);
 
     // Offered only for a vendor whose own catalog already lists every skill
     // under `/` — see `skillsAreSlashCommands` above.
@@ -297,7 +316,7 @@ export function useSlashCommands({
   // the home-screen case is unaffected.
   const loading =
     targetId === null
-      ? skillsQuery.isLoading || capabilitiesQuery.isLoading
+      ? libraryQuery.isLoading || skillsQuery.isLoading || capabilitiesQuery.isLoading
       : libraryQuery.isLoading || hubCatalogQuery.isLoading || librarySkillsQuery.isLoading;
 
   return { entries, loading };

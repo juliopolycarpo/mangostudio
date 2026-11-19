@@ -14,6 +14,7 @@ import { assertChatAttachmentIdsAvailable } from '../../attachments/infrastructu
 import { recordTurnCompletedActivity } from '../../chats/application/record-turn-activity';
 import { getOwnedChatOrThrow } from '../../chats/domain/chat-ownership';
 import type { OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
+import { expandNativeSlashCommand } from '../../library/application/native-command-expansion';
 import { loadHistory } from '../../messages/infrastructure/message-repository';
 import {
   persistAiResponse,
@@ -144,7 +145,8 @@ export async function sendTextMessage(
       environmentId: chat.environmentId,
       chatId: input.chatId,
       history,
-      prompt: input.prompt,
+      // The model gets the expanded command; the stored message keeps what was typed.
+      prompt: await expandNativeSlashCommand(db, input.userId, input.prompt),
       systemPrompt: input.systemPrompt,
       modelName: modelId,
       signal: input.signal,

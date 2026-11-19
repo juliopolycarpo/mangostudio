@@ -36,6 +36,7 @@ import type { WorkdirPolicy } from '../../../services/tools/types';
 import { generateId } from '../../../utils/id';
 import { resolveProviderRuntimeAttachments } from '../../attachments/application/runtime-attachment-resolver';
 import { recordTurnCompletedActivity } from '../../chats/application/record-turn-activity';
+import { expandNativeSlashCommand } from '../../library/application/native-command-expansion';
 import { loadHistory, loadRichHistory } from '../../messages/infrastructure/message-repository';
 import {
   finalizeCheckpointedAiResponse,
@@ -252,7 +253,12 @@ export async function prepareStreamTextTurn(
     allowedToolNames,
     effectiveSystemPrompt,
     continuationSystemPrompt,
-    effectivePrompt: input.prompt,
+    // The model gets the expanded template; the transcript (`displayPrompt`
+    // above) keeps what the user typed. A resumed turn's prompt is the internal
+    // recovery text, never a user command, so it is not looked up.
+    effectivePrompt: input.preparedTurn
+      ? input.prompt
+      : await expandNativeSlashCommand(db, userId, input.prompt),
     thinkingEnabled: runtimeSettings.thinkingEnabled ?? true,
     reasoningEffort: runtimeSettings.reasoningEffort ?? 'medium',
     attachmentIds,
@@ -422,15 +428,8 @@ export async function* emitAgentStreamEvent(
   loop: AgentLoopState,
   richHistory: ChatTurnContext[]
 ): AsyncGenerator<StreamEvent> {
-  const {
-    provider,
-    resolvedModel,
-    chatId,
-    input,
-    toolDefs,
-    effectiveSystemPrompt,
-    executionState,
-  } = session;
+  const { provider, resolvedModel, chatId, toolDefs, effectiveSystemPrompt, executionState } =
+    session;
   const { modelId } = resolvedModel;
 
   switch (event.type) {
@@ -506,7 +505,7 @@ export async function* emitAgentStreamEvent(
         providerType: provider.providerType,
         modelId,
         chatId,
-        prompt: input.prompt,
+        prompt: session.effectivePrompt,
         richHistory,
         effectiveSystemPrompt,
         toolDefs,

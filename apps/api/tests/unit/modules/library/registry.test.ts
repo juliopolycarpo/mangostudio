@@ -138,12 +138,23 @@ describe('library target registry', () => {
   });
 
   /**
-   * Absence here is a decision, not an omission: MangoStudio has no slash
-   * commands, so a location for it would report a coverage tick for files
-   * nothing loads.
+   * MangoStudio's native chats expand `/name` from this directory before the
+   * turn is built (`expandNativeSlashCommand`), so the tick in the coverage
+   * column is honest: something loads these files.
    */
-  it('claims no command home for the target that has no commands', () => {
-    expect(getLibraryTarget('mangostudio')?.reads.command).toEqual([]);
+  it('reads native slash commands from the MangoStudio config home', () => {
+    expect(getLibraryTarget('mangostudio')?.reads.command).toEqual(['mango-commands']);
+    expect(getLibraryLocation('mango-commands')).toMatchObject({
+      kind: 'command',
+      scope: 'home',
+      layout: 'directory-of-files',
+      format: 'markdown-frontmatter',
+      access: 'read-write',
+      readBy: ['mangostudio'],
+    });
+    expect(getLibraryLocation('mango-commands')?.resolvePath(LINUX_ENV)).toBe(
+      '/home/ada/.mango/commands'
+    );
   });
 
   it('resolves command locations under each vendor config home, override included', () => {
@@ -241,6 +252,7 @@ describe('library target registry', () => {
     );
     expect(mangoLocationIds.sort()).toEqual([
       'mango-agents',
+      'mango-commands',
       'mango-instructions',
       'mango-settings',
       'mango-skills',
@@ -304,7 +316,13 @@ describe('library target registry', () => {
       dirname(TEST_MANAGED_CONFIG_PATH)
     );
     expect(getConfig().configFilePath).toBe(TEST_MANAGED_CONFIG_PATH);
-    for (const id of ['mango-skills', 'mango-agents', 'mango-instructions', 'mango-settings']) {
+    for (const id of [
+      'mango-skills',
+      'mango-agents',
+      'mango-commands',
+      'mango-instructions',
+      'mango-settings',
+    ]) {
       const path = getLibraryLocation(id as never)?.resolvePath(env) ?? '';
       // The env is the host's, so the host's own path rules decide containment;
       // a "/" prefix check would never match a Windows path.

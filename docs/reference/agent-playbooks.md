@@ -187,6 +187,10 @@ Open these first:
 - `apps/shared/src/skills/`
 - `apps/frontend/src/features/settings/skills/`
 - Reference: `docs/reference/skills.md`
+- Native slash commands (`~/.mango/commands`): `apps/api/src/modules/library/application/native-command-expansion.ts`
+  (hub-side expansion), `domain/command-template.ts` (pure placeholder rules),
+  `apps/frontend/src/features/chat/hooks/use-slash-commands.ts` (palette). Reference:
+  `docs/reference/commands.md`
 
 ## Library (Coverage, Divergence, Propagation)
 

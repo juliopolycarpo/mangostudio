@@ -29,7 +29,7 @@ const EMPTY_SCAN: LibraryScanResult = { resources: [], unreadableEntries: [] };
 function libraryResource(
   kind: 'command' | 'skill',
   slug: string,
-  targetId: 'claude' | 'codex'
+  targetId: 'claude' | 'codex' | 'mangostudio'
 ): LibraryResource {
   return {
     ref: { kind, slug },
@@ -326,5 +326,102 @@ describe('useSlashCommands — external agents', () => {
     await waitFor(() => {
       expect(result.current.entries.map((entry) => entry.name)).toEqual(['review']);
     });
+  });
+});
+
+/**
+ * MangoStudio's own commands (issue #961): `~/.mango/commands/*.md`, which the
+ * hub expands before a native turn is built. They come from the same library
+ * scan external chats use, read on the hub's machine rather than the chat's.
+ */
+describe('useSlashCommands — native commands', () => {
+  function nativeCommand(
+    slug: string,
+    options: { description?: string; targetId?: 'mangostudio' | 'claude' } = {}
+  ): LibraryResource {
+    const targetId = options.targetId ?? 'mangostudio';
+    const locationId = targetId === 'mangostudio' ? 'mango-commands' : 'claude-commands';
+    return {
+      ...libraryResource('command', slug, targetId),
+      coverage: [
+        { targetId, state: 'present', effectiveLocationId: locationId, shadowedLocationIds: [] },
+      ],
+      instances: [
+        {
+          locationId,
+          path: `/home/ada/.mango/commands/${slug}.md`,
+          modifiedAtMs: 1,
+          format: 'markdown-frontmatter',
+          valid: true,
+          contentHash: 'hash',
+          sizeBytes: 12,
+          ...(options.description ? { description: options.description } : {}),
+        },
+      ],
+    };
+  }
+
+  function respondWithNativeCommands(resources: LibraryResource[]) {
+    scenario.respondWithJson('GET', '/api/library/resources?kind=command', {
+      body: { resources, unreadableEntries: [] },
+    });
+  }
+
+  it('offers the commands MangoStudio reads, with their descriptions', async () => {
+    respondWithNativeCommands([nativeCommand('review', { description: 'Review a file' })]);
+
+    const { result } = renderPalette(null);
+
+    await waitFor(() => {
+      expect(result.current.entries).toContainEqual({
+        name: 'review',
+        description: 'Review a file',
+        origin: 'library',
+      });
+    });
+  });
+
+  it('does not offer a command only a vendor target reads', async () => {
+    respondWithNativeCommands([
+      nativeCommand('vendor-only', { targetId: 'claude' }),
+      nativeCommand('review'),
+    ]);
+
+    const { result } = renderPalette(null);
+
+    await waitFor(() => {
+      expect(result.current.entries.map((entry) => entry.name)).toEqual(['review', 'dataviz']);
+    });
+  });
+
+  it('lets a command win a name a skill also claims, because the hub expands the command', async () => {
+    respondWithNativeCommands([nativeCommand('dataviz', { description: 'Command copy' })]);
+
+    const { result } = renderPalette(null);
+
+    await waitFor(() => {
+      expect(result.current.entries).toEqual([
+        { name: 'dataviz', description: 'Command copy', origin: 'library' },
+      ]);
+    });
+  });
+
+  it('reads the hub machine even when the chat runs on another environment', async () => {
+    respondWithNativeCommands([nativeCommand('review')]);
+
+    const { result } = renderHook(() =>
+      useSlashCommands({ chatId: null, runner: RUNNER, environmentId: 'env-7', active: true })
+    );
+
+    await waitFor(() => {
+      expect(result.current.entries.map((entry) => entry.name)).toContain('review');
+    });
+    const requested = scenario.fetchMock.mock.calls.map(([input]) =>
+      input instanceof Request ? input.url : String(input)
+    );
+    expect(
+      requested.filter((url) => url.includes('/api/library/resources')),
+      '(library requests): expected the hub-local scan without an environmentId'
+    ).toEqual([expect.not.stringContaining('environmentId=')]);
   });
 });

@@ -24,7 +24,8 @@ use crate::probing::locations::{LOCATION_DEFINITIONS, LocationDefinition};
 
 /// `ALWAYS_ENABLED_LIBRARY_LOCATIONS`: MangoStudio's own directories, on at
 /// home scope whatever the toggles say.
-const ALWAYS_ENABLED_LIBRARY_LOCATIONS: [&str; 2] = ["mango-skills", "mango-agents"];
+const ALWAYS_ENABLED_LIBRARY_LOCATIONS: [&str; 3] =
+    ["mango-skills", "mango-agents", "mango-commands"];
 
 /// The hub's per-scope location toggles (`LibraryLocationSettings`).
 pub(crate) type LocationSettings = HashMap<String, HashMap<String, bool>>;
@@ -227,7 +228,10 @@ mod tests {
             ("workspace", "claude-skills", true),
         ]);
         let targets = resolve_scan_targets(&disabled, &env("/h", &[]), None, None);
-        assert_eq!(ids(&targets), ["mango-skills", "mango-agents"]);
+        assert_eq!(
+            ids(&targets),
+            ["mango-skills", "mango-agents", "mango-commands"]
+        );
         assert!(!enabled_locations(&disabled, "workspace").contains("mango-skills"));
     }
 
