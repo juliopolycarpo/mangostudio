@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 
+import { RemoteError } from '@mangostudio/protocol';
+
 import { createWorktreeOwnership } from '../../../../src/modules/git/application/worktree-ownership';
 import type { ParsedWorktree } from '../../../../src/modules/git/domain/worktree-parser';
 import { createTargetPaths } from '../../../../src/services/runtime-client/target-paths';
@@ -135,5 +137,149 @@ describe('createWorktreeOwnership', () => {
 
     expect(reads).toBe(1);
     expect(runtime.validated.filter((path) => path === '/link/feature')).toEqual(['/link/feature']);
+  });
+
+  it('validates each worktree path once however many lists the request builds', async () => {
+    runtime = installFakeWorkspaceRuntime({
+      '/link/feature': '/real/feature',
+      '/real/feature': '/real/feature',
+      '/real/main': '/real/main',
+    });
+    const ownership = createWorktreeOwnership(paths, selection, () =>
+      Promise.resolve(['/link/feature'])
+    );
+
+    await ownership.annotate([main, feature], '/real/main');
+    await ownership.annotate([main, feature], '/real/main');
+
+    // `removeWorktree` annotates twice, the second time inside the repository lock.
+    expect([...runtime.validated].sort()).toEqual(['/link/feature', '/real/feature', '/real/main']);
+  });
+
+  describe('a directory the runtime fails on', () => {
+    const brokenWorkdir = '/broken/loop';
+    const failure = new RemoteError('INTERNAL', 'Too many levels of symbolic links (ELOOP)');
+
+    it('keeps the list answering and flags the other siblings correctly', async () => {
+      runtime = installFakeWorkspaceRuntime({
+        [brokenWorkdir]: failure,
+        '/link/feature': '/real/feature',
+        '/real/feature': '/real/feature',
+        '/real/main': '/real/main',
+      });
+      const ownership = createWorktreeOwnership(paths, selection, () =>
+        Promise.resolve([brokenWorkdir, '/link/feature'])
+      );
+
+      const annotated = await ownership.annotate([main, feature], '/real/main');
+
+      expect(annotated.map(({ path, boundByOtherChat }) => [path, boundByOtherChat])).toEqual([
+        ['/real/main', false],
+        ['/real/feature', true],
+      ]);
+    });
+
+    it('compares the broken sibling as written', async () => {
+      runtime = installFakeWorkspaceRuntime({
+        '/real/feature/sub': failure,
+        '/real/feature': '/real/feature',
+      });
+      const ownership = createWorktreeOwnership(paths, selection, () =>
+        Promise.resolve(['/real/feature/sub'])
+      );
+
+      const annotated = await ownership.annotate([feature], '/real/main');
+
+      expect(annotated[0]?.boundByOtherChat).toBe(true);
+    });
+
+    it('keeps a worktree whose own path the runtime fails on in the list', async () => {
+      runtime = installFakeWorkspaceRuntime({ '/real/feature': failure });
+      const ownership = createWorktreeOwnership(paths, selection, () =>
+        Promise.resolve(['/real/feature'])
+      );
+
+      const annotated = await ownership.annotate([feature], '/real/main');
+
+      expect(annotated[0]?.boundByOtherChat).toBe(true);
+    });
+  });
+
+  it('fails closed when the runtime is unreachable instead of reporting nothing bound', async () => {
+    runtime = installFakeWorkspaceRuntime({
+      '/link/feature': new RemoteError('UNAVAILABLE', 'runtime connection closed'),
+    });
+    const ownership = createWorktreeOwnership(paths, selection, () =>
+      Promise.resolve(['/link/feature'])
+    );
+
+    const outcome = await ownership
+      .annotate([main, feature], '/real/main')
+      .catch((e: unknown) => e);
+
+    expect(outcome).toBeInstanceOf(RemoteError);
+    expect((outcome as RemoteError).code).toBe('UNAVAILABLE');
+  });
+
+  describe('when the request is aborted', () => {
+    it('hands the request signal to every validate call', async () => {
+      runtime = installFakeWorkspaceRuntime({
+        '/link/feature': '/real/feature',
+        '/real/feature': '/real/feature',
+      });
+      const controller = new AbortController();
+      const ownership = createWorktreeOwnership(
+        paths,
+        selection,
+        () => Promise.resolve(['/link/feature']),
+        controller.signal
+      );
+
+      await ownership.annotate([feature], '/real/main');
+
+      expect(runtime.signals.length).toBeGreaterThan(0);
+      expect(runtime.signals.every((signal) => signal === controller.signal)).toBe(true);
+    });
+
+    it('stops waiting on a lookup the runtime never answers', async () => {
+      runtime = installFakeWorkspaceRuntime(
+        { '/link/feature': '/real/feature' },
+        { hanging: ['/real/feature'] }
+      );
+      const controller = new AbortController();
+      const ownership = createWorktreeOwnership(
+        paths,
+        selection,
+        () => Promise.resolve(['/link/feature']),
+        controller.signal
+      );
+
+      const pending = ownership.annotate([feature], '/real/main');
+      setTimeout(() => controller.abort(), 10);
+      const outcome = await Promise.race([
+        pending.catch((e: unknown) => e),
+        new Promise<string>((resolve) => setTimeout(() => resolve('still pending'), 1_000)),
+      ]);
+
+      expect(outcome).toBeInstanceOf(Error);
+      expect((outcome as Error).name).toBe('AbortError');
+    });
+
+    it('starts no lookup for a request that is already aborted', async () => {
+      runtime = installFakeWorkspaceRuntime({ '/link/feature': '/real/feature' });
+      const controller = new AbortController();
+      controller.abort();
+      const ownership = createWorktreeOwnership(
+        paths,
+        selection,
+        () => Promise.resolve(['/link/feature']),
+        controller.signal
+      );
+
+      const outcome = await ownership.annotate([feature], '/real/main').catch((e: unknown) => e);
+
+      expect((outcome as Error).name).toBe('AbortError');
+      expect(runtime.validated).toEqual([]);
+    });
   });
 });

@@ -58,7 +58,8 @@ export async function listWorktrees(
     const ownership = createWorktreeOwnership(
       await readTargetPaths(selection),
       selection,
-      otherChatWorkdirs
+      otherChatWorkdirs,
+      signal
     );
     return await readWorktreeList(root, ownership, signal, selection);
   } catch (error) {
@@ -254,7 +255,7 @@ async function runWorktreeMutation(
     // needs to compare worktree paths: they are paths on the runtime, not the
     // hub, and every caller of this function is about that same machine.
     const paths = await readTargetPaths(selection);
-    const ownership = createWorktreeOwnership(paths, selection, otherChatWorkdirs);
+    const ownership = createWorktreeOwnership(paths, selection, otherChatWorkdirs, signal);
     const worktrees = await withRepoMutationLock(
       selection,
       root,
