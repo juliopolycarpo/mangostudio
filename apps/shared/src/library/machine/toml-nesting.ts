@@ -5,7 +5,7 @@
  * TOML parsers accept deeply nested dotted keys and table headers, while the
  * Rust runtime host's `toml` crate stops at 80 levels and would otherwise
  * recurse once per level. Both hosts narrow validity to this limit instead
- * (`crates/mangostudio-runtime/src/library/smol_toml.rs` mirrors it), so a
+ * (`crates/mangostudio-runtime/src/library/toml_document.rs` mirrors it), so a
  * document either host accepts nests no deeper than any real config does.
  */
 export const TOML_NESTING_LIMIT = 64;

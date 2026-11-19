@@ -17,7 +17,7 @@ import { ICON_MD } from '@/lib/icon-sizes';
 import { cn, resolveApiErrorMessage } from '@/lib/utils';
 
 import { toolchainSummary } from '../format';
-import { useRuntimeStatuses } from '../hooks/use-runtime-status';
+import { useCachedRuntimeStatuses } from '../hooks/use-runtime-status';
 import { MachineOnboardingWizard } from '../onboarding/MachineOnboardingWizard';
 import {
   useConnectEnvironmentMutation,
@@ -364,15 +364,16 @@ function formatSlotBytes(bytes: number | null): string {
  * "Node {version} ({source}) · Bun {version}" for this machine, read off its
  * own runtime statuses.
  *
- * Gated on `connected` for the same reason {@link useEnvironmentHealth} gates
- * its own queries: a card in a grid of many machines must not wake a sleeping
- * remote just by being on screen. Renders nothing rather than a loading state
- * — the line either has an answer or it does not exist yet.
+ * Reads the query cache and never fetches. The full runtime probe spawns
+ * `bun`, `node`, `fnm` and `git` (plus `winget` on Windows) on the machine, and
+ * a grid of cards would fan that across the fleet to print one decorative line.
+ * The runtimes screen or the local overview put these statuses in the cache; a
+ * machine nobody has probed yet shows no line. Renders nothing rather than a
+ * loading state — the line either has an answer or it does not exist yet.
  */
 function ToolchainSummaryLine({ environment }: { environment: Environment }) {
   const { t } = useI18n();
-  const connected = environment.status.state === 'connected';
-  const runtimes = useRuntimeStatuses(environment.id, connected);
+  const runtimes = useCachedRuntimeStatuses(environment.id);
   const summary = toolchainSummary(t, runtimes.data);
   if (!summary) return null;
 

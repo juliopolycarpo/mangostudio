@@ -14,6 +14,8 @@ import { ENVIRONMENTS_TOPIC, EXTERNAL_AGENTS_TOPIC } from '@mangostudio/shared/r
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 
+import { invalidateForSignal } from '@/lib/realtime/read-after-subscribe';
+import type { RealtimeSignal } from '@/lib/realtime/realtime-client';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 
 import { externalAgentKeys, externalAgentsQueryOptions } from './queries';
@@ -36,9 +38,11 @@ export interface ExternalAgentsView {
 
 export function useExternalAgents(environmentId: string | null): ExternalAgentsView {
   const queryClient = useQueryClient();
-  const invalidate = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: externalAgentKeys.all });
-  }, [queryClient]);
+  const invalidate = useCallback(
+    (signal: RealtimeSignal) =>
+      invalidateForSignal(queryClient, signal, { queryKey: externalAgentKeys.all }),
+    [queryClient]
+  );
 
   // A runtime connecting or dropping, an environment edited or removed: exactly
   // when "is Codex installed and signed in over there" stops being true.

@@ -68,7 +68,7 @@ mod service;
 #[cfg(test)]
 mod service_tests;
 mod settings_sources;
-mod smol_toml;
+mod toml_document;
 mod tree;
 #[cfg(test)]
 mod ts_compat_tests;

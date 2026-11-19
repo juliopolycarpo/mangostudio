@@ -1,6 +1,7 @@
 import type { GenerateCommitMessageResponse, GitStatus } from '@mangostudio/shared/git';
 import { parseCommitMessageOutput } from '@mangostudio/shared/git';
 
+import { SHORT_TEXT_GENERATION_TIMEOUT_MS } from '../../../services/providers/core/generation-deadline';
 import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import {
   getProvider,
@@ -138,6 +139,7 @@ export async function generateCommitMessageUseCase(
     modelName: modelId,
     modelCapabilities: capabilities,
     signal: input.signal,
+    timeoutMs: SHORT_TEXT_GENERATION_TIMEOUT_MS,
     generationConfig: {
       thinkingEnabled: false,
       reasoningEffort: 'low',

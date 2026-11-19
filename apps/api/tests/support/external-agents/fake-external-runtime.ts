@@ -88,6 +88,11 @@ export interface FakeExternalRuntimeOptions {
    */
   readonly refuseFallbackResume?: boolean;
   readonly turnFailure?: () => Error | undefined;
+  /**
+   * What `runtime.health` lists for the session: a row in that state, no row at all (`unlisted`,
+   * as a report past its row cap does), or a refused call. Defaults to a running session.
+   */
+  readonly sessionHealth?: () => 'idle' | 'running' | 'closing' | 'unlisted' | Error;
   readonly capabilities?: ExternalAgentCapabilities;
   /**
    * Overrides the default `{ accepted: true }` outcome of every `steer` call.
@@ -124,6 +129,8 @@ export interface FakeExternalRuntime {
     readonly listSessions: ExternalAgentListSessionsParams[];
     readonly cancel: { sessionId: string; nativeTurnId?: string }[];
     readonly close: { sessionId: string }[];
+    /** The deadline the hub gave each `runtime.health` read, in the order they were asked. */
+    readonly healthTimeoutMs: (number | undefined)[];
     /** The wait the hub gave each `close`, in the order they were asked. */
     readonly closeTimeoutMs: (number | undefined)[];
   };
@@ -150,6 +157,7 @@ export function createFakeExternalRuntime(
     listSessions: [],
     cancel: [],
     close: [],
+    healthTimeoutMs: [],
     closeTimeoutMs: [],
   };
   const listeners = new Map<string, Set<(envelope: ExternalAgentEventEnvelope) => void>>();
@@ -164,6 +172,17 @@ export function createFakeExternalRuntime(
   }
 
   const client = {
+    health(callOptions?: { timeoutMs?: number }) {
+      calls.healthTimeoutMs.push(callOptions?.timeoutMs);
+      const state = options.sessionHealth?.() ?? 'running';
+      if (state instanceof Error) return Promise.reject(state);
+      return Promise.resolve({
+        externalAgents: {
+          liveSessions:
+            state === 'unlisted' ? [] : [{ sessionId: openSessionId, targetId: 'codex', state }],
+        },
+      });
+    },
     externalAgents: {
       open(params: ExternalAgentOpenParams): Promise<ExternalAgentOpenResult> {
         calls.open.push(params);

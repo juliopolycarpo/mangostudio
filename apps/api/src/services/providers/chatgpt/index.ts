@@ -25,6 +25,7 @@ import {
 } from '../../../modules/connectors/infrastructure/chatgpt/token-service';
 import { listSecretMetadata } from '../../secret-store/metadata';
 import { selectConnectorRowsForModel } from '../core/connector-model-rows';
+import { TEXT_GENERATION_TIMEOUT_MS, withGenerationDeadline } from '../core/generation-deadline';
 import { withModelCache } from '../core/model-cache';
 import type { ResponsesRequestPolicy } from '../core/responses-protocol/request-builder';
 import { streamAgentTurnWithResponses, streamResponses } from '../core/responses-protocol/stream';
@@ -159,18 +160,43 @@ async function probeBackend(bundle: ChatGptTokenBundle): Promise<void> {
   }
 }
 
+/**
+ * One ChatGPT reply collected from the Responses stream, bounded by
+ * `options.timeoutMs` ({@link TEXT_GENERATION_TIMEOUT_MS} by default) on top of
+ * the caller's own signal. The deadline covers token resolution and the whole
+ * stream, since the reply is only useful whole.
+ *
+ * @example
+ * const { text } = await generateChatGptText(req);
+ */
+export function generateChatGptText(
+  req: TextGenerationRequest,
+  options: { readonly timeoutMs?: number } = {}
+): Promise<TextGenerationResult> {
+  return withGenerationDeadline(
+    'ChatGPT generateText',
+    req.signal,
+    options.timeoutMs ?? req.timeoutMs ?? TEXT_GENERATION_TIMEOUT_MS,
+    async (signal) => {
+      let text = '';
+      for await (const chunk of streamWithAuthRetry(req.userId, req.modelName, (client) =>
+        streamResponses(client, { ...req, signal }, CHATGPT_RESPONSES_POLICY)
+      )) {
+        if (chunk.type === 'text' && chunk.text) text += chunk.text;
+      }
+      if (!text.trim()) {
+        throw new Error(`No text returned from ChatGPT model "${req.modelName}".`);
+      }
+      return { text };
+    }
+  );
+}
+
 const chatGptProvider: AIProvider = {
   providerType: 'chatgpt',
 
-  async generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
-    let text = '';
-    for await (const chunk of this.generateTextStream?.(req) ?? []) {
-      if (chunk.type === 'text' && chunk.text) text += chunk.text;
-    }
-    if (!text.trim()) {
-      throw new Error(`No text returned from ChatGPT model "${req.modelName}".`);
-    }
-    return { text };
+  generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
+    return generateChatGptText(req);
   },
 
   async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {

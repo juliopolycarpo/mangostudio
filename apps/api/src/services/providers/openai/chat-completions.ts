@@ -1,17 +1,25 @@
 import type OpenAI from 'openai';
 
 import { throwOnChatCompletionsFailure } from '../core/chat-completions-errors';
+import { TEXT_GENERATION_TIMEOUT_MS, withGenerationDeadline } from '../core/generation-deadline';
 import type { StreamingChunk, TextGenerationRequest, TextGenerationResult } from '../types';
 import { buildChatMessages } from './message-mapper';
 
 export async function generateChatCompletionText(
   client: OpenAI,
   req: TextGenerationRequest,
-  emptyTextMessage: string
+  emptyTextMessage: string,
+  options: { readonly timeoutMs?: number; readonly call?: string } = {}
 ): Promise<TextGenerationResult> {
-  const completion = await client.chat.completions.create(
-    { model: req.modelName, messages: buildChatMessages(req), stream: false },
-    { signal: req.signal }
+  const completion = await withGenerationDeadline(
+    options.call ?? 'OpenAI generateText',
+    req.signal,
+    options.timeoutMs ?? req.timeoutMs ?? TEXT_GENERATION_TIMEOUT_MS,
+    (signal) =>
+      client.chat.completions.create(
+        { model: req.modelName, messages: buildChatMessages(req), stream: false },
+        { signal }
+      )
   );
 
   const choice = completion.choices[0];

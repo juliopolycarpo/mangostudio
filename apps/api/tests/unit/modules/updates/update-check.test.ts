@@ -17,6 +17,7 @@ import {
   type UpdateCheckerDeps,
   updateCheckSkipReason,
 } from '../../../../src/modules/updates/application/update-check';
+import { FakeReleaseHost } from './support/fake-release-host';
 
 const PUBLIC_ADDRESS = { address: '93.184.216.34', family: 4 as const };
 const publicResolver = () => Promise.resolve([PUBLIC_ADDRESS]);
@@ -40,13 +41,16 @@ class FakeUpdateCheckStore {
 /** Named fake fetch keyed by exact URL, so a call to an unmapped URL fails loudly. */
 class FakeFetch {
   readonly calls: string[] = [];
+  /** The `Authorization` header of each call, parallel to `calls`; null where none was sent. */
+  readonly authorizations: (string | null)[] = [];
 
   constructor(private readonly responses: Record<string, () => Response>) {}
 
-  readonly fetch = ((input: Parameters<typeof fetch>[0]) => {
+  readonly fetch = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
     const url = String(input);
     this.calls.push(url);
+    this.authorizations.push(new Headers(init?.headers).get('authorization'));
     const make = this.responses[url];
     if (!make) return Promise.reject(new Error(`Unexpected fetch: ${url}`));
     return Promise.resolve(make());
@@ -309,6 +313,105 @@ describe('createUpdateChecker', () => {
       });
       expect(store.read()).toEqual(result);
       expect(fake.calls).toHaveLength(1);
+    });
+
+    it('authenticates the stable lookup with GITHUB_TOKEN', async () => {
+      const fake = new FakeFetch({
+        'https://api.github.com/repos/juliopolycarpo/mangostudio/releases/latest': () =>
+          STABLE_TAG_RESPONSE('v0.2.0'),
+      });
+      const { deps } = harness({
+        fetch: fake.fetch,
+        env: { GITHUB_TOKEN: 'dummy-token-not-a-secret' },
+      });
+
+      await createUpdateChecker(deps).check();
+
+      expect(fake.authorizations).toEqual(['Bearer dummy-token-not-a-secret']);
+    });
+
+    it('authenticates the canary release list but not the github.com manifest', async () => {
+      const fake = new FakeFetch({
+        [RELEASES_URL]: () => CANARY_LIST_RESPONSE('v0.1.1-canary.cafebee'),
+        [MANIFEST_URL('v0.1.1-canary.cafebee')]: () =>
+          CANARY_MANIFEST_RESPONSE({ version: '0.1.1-canary.cafebee', sourceSha: 'cafebabe00' }),
+      });
+      const { deps } = harness({
+        fetch: fake.fetch,
+        env: { GH_TOKEN: 'dummy-token-not-a-secret' },
+        getCurrentVersion: () => '0.1.1-canary.deadbee',
+        getConfig: () => configWith(true, 'canary'),
+      });
+
+      await createUpdateChecker(deps).check();
+
+      expect(fake.calls).toEqual([RELEASES_URL, MANIFEST_URL('v0.1.1-canary.cafebee')]);
+      expect(fake.authorizations).toEqual(['Bearer dummy-token-not-a-secret', null]);
+    });
+
+    it('still completes the stable check anonymously when GitHub rejects the token', async () => {
+      const latestUrl = 'https://api.github.com/repos/juliopolycarpo/mangostudio/releases/latest';
+      const host = new FakeReleaseHost({
+        [latestUrl]: { body: JSON.stringify({ tag_name: 'v0.2.0' }), rejectsAuthorization: true },
+      });
+      const { deps } = harness({
+        fetch: host.fetch,
+        env: { GITHUB_TOKEN: 'dummy-token-not-a-secret' },
+      });
+
+      const result = await createUpdateChecker(deps).check();
+
+      expect(result).toMatchObject({ channel: 'stable', latestVersion: '0.2.0' });
+      expect(result).not.toHaveProperty('error');
+      expect(host.authorizations()).toEqual(['Bearer dummy-token-not-a-secret', undefined]);
+    });
+
+    it('still completes the canary check anonymously when GitHub rejects the token', async () => {
+      const host = new FakeReleaseHost({
+        [RELEASES_URL]: {
+          body: JSON.stringify([{ tag_name: 'v0.1.1-canary.cafebee', prerelease: true }]),
+          rejectsAuthorization: true,
+        },
+        [MANIFEST_URL('v0.1.1-canary.cafebee')]: {
+          body: JSON.stringify({
+            schemaVersion: 1,
+            channel: 'canary',
+            version: '0.1.1-canary.cafebee',
+            assetVersion: '0.1.1-canary',
+            sourceSha: 'cafebabe00',
+            builtAt: '2026-09-01T00:00:00Z',
+            pairs: [],
+          }),
+        },
+      });
+      const { deps } = harness({
+        fetch: host.fetch,
+        env: { GH_TOKEN: 'dummy-token-not-a-secret' },
+        getCurrentVersion: () => '0.1.1-canary.deadbee',
+        getConfig: () => configWith(true, 'canary'),
+      });
+
+      const result = await createUpdateChecker(deps).check();
+
+      expect(result).toMatchObject({ channel: 'canary', latestVersion: '0.1.1-canary.cafebee' });
+      expect(result).not.toHaveProperty('error');
+      expect(host.authorizations()).toEqual([
+        'Bearer dummy-token-not-a-secret',
+        undefined,
+        undefined,
+      ]);
+    });
+
+    it('stays anonymous when no token is set', async () => {
+      const fake = new FakeFetch({
+        'https://api.github.com/repos/juliopolycarpo/mangostudio/releases/latest': () =>
+          STABLE_TAG_RESPONSE('v0.2.0'),
+      });
+      const { deps } = harness({ fetch: fake.fetch, env: { GITHUB_TOKEN: '' } });
+
+      await createUpdateChecker(deps).check();
+
+      expect(fake.authorizations).toEqual([null]);
     });
 
     it('reports no update when the stable tag matches the current version', async () => {

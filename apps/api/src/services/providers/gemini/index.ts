@@ -74,7 +74,8 @@ const geminiProvider: AIProvider = {
       req.systemPrompt,
       req.modelName,
       { attachments: req.attachments, modelCapabilities: req.modelCapabilities },
-      client
+      client,
+      { signal: req.signal, timeoutMs: req.timeoutMs }
     );
     return { text };
   },

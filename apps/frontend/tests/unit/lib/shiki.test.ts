@@ -141,6 +141,80 @@ describe('shiki highlighter', () => {
     expect(html, 'diff fence html').toContain('<span style=');
   });
 
+  // The grammar scope names of every token on a line, so a test can tell a coloured token from
+  // one the grammar did not recognise (those carry only the root scope, e.g. `source.vue`).
+  function scopedTokens(
+    highlighter: Awaited<ReturnType<Awaited<ReturnType<typeof loadShiki>>['initHighlighter']>>,
+    code: string,
+    lang: 'vue' | 'svelte'
+  ): { content: string; scopes: string[] }[] {
+    const tokens = highlighter.codeToTokensBase(code, {
+      lang,
+      theme: 'one-dark-pro',
+      includeExplanation: 'scopeName',
+    });
+    return tokens.flatMap((line) =>
+      line.map((token) => ({
+        content: token.content,
+        scopes: (token.explanation ?? []).flatMap((part) =>
+          part.scopes.map((scope) => scope.scopeName)
+        ),
+      }))
+    );
+  }
+
+  const embeddedFences = [
+    {
+      lang: 'vue',
+      code: [
+        '<script setup lang="ts">',
+        'const count: number = 1;',
+        '</script>',
+        '<template><p class="a">{{ count }}</p></template>',
+        '<style scoped>',
+        '.a { color: red; }',
+        '</style>',
+      ].join('\n'),
+    },
+    {
+      lang: 'svelte',
+      code: [
+        '<script lang="ts">',
+        '  let count: number = 1;',
+        '</script>',
+        '<p class="a">{count}</p>',
+        '<style>',
+        '  .a { color: red; }',
+        '</style>',
+      ].join('\n'),
+    },
+  ] as const;
+
+  for (const { lang, code } of embeddedFences) {
+    it(`colours a ${lang} fence, including its embedded script and style`, async () => {
+      const shiki = await loadShiki();
+
+      await shiki.preloadCodeLanguages([lang], 'one-dark-pro');
+      const highlighter = await shiki.initHighlighter();
+      const tokens = scopedTokens(highlighter, code, lang);
+      const scopeNames = new Set(tokens.flatMap((token) => token.scopes));
+
+      expect(highlighter.getLoadedLanguages(), `${lang} grammar`).toContain(lang);
+      // The host grammar alone leaves `<script>` and `<style>` bodies plain; these scopes only
+      // appear when the embedded grammars (typescript, css) were registered with it.
+      expect(
+        [...scopeNames].some((scope) => scope.startsWith('source.ts')),
+        `${lang}: expected a source.ts scope from the embedded script | scopes: ${[...scopeNames].join(', ')}`
+      ).toBe(true);
+      expect(
+        [...scopeNames].some((scope) => scope.startsWith('source.css')),
+        `${lang}: expected a source.css scope from the embedded style | scopes: ${[...scopeNames].join(', ')}`
+      ).toBe(true);
+      const html = completeRender(() => shiki.highlightCode(code, lang, 'one-dark-pro'));
+      expect(html, `${lang} fence html`).toContain('<span style=');
+    });
+  }
+
   it('ignores unsupported languages without initializing the highlighter', async () => {
     const shiki = await loadShiki();
 
