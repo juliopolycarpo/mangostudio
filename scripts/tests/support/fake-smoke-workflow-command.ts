@@ -5,7 +5,7 @@
 // `fake-smoke-workflow-command` in a fake PATH. docker and podman are
 // fake-smoke-workflow-poll.bash, which handles `ps`/`rm`, ss and sleep itself
 // and hands every other call here with FAKE_SMOKE_WORKFLOW_COMMAND naming it.
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
 const eventsPath = process.env.FAKE_SMOKE_WORKFLOW_EVENTS;
@@ -96,6 +96,12 @@ if (command === 'docker' || command === 'podman') {
     }
     console.log('fake-container-id');
   }
+  if (args[0] === 'exec') process.exit(runContainerExec(args));
+  if (args[0] === 'inspect') {
+    // `docker inspect -f '{{.State.ExitCode}}' <name>`: a hub that handled SIGTERM exits 0.
+    console.log('0');
+    process.exit(0);
+  }
   if (args[0] === 'build' && args.includes('-')) await Bun.stdin.text();
   process.exit(0);
 }
@@ -140,4 +146,37 @@ function runBunContainer(
   } finally {
     if (runArgs.includes('--rm')) rmSync(join(containerStateDir, name), { force: true });
   }
+}
+
+// Answer the process-model probes the image smoke runs inside a container: PID 1's
+// name, a /proc snapshot ("<pid> <name> <state> <ppid>" per line), and the detached
+// orphan spawn. `FAKE_SMOKE_WORKFLOW_FAILURE=no-init` makes PID 1 the hub itself.
+function runContainerExec(execArgs: string[]): number {
+  const failure = process.env.FAKE_SMOKE_WORKFLOW_FAILURE;
+  const pid1Name = failure === 'no-init' ? 'mangostudio' : 'tini';
+  if (execArgs.at(-1) === '/proc/1/comm') {
+    console.log(pid1Name);
+    return 0;
+  }
+  if (execArgs[1] === '-d') return 0;
+  // The orphan is alive under PID 1 for the first snapshot after its spawn and
+  // reaped for every later one, so the smoke's polling loop advances by call count.
+  // Bookworm and Alpine reuse one container name, so count from the latest spawn.
+  const calls = readFileSync(eventsPath ?? '', 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as { command: string; args: string[] });
+  const spawnIndex = calls
+    .map(({ args: callArgs }) => callArgs[0] === 'exec' && callArgs[1] === '-d')
+    .lastIndexOf(true);
+  const snapshotsSinceSpawn =
+    spawnIndex === -1
+      ? 0
+      : calls
+          .slice(spawnIndex)
+          .filter(({ args: callArgs }) => callArgs[0] === 'exec' && callArgs[1] !== '-d').length;
+  const lines = [`1 ${pid1Name} S 0`, '7 mangostudio S 1'];
+  if (snapshotsSinceSpawn === 1) lines.push('42 sleep S 1');
+  console.log(lines.join('\n'));
+  return 0;
 }
