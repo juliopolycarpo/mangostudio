@@ -65,9 +65,26 @@ export interface RestartDeps {
 
 const COMEBACK_TIMEOUT_MS = 20_000;
 
-/** Restart the running server, or start the service when nothing runs. // Usage: await runRestart() */
+/**
+ * Restart the running server, or start the service when nothing runs.
+ *
+ * On launchd the hub's web restart runs this command from a one-shot helper
+ * agent (see `UserServiceManager.startRetargetHelper`). Whatever ran it, the
+ * helper is removed last: a plist left in LaunchAgents would run this again at
+ * the next login. A failure to remove it is not worth failing the restart for;
+ * the next hub start removes it too.
+ * // Usage: await runRestart()
+ */
 export async function runRestart(deps: Partial<RestartDeps> = {}): Promise<void> {
   const d = resolveDeps(deps);
+  try {
+    await restartHub(d);
+  } finally {
+    await d.manager.removeRetargetHelper().catch(() => undefined);
+  }
+}
+
+async function restartHub(d: Required<RestartDeps>): Promise<void> {
   const state = await d.readState();
   // A recycled pid (token mismatch) reads as no instance, like a dead one; an unconfirmed pid
   // goes on to `stopPidOrThrow`, which refuses it.

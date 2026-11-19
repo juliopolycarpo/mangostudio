@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,7 +12,6 @@ import {
   POWERSHELL_HOST_FLAGS,
   restartExecutableOptions,
   spawnDetached,
-  spawnServiceRestartCommand,
   waiterArgv,
   WINDOWS_SYSTEM_ENV_KEYS,
 } from '../../../src/cli/detach';
@@ -422,34 +421,4 @@ describe('ensureLogDir', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
-});
-
-describe('spawnServiceRestartCommand', () => {
-  // The launcher here is a shell script; Windows has no such launcher to fake.
-  it.skipIf(process.platform === 'win32')(
-    'runs `<launcher> restart` and appends its output to the log',
-    async () => {
-      const root = mkdtempSync(join(tmpdir(), 'mango-service-restart-'));
-      try {
-        const launcher = join(root, 'mangostudio');
-        const logFile = join(root, 'restart.log');
-        writeFileSync(launcher, '#!/bin/sh\necho "launcher-args:$*"\n');
-        chmodSync(launcher, 0o755);
-
-        const pid = spawnServiceRestartCommand(launcher, logFile);
-
-        expect(pid).toBeGreaterThan(0);
-        // The child is detached, so there is no handle to await: poll its log.
-        const deadline = Date.now() + 5_000;
-        let log = '';
-        while (Date.now() < deadline && !log.includes('launcher-args:')) {
-          await Bun.sleep(25);
-          log = readFileSync(logFile, 'utf8');
-        }
-        expect(log).toBe('launcher-args:restart\n');
-      } finally {
-        rmSync(root, { recursive: true, force: true });
-      }
-    }
-  );
 });

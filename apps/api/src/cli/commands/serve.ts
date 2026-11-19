@@ -5,6 +5,7 @@
 
 import { displayHost, getConfig } from '../../lib/config';
 import { isStateLive, readState, removeState } from '../../lib/server-state';
+import { createHubServiceManager } from '../../modules/machine/application/hub-service';
 import { HUB_SERVICE_UNIT_ENV } from '../../modules/machine/domain/hub-service-identity';
 import { assertValidPort, type ServeArgs } from '../args';
 import { ensureServeAuthSecret } from '../auth-secret-setup';
@@ -25,6 +26,8 @@ export interface ServeDeps {
   /** The unit that started this process, when a supervisor did. */
   serviceUnit: string | undefined;
   waitForPredecessor: typeof waitForPredecessor;
+  /** Removes a launchd retarget helper left behind by an earlier restart. */
+  removeRetargetHelper: () => Promise<void>;
 }
 
 /** Start the server foreground, or in the background when detached. // Usage: await runServe({ detached: true }) */
@@ -33,6 +36,7 @@ export async function runServe(args: ServeArgs, deps: Partial<ServeDeps> = {}): 
     assertValidPort(args.port);
   }
   await ensureNotRunning(deps);
+  await removeLeftoverRetargetHelper(deps);
 
   if (args.detached) {
     await startDetached(args, deps);
@@ -69,6 +73,20 @@ async function ensureNotRunning(deps: Partial<ServeDeps>): Promise<void> {
   }
   // Stale file from a crashed server — clear it and continue.
   await remove();
+}
+
+/**
+ * A hub a supervisor starts is the one a launchd retarget helper restarted. The
+ * helper removes itself when its `restart` finishes; one that never got there
+ * (killed with the old hub, or a failed command) would otherwise stay in
+ * LaunchAgents and run `restart` again at the next login. Best effort: a hub
+ * that cannot clean up still has to serve.
+ */
+async function removeLeftoverRetargetHelper(deps: Partial<ServeDeps>): Promise<void> {
+  if (!(deps.serviceUnit ?? process.env[HUB_SERVICE_UNIT_ENV])) return;
+  const remove =
+    deps.removeRetargetHelper ?? (() => createHubServiceManager().removeRetargetHelper());
+  await remove().catch(() => undefined);
 }
 
 async function startDetached(args: ServeArgs, deps: Partial<ServeDeps>): Promise<void> {

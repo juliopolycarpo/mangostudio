@@ -361,33 +361,6 @@ export function spawnServeChild(
   }
 }
 
-/**
- * Run `<launcher> restart` in a session of its own and return its pid, without
- * waiting for it. launchd ends every process still in a job's process group
- * when the job is booted out, so a service restart that has to boot the hub's
- * own job out (to load a rewritten plist) must be finished by a process the
- * job does not own; `detached` gives it a new session, which launchd leaves
- * alone. Its output goes to `logFile`.
- * // Usage: spawnServiceRestartCommand('/opt/homebrew/bin/mangostudio', logFile)
- */
-export function spawnServiceRestartCommand(launcherPath: string, logFile: string): number {
-  const logFd = openSync(logFile, 'a');
-  try {
-    const proc = Bun.spawn({
-      cmd: [launcherPath, 'restart'],
-      detached: true,
-      stdin: 'ignore',
-      stdout: logFd,
-      stderr: logFd,
-      ...HIDDEN_WINDOW,
-    });
-    proc.unref();
-    return proc.pid;
-  } finally {
-    closeSync(logFd);
-  }
-}
-
 export interface SpawnDetachedWaiterInput {
   /** The package manager command to run once the wait is over, e.g. `['npm', 'install', '-g', 'mangostudio@latest']`. */
   readonly argv: readonly string[];

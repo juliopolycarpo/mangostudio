@@ -72,6 +72,26 @@ export class FakeServiceManager implements UserServiceManager {
     return Promise.resolve(this.retargetChanges);
   }
 
+  /** What the launchd retarget helper was started with, in call order. */
+  readonly retargetHelpers: { launcherPath: string; logFile: string }[] = [];
+  /** Fails `startRetargetHelper`, the way launchd refuses to load the helper's plist. */
+  startRetargetHelperFailWith: Error | null = null;
+  /** How often the helper was cleaned up; not in `calls`, which pins the verbs a restart issues. */
+  retargetHelperRemovals = 0;
+
+  startRetargetHelper(launcherPath: string, logFile: string): Promise<void> {
+    this.calls.push('startRetargetHelper');
+    this.retargetHelpers.push({ launcherPath, logFile });
+    return this.startRetargetHelperFailWith
+      ? Promise.reject(this.startRetargetHelperFailWith)
+      : Promise.resolve();
+  }
+
+  removeRetargetHelper(): Promise<void> {
+    this.retargetHelperRemovals += 1;
+    return Promise.resolve();
+  }
+
   readUnit(): Promise<string | null> {
     return Promise.resolve(null);
   }

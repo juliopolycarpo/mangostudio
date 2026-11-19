@@ -5,6 +5,8 @@
  * service is testable without a supervisor, a state file, or a running server.
  */
 
+import { dirname, join } from 'node:path';
+
 import type { InstallGuard } from '@mangostudio/shared/environments';
 import type {
   HubHealth,
@@ -47,11 +49,7 @@ import {
   type UpgradeStreamEvent,
 } from '@mangostudio/shared/updates';
 
-import {
-  restartExecutableOptions,
-  spawnServeChild,
-  spawnServiceRestartCommand,
-} from '../../../cli/detach';
+import { restartExecutableOptions, spawnServeChild } from '../../../cli/detach';
 import { canProbeHealth, probeHealth, probeHubHealth } from '../../../cli/health';
 import {
   latestHubLogFile,
@@ -201,12 +199,6 @@ export interface MachineServiceDeps {
   readonly launcherPath: () => string | undefined;
   /** Whether a path exists; the launcher a stale unit moves to must be one the manager left. */
   readonly pathExists: (path: string) => boolean;
-  /**
-   * Run `<launcher> restart` outside this process's job. launchd ends the hub's
-   * own job at a bootout, so the restart that has to boot it out to load a
-   * rewritten plist cannot be finished from in here.
-   */
-  readonly spawnServiceRestart: (launcherPath: string) => void;
   readonly serviceLogFile: () => string;
   readonly secretPersisted: () => boolean;
   /** The canonical user config.toml path; never a hard-coded `~/.mango`. */
@@ -697,10 +689,11 @@ function scheduleRestart(state: ServerState, launch: HubLaunchMode, d: MachineSe
  *
  * On launchd the hub is the job being rewritten: loading the new plist means a
  * bootout, which ends this process and the `launchctl bootstrap` it would run
- * next. A stale unit there is therefore moved by a detached `<launcher>
- * restart` that outlives the job; a unit that is not stale keeps the in-place
- * `kickstart -k`. If that command cannot start, the unit is restarted as
- * installed, which is what every restart did before it could be moved.
+ * next. A stale unit there is therefore moved by `<launcher> restart` run from
+ * a one-shot LaunchAgent of its own, which launchd owns and the hub's bootout
+ * does not reach; a unit that is not stale keeps the in-place `kickstart -k`.
+ * If that helper cannot be loaded, the unit is restarted in place as installed,
+ * which is what every restart did before it could be moved.
  */
 async function restartServiceUnit(d: MachineServiceDeps): Promise<void> {
   const launcherPath = d.launcherPath();
@@ -713,11 +706,14 @@ async function restartServiceUnit(d: MachineServiceDeps): Promise<void> {
   const stale = await staleHubServiceMove(d.manager, launcherPath, probe);
   if (stale) {
     try {
-      d.spawnServiceRestart(stale.to);
+      await d.manager.startRetargetHelper(
+        stale.to,
+        join(dirname(d.serviceLogFile()), 'service-retarget.log')
+      );
       return;
     } catch (error) {
       warn(
-        `Could not start "${stale.to} restart" to move the service unit off ${stale.from} (${error instanceof Error ? error.message : String(error)}); restarting it as installed. Run "mangostudio service install" to repair the unit.`
+        `Could not start the launchd helper that runs "${stale.to} restart" to move the service unit off ${stale.from} (${error instanceof Error ? error.message : String(error)}); restarting it as installed. Run "mangostudio service install" to repair the unit.`
       );
     }
   }
@@ -805,11 +801,6 @@ function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
     executable,
     launcherPath: deps.launcherPath ?? currentLauncherPath,
     pathExists: deps.pathExists ?? currentHubExecutableProbe().pathExists,
-    spawnServiceRestart:
-      deps.spawnServiceRestart ??
-      ((launcherPath) => {
-        spawnServiceRestartCommand(launcherPath, getServerLogPath(Date.now()));
-      }),
     serviceLogFile: deps.serviceLogFile ?? hubServiceLogPath,
     secretPersisted: deps.secretPersisted ?? (() => isAuthSecretPersisted()),
     configFilePath: deps.configFilePath ?? (() => getConfig().configFilePath),

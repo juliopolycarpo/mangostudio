@@ -42,6 +42,70 @@ afterEach(() => {
   resetConfig();
 });
 
+describe('runServe under a service unit', () => {
+  const idle = {
+    readState: () => Promise.resolve(null),
+    removeState: noop,
+    controller: new FakeProcessController([]),
+    spawnDetached: () => Promise.resolve({ pid: 1, port: 3000, logFile: '/l.log' }),
+    log: () => undefined,
+  };
+
+  // A helper agent that never reached its own cleanup would run `restart` at
+  // the next login; the next start of the hub it was restarting removes it.
+  it('removes a launchd retarget helper left behind by an earlier restart', async () => {
+    let removals = 0;
+
+    await runServe(
+      { host: undefined, port: 3000, detached: true },
+      {
+        ...idle,
+        serviceUnit: 'com.mangostudio.hub',
+        removeRetargetHelper: () => {
+          removals += 1;
+          return Promise.resolve();
+        },
+      }
+    );
+
+    expect(removals).toBe(1);
+  });
+
+  it('starts anyway when the helper cannot be removed', async () => {
+    const lines: string[] = [];
+
+    await runServe(
+      { host: undefined, port: 3000, detached: true },
+      {
+        ...idle,
+        log: (message) => lines.push(message),
+        serviceUnit: 'com.mangostudio.hub',
+        removeRetargetHelper: () => Promise.reject(new Error('bootout refused')),
+      }
+    );
+
+    expect(lines.join('\n')).toContain('MangoStudio started (PID 1');
+  });
+
+  it('leaves launchd alone for a hub no supervisor started', async () => {
+    let removals = 0;
+
+    await runServe(
+      { host: undefined, port: 3000, detached: true },
+      {
+        ...idle,
+        serviceUnit: undefined,
+        removeRetargetHelper: () => {
+          removals += 1;
+          return Promise.resolve();
+        },
+      }
+    );
+
+    expect(removals).toBe(0);
+  });
+});
+
 describe('runServe (detached)', () => {
   it('refuses to start when a live instance already exists', async () => {
     const refuse = runServe(

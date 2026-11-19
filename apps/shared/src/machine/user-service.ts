@@ -154,6 +154,27 @@ export interface UserServiceManager {
    * launchd, so it must run this from a process outside the unit.
    */
   restartRetargeted(program: string): Promise<boolean>;
+  /**
+   * macOS only: run `<launcher> restart` from a one-shot LaunchAgent labelled
+   * `<unit label>.retarget`, bootstrapped into the user domain with the unit's
+   * environment and its output appended to `logFile`. The hub cannot move its
+   * own launchd job (the bootout that loads the rewritten plist ends the
+   * process that would run the bootstrap after it), and a child it spawns
+   * belongs to the job's coalition, which launchd may reap on that bootout. A
+   * job of its own is outside the hub's job, so it survives. Returns once the
+   * helper is loaded (RunAtLoad starts it); rejects when it cannot be, and the
+   * caller should restart the unit in place instead. Any leftover helper is
+   * removed first.
+   */
+  startRetargetHelper(launcherPath: string, logFile: string): Promise<void>;
+  /**
+   * Remove the helper {@link startRetargetHelper} loaded: its plist, then its
+   * job. Does nothing when there is no helper, and everywhere but macOS. The
+   * helper's own `restart` calls this as its last step, and the next hub start
+   * calls it for one that never got there; the plist goes first because the
+   * bootout ends the process when the helper removes itself.
+   */
+  removeRetargetHelper(): Promise<void>;
   /** The installed unit body, or null when nothing is installed. */
   readUnit(): Promise<string | null>;
   /** Where the unit file lives on this platform; null for Windows. */
@@ -275,6 +296,63 @@ ${optional.map((entry) => `${entry}\n`).join('')}  <key>RunAtLoad</key>
 </dict>
 </plist>
 `;
+}
+
+/**
+ * A one-shot LaunchAgent: runs `argv` once at load, is never restarted, and
+ * lets whatever it started outlive it (`AbandonProcessGroup`), so a `bootout` of
+ * the helper itself cannot take its children along.
+ * // Usage: renderLaunchdRetargetHelperPlistFile('com.example.hub.retarget', { argv: [launcher, 'restart'], env, logFile })
+ */
+export function renderLaunchdRetargetHelperPlistFile(
+  label: string,
+  helper: {
+    readonly argv: readonly string[];
+    readonly env: Readonly<Record<string, string>>;
+    readonly logFile: string;
+  }
+): string {
+  const environment = Object.entries(helper.env);
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${escapeXml(label)}</string>
+  <key>ProgramArguments</key>
+  <array>
+${plistStringArray(helper.argv)}
+  </array>
+${
+  environment.length > 0
+    ? `  <key>EnvironmentVariables</key>\n  <dict>\n${environment
+        .map(
+          ([key, value]) =>
+            `    <key>${escapeXml(key)}</key>\n    <string>${escapeXml(value)}</string>`
+        )
+        .join('\n')}\n  </dict>\n`
+    : ''
+}  <key>StandardOutPath</key>
+  <string>${escapeXml(helper.logFile)}</string>
+  <key>StandardErrorPath</key>
+  <string>${escapeXml(helper.logFile)}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>AbandonProcessGroup</key>
+  <true/>
+</dict>
+</plist>
+`;
+}
+
+/** The `EnvironmentVariables` a plist body declares, or none. */
+function environmentFromPlist(body: string): Record<string, string> {
+  const block = /<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/.exec(body)?.[1] ?? '';
+  const env: Record<string, string> = {};
+  for (const [, key, value] of block.matchAll(/<key>([^<]*)<\/key>\s*<string>([^<]*)<\/string>/g)) {
+    if (key !== undefined && value !== undefined) env[unescapeXml(key)] = unescapeXml(value);
+  }
+  return env;
 }
 
 /**
@@ -1128,6 +1206,46 @@ export function createUserServiceManager(
     return refuseUnsupported('No user-level service manager is supported on this platform.');
   };
 
+  const retargetHelperLabel = `${identity.launchdLabel}.retarget`;
+  const retargetHelperPlist = launchdAgentPlistPath(deps.home, retargetHelperLabel);
+
+  async function removeRetargetHelper(): Promise<void> {
+    if (deps.platform !== 'darwin') return;
+    // The plist is the helper's record: without it there is nothing loaded
+    // worth a launchctl call, which keeps every hub start from spawning one.
+    try {
+      await deps.readFile(retargetHelperPlist);
+    } catch {
+      return;
+    }
+    await deps.unlink(retargetHelperPlist).catch(() => undefined);
+    await run(['launchctl', 'bootout', `gui/${deps.uid}/${retargetHelperLabel}`]);
+  }
+
+  async function startRetargetHelper(launcherPath: string, logFile: string): Promise<void> {
+    if (deps.platform !== 'darwin') {
+      refuseUnsupported('The launchd retarget helper runs only on macOS.');
+    }
+    // A leftover would make the bootstrap fail as already loaded.
+    await removeRetargetHelper();
+    const unit = await readUnit();
+    await deps.mkdir(posix.join(deps.home, 'Library', 'LaunchAgents'));
+    await deps.writeFile(
+      retargetHelperPlist,
+      renderLaunchdRetargetHelperPlistFile(retargetHelperLabel, {
+        argv: [launcherPath, 'restart'],
+        env: unit === null ? {} : environmentFromPlist(unit),
+        logFile,
+      })
+    );
+    const result = await run(['launchctl', 'bootstrap', `gui/${deps.uid}`, retargetHelperPlist]);
+    if (result.exitCode !== 0) {
+      // Left in LaunchAgents it would run `restart` again at the next login.
+      await deps.unlink(retargetHelperPlist).catch(() => undefined);
+      throw commandFailure('launchctl bootstrap (retarget helper)', result);
+    }
+  }
+
   /** Runs one half of `restartRetargeted`, so a failure names the half it came from. */
   async function retargetPhase<T>(
     phase: RestartRetargetedPhase,
@@ -1176,6 +1294,8 @@ export function createUserServiceManager(
     stop: async () => await require().stop(),
     restart: async () => await require().restart(),
     restartRetargeted: async (program) => await require().restartRetargeted(program),
+    startRetargetHelper,
+    removeRetargetHelper,
   };
 }
 

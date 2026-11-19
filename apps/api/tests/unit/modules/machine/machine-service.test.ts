@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { join } from 'node:path';
 
 import {
   MACHINE_CHECK_DETAIL_MAX,
@@ -341,7 +342,6 @@ describe('machineService.restart', () => {
       extra: Partial<MachineServiceDeps> = {}
     ) {
       const { cellar: CELLAR, launcher: LAUNCHER } = HOMEBREW[platform];
-      const spawnedRestarts: string[] = [];
       const made = makeService(
         {
           environment: () => ({
@@ -359,28 +359,25 @@ describe('machineService.restart', () => {
           }),
           launcherPath: () => LAUNCHER,
           pathExists: () => true,
-          spawnServiceRestart: (launcher) => {
-            spawnedRestarts.push(launcher);
-          },
           ...extra,
         },
         SERVICE
       );
       made.manager.setStatus({ ...installedAndRunning(), execPath: CELLAR });
-      return { ...made, spawnedRestarts, launcher: LAUNCHER };
+      return { ...made, launcher: LAUNCHER };
     }
 
     // The web restart ran `manager.restart()` against the stale unit, so a hub
     // started from a Cellar entry that `brew upgrade` removed never came back.
     it('moves the unit onto the launcher as part of the restart', async () => {
-      const { service, manager, recorder, spawnedRestarts, launcher } = staleServiceHub('linux');
+      const { service, manager, recorder, launcher } = staleServiceHub('linux');
 
       await service.restart(LOCAL);
       await recorder.flush();
 
       expect(verbs(manager)).toEqual(['restartRetargeted']);
       expect(manager.retargeted).toEqual([launcher]);
-      expect(spawnedRestarts).toEqual([]);
+      expect(manager.retargetHelpers).toEqual([]);
     });
 
     it('still restarts the unit as installed when the move fails', async () => {
@@ -394,39 +391,43 @@ describe('machineService.restart', () => {
     });
 
     // launchd ends the hub's own job at the bootout, and the bootstrap that
-    // follows would die with it: a process outside the job has to finish it.
-    it('on launchd hands the move to a detached `restart` outside the unit', async () => {
-      const { service, manager, recorder, spawnedRestarts, launcher } = staleServiceHub('darwin');
+    // follows would die with it: a job of its own, outside the hub's, has to
+    // finish it.
+    it('on launchd hands the move to a one-shot launchd helper outside the unit', async () => {
+      const { service, manager, recorder, launcher } = staleServiceHub('darwin');
 
       await service.restart(LOCAL);
       await recorder.flush();
 
-      expect(spawnedRestarts).toEqual([launcher]);
-      expect(verbs(manager)).toEqual([]);
+      expect(verbs(manager)).toEqual(['startRetargetHelper']);
+      expect(manager.retargetHelpers).toEqual([
+        {
+          launcherPath: launcher,
+          // In the hub's own log directory, next to service.log.
+          logFile: join('/home/j/.mango/logs', 'service-retarget.log'),
+        },
+      ]);
     });
 
-    it('on launchd falls back to a plain restart when the detached command cannot start', async () => {
-      const { service, manager, recorder } = staleServiceHub('darwin', {
-        spawnServiceRestart: () => {
-          throw new Error('spawn EACCES');
-        },
-      });
+    it('on launchd falls back to restarting the unit in place when the helper cannot be loaded', async () => {
+      const { service, manager, recorder } = staleServiceHub('darwin');
+      manager.startRetargetHelperFailWith = new Error('launchctl bootstrap failed (exit 5)');
 
       await service.restart(LOCAL);
       await recorder.flush();
 
-      expect(verbs(manager)).toEqual(['restart']);
+      expect(verbs(manager)).toEqual(['startRetargetHelper', 'restart']);
     });
 
     it('on launchd restarts in place when the unit is not stale', async () => {
-      const { service, manager, recorder, spawnedRestarts, launcher } = staleServiceHub('darwin');
+      const { service, manager, recorder, launcher } = staleServiceHub('darwin');
       manager.setStatus({ execPath: launcher });
 
       await service.restart(LOCAL);
       await recorder.flush();
 
       expect(verbs(manager)).toEqual(['restart']);
-      expect(spawnedRestarts).toEqual([]);
+      expect(manager.retargetHelpers).toEqual([]);
     });
   });
 

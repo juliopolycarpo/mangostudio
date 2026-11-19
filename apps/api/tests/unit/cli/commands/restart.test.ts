@@ -266,6 +266,56 @@ describe('runRestart', () => {
     });
   });
 
+  // On launchd this command is what a one-shot helper agent runs. Its last act
+  // removes that agent, since a plist left in LaunchAgents would run it again.
+  describe('cleaning up the launchd retarget helper', () => {
+    it('removes the helper once the service is back', async () => {
+      const { deps, manager } = baseDeps({
+        controller: new FakeProcessController([42, 77]),
+        readState: (() => {
+          let reads = 0;
+          return () => {
+            reads += 1;
+            return Promise.resolve(reads < 3 ? SERVICE : { ...SERVICE, pid: 77 });
+          };
+        })(),
+      });
+
+      await runRestart(deps);
+
+      expect(manager.retargetHelperRemovals).toBe(1);
+    });
+
+    it('removes it when the service does not come back, so the failure is not run again at login', async () => {
+      const { deps, manager } = baseDeps({
+        controller: new FakeProcessController([42]),
+        readState: () => Promise.resolve(SERVICE),
+      });
+
+      await expect(runRestart(deps)).rejects.toThrow(/did not come back/);
+
+      expect(manager.retargetHelperRemovals).toBe(1);
+    });
+
+    it('does not let a failed removal hide the restart result', async () => {
+      const { deps, manager, lines } = baseDeps({
+        controller: new FakeProcessController([42, 77]),
+        readState: (() => {
+          let reads = 0;
+          return () => {
+            reads += 1;
+            return Promise.resolve(reads < 3 ? SERVICE : { ...SERVICE, pid: 77 });
+          };
+        })(),
+      });
+      manager.removeRetargetHelper = () => Promise.reject(new Error('bootout refused'));
+
+      await runRestart(deps);
+
+      expect(lines.at(-1)).toBe('MangoStudio restarted (PID 77, http://localhost:3001).');
+    });
+  });
+
   it('refuses a foreground instance and says where to restart it', async () => {
     const { deps } = baseDeps({
       controller: new FakeProcessController([42]),
