@@ -11,6 +11,7 @@ import type { Chat, ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type {
   ExternalAgentCommandCatalogResponse,
   ExternalAgentDescriptorListResponse,
+  ExternalApprovalAnswerResult,
   ExternalNativeSession,
   ExternalNativeSessionListResponse,
   ExternalSteerResponse,
@@ -25,11 +26,7 @@ export interface AnswerExternalApprovalBody {
 }
 
 /** What the server did with the answer. `rejected` is a fact, not an exception. */
-export interface AnswerExternalApprovalResult {
-  readonly status: 'accepted' | 'rejected';
-  readonly optionId?: string;
-  readonly reason?: string;
-}
+export type AnswerExternalApprovalResult = ExternalApprovalAnswerResult;
 
 export async function listExternalAgents(
   environmentId: string
@@ -53,11 +50,12 @@ export async function answerExternalApproval(
   const chat = client.api.chats({ id: chatId });
   const { data, error } = await chat['external-agent'].respond.post(body);
   if (error) {
-    const value = error.value as AnswerExternalApprovalResult | { error?: string } | null;
-    if (value && 'status' in value && value.status === 'rejected') return value;
+    // The route's 400, 404 and 409 are the rejection; anything else (401, 422,
+    // 500) is a failure and throws.
+    if (error.status === 400 || error.status === 404 || error.status === 409) return error.value;
     throw new ApiError(error.value);
   }
-  return data as AnswerExternalApprovalResult;
+  return data;
 }
 
 /**
@@ -76,11 +74,11 @@ export async function steerExternalTurn(
 ): Promise<ExternalSteerResponse> {
   const { data, error } = await client.api.chats({ id: chatId })['external-agent'].steer.post(body);
   if (error) {
-    const value = error.value as ExternalSteerResponse | { error?: string } | null;
-    if (value && 'accepted' in value && value.accepted === false) return value;
+    // The 409 is the refusal; the 200 below is accepted or delivery-unknown.
+    if (error.status === 409) return error.value;
     throw new ApiError(error.value);
   }
-  return data as ExternalSteerResponse;
+  return data;
 }
 
 /**
