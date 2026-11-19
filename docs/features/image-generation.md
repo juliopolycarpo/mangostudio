@@ -73,6 +73,13 @@ Images are stored on the filesystem under the configured `images.dir` directory 
 
 **URL access:** Images are served via `GET /images/:filename`. The API maps this route to serve static files from the images directory.
 
+**Reclaiming space:** The files are not tied to their rows by a foreign key, so the API removes them itself:
+
+- Deleting a chat deletes the files its rows referenced, except any file another row still references.
+- A sweep runs at startup and every 6 hours. It removes files that nothing references and that are older than 24 hours, which covers a turn that wrote an image and died before recording it, and the files of a deleted user. It only touches names `saveGeneratedImage` writes (`<prefix>-<epoch ms>-<uuid>.<ext>`), so other files in a custom `images.dir` are left alone.
+
+A file counts as referenced when a `generated_images` row, a legacy `messages.imageUrl`, or an `/images/<name>` URL in a message's text, parts or provider state points at it.
+
 ## Gallery
 
 The gallery (`apps/frontend/src/features/gallery/GalleryPage.tsx`) provides:

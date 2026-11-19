@@ -35,6 +35,7 @@ import {
   reconcileExternalTurns,
   sealOrphanedExternalTurnAttempts,
 } from '../modules/external-agents/application/external-turn-recovery';
+import { sweepUnreferencedGeneratedImages } from '../modules/generated-images/application/reclaim-generated-images';
 import { isActiveTurn } from '../modules/generation/application/active-turn-registry';
 import { reconcileStaleTurns } from '../modules/generation/application/turn-recovery';
 import { HUB_SERVICE_UNIT_ENV } from '../modules/machine/domain/hub-service-identity';
@@ -54,6 +55,7 @@ import {
 import { getDevFrontendDir } from './dev-frontend-dir';
 import { EMBEDDED_FRONTEND_DIR, getEmbeddedFrontend } from './embedded-frontend';
 import { registerFrontend } from './frontend-static';
+import { type GeneratedImageSweep, startGeneratedImageSweep } from './generated-image-sweep';
 import { runMigrations } from './migrations';
 import { subscribeRuntimeScopeReaps } from './runtime-scope-reaps';
 import { registerShutdownHandler, requestShutdown } from './shutdown-request';
@@ -76,6 +78,7 @@ export interface StartOptions {
 let releaseCaptureLock: (() => Promise<void>) | undefined;
 
 let staleTurnReconcileSweep: StaleTurnReconcileSweep | null = null;
+let generatedImageSweep: GeneratedImageSweep | null = null;
 let stopTerminalIdleReaper: (() => void) | null = null;
 let stopUpdateChecks: (() => void) | null = null;
 let stopRuntimeScopeReaps: (() => void) | null = null;
@@ -136,6 +139,10 @@ async function startServerWithLock(options: StartOptions): Promise<ServerHandle>
   staleTurnReconcileSweep = startStaleTurnReconcileSweep(() =>
     reconcileStaleTurns({ reasonCode: 'unknown', isActive: isActiveTurn }, getDb())
   );
+  // Reclaims generated images no row references (a turn that died before it
+  // recorded them, a deleted user's files). The first pass runs in the
+  // background; it never delays listening.
+  generatedImageSweep = startGeneratedImageSweep(() => sweepUnreferencedGeneratedImages(getDb()));
   stopTerminalIdleReaper = terminalSessionService.startIdleReaper();
   // Never under `bun test`: a check hits a real host, and nothing in the test
   // suite should depend on GitHub being reachable or on a 24h timer outliving
@@ -258,6 +265,9 @@ async function gracefulStop(): Promise<void> {
   const sweep = staleTurnReconcileSweep;
   staleTurnReconcileSweep = null;
   await attempt(() => sweep?.stop());
+  const imageSweep = generatedImageSweep;
+  generatedImageSweep = null;
+  await attempt(() => imageSweep?.stop());
   const idleReaperStop = stopTerminalIdleReaper;
   stopTerminalIdleReaper = null;
   await attempt(() => idleReaperStop?.());

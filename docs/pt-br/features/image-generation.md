@@ -73,6 +73,13 @@ As imagens são armazenadas no sistema de arquivos sob o diretório configurado 
 
 **Acesso por URL:** imagens são servidas por `GET /images/:filename`. A API mapeia essa rota para servir arquivos estáticos do diretório de imagens.
 
+**Recuperação de espaço:** os arquivos não são ligados às linhas por chave estrangeira, então a API os remove por conta própria:
+
+- Excluir um chat apaga os arquivos que suas linhas referenciavam, exceto qualquer arquivo que outra linha ainda referencie.
+- Uma varredura roda na inicialização e a cada 6 horas. Ela remove arquivos que nada referencia e que têm mais de 24 horas, o que cobre um turno que gravou uma imagem e morreu antes de registrá-la, e os arquivos de um usuário excluído. Ela só toca nomes que `saveGeneratedImage` grava (`<prefixo>-<epoch ms>-<uuid>.<ext>`), então outros arquivos em um `images.dir` personalizado são preservados.
+
+Um arquivo conta como referenciado quando uma linha de `generated_images`, um `messages.imageUrl` legado ou uma URL `/images/<nome>` no texto, nas partes ou no estado do provedor de uma mensagem aponta para ele.
+
 ## Galeria
 
 A galeria em `apps/frontend/src/features/gallery/GalleryPage.tsx` oferece:

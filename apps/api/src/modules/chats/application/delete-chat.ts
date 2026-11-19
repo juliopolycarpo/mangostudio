@@ -7,6 +7,10 @@ import {
   listChatCheckpointBlobKeys,
   releaseCheckpointBlobs,
 } from '../../file-checkpoints/infrastructure/checkpoint-repository';
+import {
+  listChatGeneratedImageFilenames,
+  releaseGeneratedImageFiles,
+} from '../../generated-images/application/reclaim-generated-images';
 import { deleteChat, verifyChatOwnership } from '../infrastructure/chat-repository';
 
 export interface DeleteChatInput {
@@ -28,6 +32,12 @@ export async function deleteChatUseCase(
   // the ownership check, so a request naming somebody else's chat cannot kill
   // their live turn on the way to deleting nothing.
   const owned = await verifyChatOwnership(input.chatId, input.userId, db);
+  // Same shape as the blobs: the rows cascade away, the files do not. Read
+  // before the delete, and only for the owner, so a foreign request cannot
+  // learn or touch anything about a chat that stays.
+  const imageFilenames = owned
+    ? await listChatGeneratedImageFilenames(db, input.chatId)
+    : new Set<string>();
   if (owned) {
     // Not awaited: the live turn is told and the session unregistered
     // synchronously, and only the vendor's own close call is left in flight.
@@ -42,4 +52,7 @@ export async function deleteChatUseCase(
   // the caller does not own the chat: nothing was deleted, so nothing is stale.
   if (owned) publishChatListInvalidation(input.userId);
   await releaseCheckpointBlobs(db, blobKeys);
+  // A failure here leaves files for the periodic sweep; it must not turn a
+  // committed delete into an error response.
+  await releaseGeneratedImageFiles(db, imageFilenames).catch(() => undefined);
 }
