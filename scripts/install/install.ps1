@@ -65,6 +65,9 @@ function Show-Usage {
   Write-Host '  MANGOSTUDIO_INSTALL_DIR     Override the versioned install root'
   Write-Host '  MANGOSTUDIO_BIN_DIR         Override the user bin directory'
   Write-Host '  MANGOSTUDIO_INSTALL_ORIGIN  Set to "upgrade" when the hub itself runs this script'
+  Write-Host '  MANGOSTUDIO_INSTALL_LOCK_TIMEOUT'
+  Write-Host '                              Seconds to wait for another installer or launcher of the same'
+  Write-Host '                              version before giving up (default 3600)'
   Write-Host '  GITHUB_TOKEN                Authenticates api.github.com requests (GH_TOKEN if unset); raises the'
   Write-Host '                              rate limit. Release downloads never receive it.'
 }
@@ -567,6 +570,85 @@ function Set-CurrentJunction([string]$InstallRoot, [string]$Version) {
   }
 }
 
+# The Cargo launcher (crates/mangostudio-launcher) serializes every install of
+# one version on an exclusive lock on "<install root>\.launcher-<version>.lock"
+# (LockFileEx on Windows, flock(2) elsewhere, where install.sh takes it).
+# Replacing "<install root>\<version>" here without that lock lets a launcher's
+# move land between the Remove-Item and the Move-Item, or lets the Remove-Item
+# delete the tree the launcher just moved in. So the swap, and a prune's
+# removal of a version, hold the same lock on the same file. FileStream.Lock
+# is a byte-range lock from offset 0 over the largest range, which overlaps the
+# launcher's whole-file lock. A process that dies drops it with its handle.
+#
+# Seconds to wait for another installer of the same version before giving up.
+# The launcher's own ceiling is an hour; the variable exists for tests.
+function Get-InstallLockTimeoutSeconds {
+  $seconds = 0
+  $raw = [Environment]::GetEnvironmentVariable('MANGOSTUDIO_INSTALL_LOCK_TIMEOUT')
+  if ([int]::TryParse([string]$raw, [ref]$seconds) -and $seconds -ge 0) { return $seconds }
+  return 3600
+}
+
+# ERROR_LOCK_VIOLATION (33): another handle holds a conflicting byte-range lock.
+# Any other failure means this host cannot lock this file at all. A .NET
+# method called from PowerShell reports its exception wrapped in a
+# MethodInvocationException, so the IOException is the inner one.
+function Test-LockViolation($Failure) {
+  if ($Failure -is [System.Management.Automation.MethodInvocationException] -and $null -ne $Failure.InnerException) {
+    $Failure = $Failure.InnerException
+  }
+  return (($Failure -is [System.IO.IOException]) -and (($Failure.HResult -band 0xFFFF) -eq 33))
+}
+
+# Take the lock of $Version, waiting for another holder, and return the open
+# stream that holds it ($null when this host cannot lock: warned about and let
+# through, which is how installs ran before this lock existed). Throws only when
+# the holder outlasts MANGOSTUDIO_INSTALL_LOCK_TIMEOUT. Release it with
+# Exit-VersionLock.
+function Enter-VersionLock([string]$InstallRoot, [string]$Version) {
+  $lockPath = Join-Path $InstallRoot ".launcher-$Version.lock"
+  New-Item -ItemType Directory -Force $InstallRoot | Out-Null
+
+  $stream = $null
+  try {
+    $stream = New-Object System.IO.FileStream($lockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::ReadWrite)
+  } catch {
+    Write-Warning "cannot open $lockPath ($($_.Exception.Message)); continuing without the install lock"
+    return $null
+  }
+
+  $timeout = Get-InstallLockTimeoutSeconds
+  $waited = [System.Diagnostics.Stopwatch]::StartNew()
+  $nextNotice = 0
+  while ($true) {
+    try {
+      $stream.Lock(0, [long]::MaxValue)
+      return $stream
+    } catch {
+      if (-not (Test-LockViolation $_.Exception)) {
+        $stream.Dispose()
+        Write-Warning "cannot lock $lockPath ($($_.Exception.Message)); continuing without the install lock"
+        return $null
+      }
+    }
+
+    if ($waited.Elapsed.TotalSeconds -ge $timeout) {
+      $stream.Dispose()
+      Fail "another installer is still using $Version after $([int]$waited.Elapsed.TotalSeconds)s (lock $lockPath); not waiting longer. Run the command again once it finishes."
+    }
+    if ($waited.Elapsed.TotalSeconds -ge $nextNotice) {
+      Write-Host "Waiting for another installer to finish with $Version ($([int]$waited.Elapsed.TotalSeconds)s so far)..."
+      $nextNotice = $waited.Elapsed.TotalSeconds + 30
+    }
+    Start-Sleep -Milliseconds 200
+  }
+}
+
+# Drop the lock Enter-VersionLock returned. Takes $null: no lock was held.
+function Exit-VersionLock($Lock) {
+  if ($null -ne $Lock) { $Lock.Dispose() }
+}
+
 # $TargetPath relative to $BaseDir, or $null when there is no relative form
 # (different drive, a UNC share, anything that does not round-trip).
 function Get-RelativePathOrNull([string]$BaseDir, [string]$TargetPath) {
@@ -812,8 +894,23 @@ function Complete-Install([string]$InstallRoot, [string]$BinDir, [string]$Origin
   $tempInstall = Expand-InstallArchive $ArchivePath $InstallVersion $InstallRoot
   Test-SmokeOrFail $tempInstall $InstallVersion $true
 
-  if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force }
-  Move-Item $tempInstall $installDir
+  # The smoke check ran on the scratch copy, so the lock is held only for the
+  # swap itself: no launcher or second installer can move a tree in between
+  # the Remove-Item and the Move-Item. A holder that outlasts the timeout
+  # leaves the installed tree alone and takes the scratch copy with it.
+  $versionLock = $null
+  try {
+    $versionLock = Enter-VersionLock $InstallRoot $InstallVersion
+  } catch {
+    Remove-Item $tempInstall -Recurse -Force -ErrorAction SilentlyContinue
+    throw
+  }
+  try {
+    if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force }
+    Move-Item $tempInstall $installDir
+  } finally {
+    Exit-VersionLock $versionLock
+  }
 
   $oldVersion = Resolve-CurrentVersion $InstallRoot (Get-BinCmdPath $BinDir)
 
@@ -972,12 +1069,23 @@ function Invoke-Prune([string]$InstallRoot, [string]$BinDir) {
       if ($name -eq $current) { return }
       if ($previous -and $name -eq $previous) { return }
 
+      # A launcher installing this version holds its lock while it moves a
+      # tree in; a prune that outwaits it leaves the version for the next run.
+      $versionLock = $null
+      try {
+        $versionLock = Enter-VersionLock $InstallRoot $name
+      } catch {
+        Write-Host "Could not remove $name (another installer holds its lock; run again once it finishes)"
+        return $name
+      }
       try {
         Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction Stop
         Write-Host "Removed $name"
       } catch {
         Write-Host "Could not remove $name (close editors or stop the process, then run again)"
         return $name
+      } finally {
+        Exit-VersionLock $versionLock
       }
     })
 

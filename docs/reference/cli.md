@@ -267,8 +267,10 @@ archives, the registry's `dist.integrity` for an npm tarball), then write the
 install script embedded in its own binary to a temp file and run it with
 `--local <archive>` (`bash` on POSIX; `pwsh` when present, else
 `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File`, on
-Windows). The script extracts, smokes `mangostudio --version`, moves the
-`current` pointer, rewrites `install-origin.json` with `origin: upgrade`, and
+Windows). The script extracts, smokes `mangostudio --version`, replaces the
+version directory while holding the per-version lock the Cargo launcher takes
+(`.launcher-<version>.lock` in the dist root), so a script and a launcher
+installing one version take turns, moves the `current` pointer, rewrites `install-origin.json` with `origin: upgrade`, and
 prunes. No executable code is ever downloaded — only archives, verified before
 the script sees them. The script receives `MANGOSTUDIO_INSTALL_ORIGIN=upgrade`,
 `MANGOSTUDIO_INSTALL_DIR` (the detected dist root) and, when the origin record
