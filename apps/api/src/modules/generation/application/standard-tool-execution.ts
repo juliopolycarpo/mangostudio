@@ -67,7 +67,7 @@ import {
   ToolPolicyError,
 } from './tool-execution-lifecycle';
 import { errorToToolMessage, parseToolArgs, stringifyToolResult } from './tool-result-utils';
-import { classifyToolRetrySafety } from './turn-checkpoint';
+import { classifyToolRetrySafety } from './tool-retry-safety';
 
 interface StandardToolExecution {
   callId: string;
@@ -260,7 +260,7 @@ async function executeStandardToolCall(
   try {
     const prepared = await prepareStandardToolCall(name, context);
     const timeoutMs = resolvePreparedToolTimeoutMs(prepared);
-    lifecycle.start(timeoutMs);
+    lifecycle.start(timeoutMs, classifyToolRetrySafety(name));
     await recordToolStartBeforeRunning(name, callId, lifecycle, context);
     if (prepared.kind === 'mcp') {
       // Builtins record themselves from `executeTool`, off their declared

@@ -4,6 +4,7 @@
 
 import type { UncheckpointedWriteSource } from '@mangostudio/shared/file-checkpoints';
 import type { RuntimeCapabilityAllow } from '@mangostudio/shared/runtime-home';
+import type { ToolRetrySafety } from '@mangostudio/shared/tool-executions';
 import type {
   ToolParameterDescriptor,
   ToolSettingsCategory,
@@ -94,6 +95,18 @@ interface ToolSettingsMetadata {
    * noting the source only when its snapshot did not cover the call.
    */
   checkpointsOwnWrites?: (parameters: Record<string, unknown>) => boolean;
+  /**
+   * Whether running a call to this tool again is safe: `safe_read` changes
+   * nothing, so a retry runs without asking; `confirmation_required` asks first;
+   * `unknown` is a tool the hub cannot vouch for. Declared here, like
+   * `uncheckpointedWriteSource`, so a tool is classified when it is built
+   * instead of by a name list someone has to remember to extend.
+   *
+   * Absent means `confirmation_required`: the cautious answer is the default and
+   * a read has to be claimed. Every builtin states its own, and a test fails for
+   * one that does not. See `classifyToolRetrySafety`.
+   */
+  retrySafety?: ToolRetrySafety;
 }
 
 /** A fully registered tool: its schema definition + its executor. */

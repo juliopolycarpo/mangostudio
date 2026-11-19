@@ -68,6 +68,8 @@ export function register(): void {
       category: 'system',
       enabledByDefault: true,
       canDisable: true,
+      // Another agent runs its own tools; the hub cannot say what a second run does.
+      retrySafety: 'unknown',
       defaultParameters: {},
       parameterDescriptors: [],
     },

@@ -336,6 +336,73 @@ describe('executeStandardToolCallsWithProgress time budget', () => {
     });
     expect(execution.execution.execution.timeoutMs).toBeUndefined();
   });
+
+  it("stamps the tool's declared retry policy on the running and terminal snapshots", async () => {
+    const snapshots = await runBudgetTool(45);
+
+    // `budgeted_fixture` declares nothing, so it gets the cautious default.
+    expect(snapshots.map((execution) => [execution.status, execution.retrySafety])).toEqual([
+      ['queued', undefined],
+      ['running', 'confirmation_required'],
+      ['succeeded', 'confirmation_required'],
+    ]);
+  });
+
+  it('stamps safe_read for a tool that declares itself a read', async () => {
+    clearRegistry();
+    registerTool({
+      definition: { name: 'declared_read_fixture', description: 'Reads', parameters: {} },
+      settings: {
+        title: 'Declared read',
+        description: 'Reads',
+        category: 'system',
+        enabledByDefault: true,
+        canDisable: true,
+        retrySafety: 'safe_read',
+        defaultParameters: {},
+        parameterDescriptors: [],
+      },
+      execute: () => Promise.resolve({ ok: true }),
+    });
+    const items = await collectProgress(
+      executeStandardToolCallsWithProgress(
+        [['read-1', { name: 'declared_read_fixture', argsStr: '{}' }]],
+        {
+          userId: 'user-1',
+          chatId: 'chat-1',
+          environmentId: 'local',
+          settingsByToolName: new Map(),
+          allowedToolNames: new Set(['declared_read_fixture']),
+        }
+      )
+    );
+    const running = items.flatMap((item) =>
+      item.kind === 'event' &&
+      item.event.type === 'tool_execution' &&
+      item.event.execution.status === 'running'
+        ? [item.event.execution]
+        : []
+    );
+    expect(running.map((execution) => execution.retrySafety)).toEqual(['safe_read']);
+  });
+
+  it('records no retry policy on a call rejected by policy before it started', async () => {
+    const items = await collectProgress(
+      executeStandardToolCallsWithProgress(
+        [['budget-3', { name: BUDGET_TOOL_NAME, argsStr: '{}' }]],
+        {
+          userId: 'user-1',
+          chatId: 'chat-1',
+          environmentId: 'local',
+          settingsByToolName: new Map(),
+          allowedToolNames: new Set(),
+        }
+      )
+    );
+    const execution = items.find((item) => item.kind === 'execution');
+    if (execution?.kind !== 'execution') throw new Error('expected an execution item');
+    expect(execution.execution.execution.retrySafety).toBeUndefined();
+  });
 });
 
 describe('executeStandardToolCallsWithProgress result shaping', () => {

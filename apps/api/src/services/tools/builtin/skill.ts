@@ -67,6 +67,7 @@ export function register(): void {
       category: 'system',
       enabledByDefault: true,
       canDisable: true,
+      retrySafety: 'safe_read',
       defaultParameters: {},
       parameterDescriptors: [],
     },

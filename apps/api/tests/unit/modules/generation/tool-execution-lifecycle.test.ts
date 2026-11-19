@@ -182,6 +182,20 @@ describe('ToolExecutionLifecycle', () => {
     expect(lifecycle.current.timeoutMs).toBeUndefined();
   });
 
+  it('carries the retry policy from start through the terminal snapshot', () => {
+    const events: ToolExecutionTransitionEvent[] = [];
+    const lifecycle = new ToolExecutionLifecycle('call-5', 'bash', (event) => events.push(event));
+    lifecycle.emitQueued();
+    lifecycle.start(45_000, 'confirmation_required');
+    lifecycle.fail(new ToolExecutionTimedOutError('too slow'));
+
+    expect(events.map((event) => [event.execution.status, event.execution.retrySafety])).toEqual([
+      ['queued', undefined],
+      ['running', 'confirmation_required'],
+      ['timed_out', 'confirmation_required'],
+    ]);
+  });
+
   it('supports the awaiting_user round trip', () => {
     const lifecycle = new ToolExecutionLifecycle('call-2', 'mcp__demo__ask');
     lifecycle.transition('running');

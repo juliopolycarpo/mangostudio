@@ -24,11 +24,8 @@ import {
 import { insertMessage } from '../../messages/infrastructure/message-repository';
 import { IMAGE_ABANDONED_ERROR, IMAGE_ABANDONED_ERROR_CODE } from './image-interruption';
 import type { ResolvedModel } from './resolve-model';
-import {
-  classifyToolRetrySafety,
-  createTurnCheckpointPart,
-  refreshTurnCheckpointPart,
-} from './turn-checkpoint';
+import { classifyToolRetrySafety } from './tool-retry-safety';
+import { createTurnCheckpointPart, refreshTurnCheckpointPart } from './turn-checkpoint';
 
 const RECOVERY_PROMPT_MAX_LENGTH = 16_000;
 const RECOVERY_RESULT_INITIAL_LENGTH = 512;
