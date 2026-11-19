@@ -5,7 +5,10 @@ import {
   EXTERNAL_AGENT_CAPACITY_CODE,
   EXTERNAL_AGENT_TARGET_IDS,
 } from '@mangostudio/shared/external-agents';
-import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
+import {
+  RuntimeConsentDeniedError,
+  RuntimePolicyDeniedError,
+} from '@mangostudio/shared/runtime-contract';
 
 import { productDescriptorFor } from '../../../../src/modules/external-agents/domain/adapter-descriptors';
 import {
@@ -50,6 +53,12 @@ describe('openRefusalFor', () => {
       unavailableReason: 'runtime-denied',
       remedy: { kind: 'contact-admin' },
     });
+  });
+
+  it('does not present a non-consent DENIED as the denied reason', () => {
+    const policyRefusal = new RuntimePolicyDeniedError('refused', { kind: 'some_policy' });
+
+    expect(openRefusalFor('cursor', policyRefusal)).toBeUndefined();
   });
 
   it('reads the kind as a name, not as a property of every object', () => {

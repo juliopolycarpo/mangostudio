@@ -6,7 +6,10 @@ import {
   LOCAL_ENVIRONMENT_ID,
   type ToolchainSelection,
 } from '@mangostudio/shared/environments';
-import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
+import {
+  RuntimeConsentDeniedError,
+  RuntimePolicyDeniedError,
+} from '@mangostudio/shared/runtime-contract';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { TERMINAL_SOCKET_CLOSE_CODES, type TerminalExit } from '@mangostudio/shared/terminal';
 
@@ -402,6 +405,21 @@ describe('terminalSessionService.open', () => {
       await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
       expect(client.calls.open).toHaveLength(2);
     }
+  });
+
+  test('does not report a non-consent DENIED as withdrawn consent, and retains no PTY for it', async () => {
+    const policyRefusal = new RuntimePolicyDeniedError('terminal.open refused by policy');
+    const client = new FakeTerminalRuntimeClient({
+      failFirstOpen: policyRefusal,
+      // The close cannot confirm either; a DENIED still proves the open never ran.
+      failFirstClose: new RuntimeConsentDeniedError('close denied'),
+    });
+    const { service } = createHarness({ client });
+
+    await expect(service.open(USER_ID, { environmentId: ENVIRONMENT_ID })).rejects.toBe(
+      policyRefusal
+    );
+    expect(service.list(USER_ID)).toHaveLength(0);
   });
 
   test('reconciles detached exits at the cap without evicting running sessions', async () => {
