@@ -871,6 +871,25 @@ export const ExternalConversationResetReasonSchema = Type.Union([
 export type ExternalConversationResetReason = Static<typeof ExternalConversationResetReasonSchema>;
 
 /**
+ * Why a turn that has not reached the vendor is still waiting to be resubmitted.
+ *
+ * Added by the hub, never by a vendor. The submission loop retries what it proved was not
+ * submitted with no count cutoff, so without this a waiting turn reads the same as a running one.
+ * It is reported once the loop has waited longer than one backoff cap.
+ *
+ * - `runtime-unreachable`: the connection to the runtime is gone, and the loop only reuses a
+ *   connection someone else opens; it never connects on its own.
+ * - `runtime-busy`: the runtime keeps answering that it did not dispatch the turn, typically
+ *   because a vendor session was left busy by a turn that was never cancelled.
+ */
+export const ExternalTurnWaitCauseSchema = Type.Union([
+  Type.Literal('runtime-unreachable'),
+  Type.Literal('runtime-busy'),
+]);
+
+export type ExternalTurnWaitCause = Static<typeof ExternalTurnWaitCauseSchema>;
+
+/**
  * Who the vendor thinks is signed in, as a label the owner is looking at.
  *
  * Personal data, so it is minimal by construction: Claude's status call returns

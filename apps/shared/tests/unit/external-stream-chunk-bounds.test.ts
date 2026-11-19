@@ -14,6 +14,7 @@ import {
   externalSessionStartedChunk,
   externalSteerChunk,
   externalTurnCompletedChunk,
+  externalTurnWaitingChunk,
   type StreamChunk,
   StreamChunkSchema,
 } from '../../src/streaming';
@@ -122,6 +123,8 @@ function producerChunks(): readonly StreamChunk[] {
       status: 'rejected',
       reasonCode: 'turn-already-completed',
     }),
+    externalTurnWaitingChunk('runtime-busy'),
+    externalTurnWaitingChunk(undefined),
     externalTurnCompletedChunk('completed'),
   ];
 }

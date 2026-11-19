@@ -848,3 +848,34 @@ describe('ExternalTurnTranscript', () => {
     expect(JSON.stringify(target.parts)).not.toContain('vendor-secret');
   });
 });
+
+describe('a turn waiting for the runtime to take it', () => {
+  it('records the cause on the turn record, and drops it when the wait ends', () => {
+    const target = transcript();
+
+    target.markWaiting('runtime-unreachable');
+    expect(target.turnPart.waiting).toBe('runtime-unreachable');
+
+    target.markWaiting('runtime-busy');
+    expect(target.turnPart.waiting).toBe('runtime-busy');
+
+    target.markWaiting(undefined);
+    expect(target.turnPart, 'expected no waiting field once the wait ended').not.toHaveProperty(
+      'waiting'
+    );
+  });
+
+  it('keeps nothing once the turn is settled, and ignores a late report', () => {
+    const target = transcript();
+    target.markWaiting('runtime-busy');
+
+    target.finalize('cancelled-by-user', 3_000);
+    expect(target.turnPart).not.toHaveProperty('waiting');
+
+    target.markWaiting('runtime-unreachable');
+    expect(
+      target.turnPart,
+      'expected a settled turn to stay free of a late waiting report'
+    ).not.toHaveProperty('waiting');
+  });
+});

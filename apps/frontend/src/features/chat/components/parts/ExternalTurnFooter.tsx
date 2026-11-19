@@ -41,7 +41,9 @@ export function ExternalTurnFooter({ part }: ExternalTurnFooterProps) {
       ).filter((entry): entry is [string, number] => typeof entry[1] === 'number')
     : [];
 
-  if (fields.length === 0 && !part.error && !part.conversationReset) return null;
+  // A settled turn is never waiting; the record drops the field, and this keeps a stale one quiet.
+  const waiting = part.status === 'active' ? part.waiting : undefined;
+  if (fields.length === 0 && !part.error && !part.conversationReset && !waiting) return null;
 
   // An error the hub can present is shown the way the selector shows the same state: its words,
   // the sign-in command to copy, or the install and update link. Two sources name it: the reason
@@ -53,6 +55,16 @@ export function ExternalTurnFooter({ part }: ExternalTurnFooterProps) {
 
   return (
     <div className="mt-2 max-w-2xl space-y-1.5 pl-4">
+      {waiting ? (
+        <Callout
+          tone="warning"
+          // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces the wait without implying a calculation output.
+          role="status"
+          data-external-turn-waiting={waiting}
+        >
+          {labels.waiting[waiting]}
+        </Callout>
+      ) : null}
       {part.conversationReset ? (
         <Callout
           tone="warning"

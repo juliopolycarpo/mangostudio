@@ -283,3 +283,137 @@ describe('submitExternalTurn', () => {
     }
   });
 });
+
+/**
+ * A turn the vendor has not received reads as a running one unless the loop says it is waiting.
+ * The policy is small so a few waits cross one backoff cap: with `random() = 0.5` the delays are
+ * 88, 175, then 263 ms against a 300 ms cap, so the third wait is the first past it.
+ */
+describe('reporting a long wait', () => {
+  const SMALL_POLICY = { baseDelayMs: 100, maxDelayMs: 300 };
+  const busyRefusal = () =>
+    new RemoteError('INTERNAL', 'The vendor session is busy.', {
+      kind: 'external_agent_busy',
+      dispatch: 'not-submitted',
+    });
+  const notSent = () => new RuntimeRequestNotSentError('external-agent.turn', undefined);
+
+  /** Records every `onWaiting` call with how many backoff waits had been requested by then. */
+  function submitReportingWaits(options: {
+    readonly handle: ReturnType<typeof createScriptedSessionHandle>;
+    readonly reacquire?: () => Promise<ReturnType<typeof createScriptedSessionHandle>>;
+    readonly signal?: AbortSignal;
+  }) {
+    const clock = createFakeBackoffClock({ auto: true });
+    const reports: Array<{ cause: string | undefined; waitsSoFar: number }> = [];
+    const outcome = submitExternalTurn({
+      db: getDb(),
+      messageId,
+      chatId,
+      userId,
+      environmentId: 'local',
+      turn: {
+        clientMessageId: 'client-1',
+        input: 'hi',
+        configuration: { level: 'default', routing: 'user', workspaceRoots: ['/w'] },
+      },
+      handle: options.handle,
+      reacquire: options.reacquire ?? (() => Promise.resolve(options.handle)),
+      isTerminalConnectFailure: () => false,
+      signal: options.signal ?? new AbortController().signal,
+      policy: SMALL_POLICY,
+      now: () => 1_000,
+      newId: () => `attempt-${crypto.randomUUID()}`,
+      random: () => 0.5,
+      sleep: clock.sleep,
+      onLateAcceptance: () => undefined,
+      onWaiting: (cause) => reports.push({ cause, waitsSoFar: clock.waits.length }),
+    });
+    return { outcome, reports, clock };
+  }
+
+  it('names a runtime that keeps declining the turn once the waits pass one cap, then clears it on acceptance', async () => {
+    const handle = createScriptedSessionHandle();
+    for (let index = 0; index < 4; index += 1) handle.failures.push(busyRefusal);
+
+    const { outcome, reports } = submitReportingWaits({ handle });
+
+    expect((await outcome).kind).toBe('accepted');
+    // Told as the third wait starts (two already requested), cleared once the fourth attempt landed.
+    expect(reports).toEqual([
+      { cause: 'runtime-busy', waitsSoFar: 2 },
+      { cause: undefined, waitsSoFar: 4 },
+    ]);
+  });
+
+  it('names a request the hub could not write as the runtime being unreachable', async () => {
+    const handle = createScriptedSessionHandle();
+    for (let index = 0; index < 3; index += 1) handle.failures.push(notSent);
+
+    const { outcome, reports } = submitReportingWaits({ handle });
+
+    expect((await outcome).kind).toBe('accepted');
+    expect(reports.map((report) => report.cause)).toEqual(['runtime-unreachable', undefined]);
+  });
+
+  it('names a lost connection, and clears it as soon as the connection is back', async () => {
+    const dead = { ...createScriptedSessionHandle(), isLive: () => false };
+    const revived = createScriptedSessionHandle();
+    let reopens = 0;
+
+    const { outcome, reports } = submitReportingWaits({
+      handle: dead,
+      reacquire: () => {
+        reopens += 1;
+        if (reopens <= 3) return Promise.reject(new RemoteError('UNAVAILABLE', 'runtime offline'));
+        return Promise.resolve(revived);
+      },
+    });
+
+    expect((await outcome).kind).toBe('accepted');
+    // Told as the third wait starts (two already requested), cleared when the connection returned
+    // after it, before any request was sent.
+    expect(reports).toEqual([
+      { cause: 'runtime-unreachable', waitsSoFar: 2 },
+      { cause: undefined, waitsSoFar: 3 },
+    ]);
+    expect(revived.submissions()).toBe(1);
+  });
+
+  it('says nothing for a short wait that ends within one cap', async () => {
+    const handle = createScriptedSessionHandle();
+    handle.failures.push(busyRefusal, busyRefusal);
+
+    const { outcome, reports, clock } = submitReportingWaits({ handle });
+
+    expect((await outcome).kind).toBe('accepted');
+    expect({ reports, waits: clock.waits }).toEqual({ reports: [], waits: [88, 175] });
+  });
+
+  it('announces a cause once, however many more waits it takes', async () => {
+    const handle = createScriptedSessionHandle();
+    for (let index = 0; index < 9; index += 1) handle.failures.push(busyRefusal);
+
+    const { outcome, reports } = submitReportingWaits({ handle });
+
+    await outcome;
+    expect(reports.map((report) => report.cause)).toEqual(['runtime-busy', undefined]);
+  });
+
+  it('clears the report when the turn is stopped mid-wait', async () => {
+    const handle = createScriptedSessionHandle();
+    for (let index = 0; index < 50; index += 1) handle.failures.push(busyRefusal);
+    const stop = new AbortController();
+
+    const { outcome, reports } = submitReportingWaits({ handle, signal: stop.signal });
+    // Abort once the loop has announced its wait, so the clear belongs to the stop.
+    for (let tick = 0; reports.length === 0; tick += 1) {
+      if (tick > 1_000) throw new Error('expected a wait report within 1s | received: none');
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    stop.abort();
+
+    expect((await outcome).kind).toBe('stopped');
+    expect(reports.map((report) => report.cause)).toEqual(['runtime-busy', undefined]);
+  });
+});

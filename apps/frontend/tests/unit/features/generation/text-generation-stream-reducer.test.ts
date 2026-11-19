@@ -86,6 +86,56 @@ describe('text generation stream reducer', () => {
     expect(done.sealed).toBe(true);
   });
 
+  describe('a turn waiting for the runtime to take it', () => {
+    const waiting = (cause?: 'runtime-unreachable' | 'runtime-busy'): StreamChunk => ({
+      type: 'external_turn_waiting',
+      ...(cause ? { cause } : {}),
+      done: false,
+    });
+
+    it('marks the turn record with the cause and clears it when the wait ends', () => {
+      const waited = reduceChunks([...EXTERNAL_ACTIVITY_PREFIX, waiting('runtime-busy')]);
+      expect(waited.parts[0], 'expected the turn record to carry the cause').toMatchObject({
+        waiting: 'runtime-busy',
+      });
+      expect(waited.aiMessageUpdate?.patch.parts).toBe(waited.parts);
+
+      const cleared = reduceTextGenerationStreamChunk(waited, waiting(), REDUCER_OPTIONS);
+      expect(
+        cleared.parts[0],
+        'expected no waiting field after the clearing chunk'
+      ).not.toHaveProperty('waiting');
+    });
+
+    it('drops the wait when the turn settles, so a settled turn never reads as waiting', () => {
+      const settled = reduceChunks([
+        ...EXTERNAL_ACTIVITY_PREFIX,
+        waiting('runtime-unreachable'),
+        { type: 'external_turn_completed', reason: 'cancelled-by-user', done: false },
+      ]);
+
+      expect(settled.parts[0]).toMatchObject({ status: 'terminal' });
+      expect(settled.parts[0]).not.toHaveProperty('waiting');
+    });
+
+    it('drops the wait when a local stop settles the turn', () => {
+      const state = reduceChunks([...EXTERNAL_ACTIVITY_PREFIX, waiting('runtime-busy')]);
+      const settled = settleUnfinishedExternalTurn(state, 'runtime-disconnected');
+
+      expect(settled.parts[0]).not.toHaveProperty('waiting');
+    });
+
+    it('ignores a late report once the turn is terminal', () => {
+      const settled = reduceChunks([
+        ...EXTERNAL_ACTIVITY_PREFIX,
+        { type: 'external_turn_completed', reason: 'completed', done: false },
+        waiting('runtime-busy'),
+      ]);
+
+      expect(settled.parts[0]).not.toHaveProperty('waiting');
+    });
+  });
+
   it('builds separate thinking segments across tool boundaries', () => {
     const state = reduceChunks([
       { type: 'thinking_start', done: false },

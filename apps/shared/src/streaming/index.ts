@@ -34,6 +34,7 @@ export {
   externalSessionStartedChunk,
   externalSteerChunk,
   externalTurnCompletedChunk,
+  externalTurnWaitingChunk,
 } from './external-events';
 export {
   SSEContextEventSchema,

@@ -19,6 +19,7 @@ import {
   ExternalSteerRejectionReasonSchema,
   ExternalThreadUsageSchema,
   ExternalTurnTerminalReasonSchema,
+  ExternalTurnWaitCauseSchema,
   ExternalUsageSchema,
   ExternalVendorIdSchema,
   VendorText,
@@ -681,6 +682,25 @@ const SSEExternalTurnCompletedEventSchema = Type.Object(
   { additionalProperties: false }
 );
 
+/**
+ * Says a turn the vendor has not received is waiting to be resubmitted, or that it no longer is.
+ *
+ * Hub-originated, like `external_steer`: the submission loop retries what it proved was not
+ * submitted with no count cutoff, so the turn would otherwise read as running until the user
+ * pressed Stop. It is sent once the loop has waited longer than one backoff cap, and again with
+ * `cause` absent when the wait ends. The durable turn record keeps the same field, so a reload
+ * mid-wait agrees with the stream.
+ */
+const SSEExternalTurnWaitingEventSchema = Type.Object(
+  {
+    type: Type.Literal('external_turn_waiting'),
+    /** Why the turn is waiting. Absent means it no longer is. */
+    cause: Type.Optional(ExternalTurnWaitCauseSchema),
+    done: Type.Literal(false),
+  },
+  { additionalProperties: false }
+);
+
 export const SSEDoneEventSchema = Type.Object({
   type: Type.Literal('done'),
   done: Type.Literal(true),
@@ -736,6 +756,7 @@ export const StreamChunkSchema = Type.Union([
   SSEExternalErrorEventSchema,
   SSEExternalNoticeEventSchema,
   SSEExternalTurnCompletedEventSchema,
+  SSEExternalTurnWaitingEventSchema,
   SSEDoneEventSchema,
   SSEErrorEventSchema,
 ]);

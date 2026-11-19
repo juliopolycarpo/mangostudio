@@ -660,6 +660,15 @@ disagreeing.
 two of nine ways a turn ends and the hub decides the other seven, so without it a live view could
 only ever show two outcomes and a reload would replace them with a third.
 
+`external_turn_waiting` is hub-originated too. The submission loop retries a turn the runtime never
+received with capped backoff and no deadline, so a turn that is not reaching the agent would look
+exactly like one that is running. Once the waits add up to more than one backoff cap (30 s by
+default) the loop reports why, `runtime-unreachable` (the hub could not write the request, or the
+connection is gone) or `runtime-busy` (the runtime keeps declining it), and reports again with no
+cause when the connection returns, the runtime accepts, or the turn ends. The cause is also stored
+as `waiting` on the `external_turn` part, so a reload mid-wait shows it, and `finalize` drops it. The
+turn footer renders it as a notice; the live-vs-reload test covers the pair.
+
 An event type this hub does not recognize is dropped as inert, because a runtime newer than the hub
 may send progress the hub cannot read. The hub cannot tell that from an unreadable ending, and
 silence does not tell it either: a vendor running a long tool sends nothing, and no heartbeat exists.

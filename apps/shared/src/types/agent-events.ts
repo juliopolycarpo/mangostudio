@@ -10,6 +10,7 @@ import type {
   ExternalNoticeSeverity,
   ExternalSteerRejectionReason,
   ExternalTurnTerminalReason,
+  ExternalTurnWaitCause,
   ExternalUsage,
 } from '../external-agents/schemas';
 import type { ImageGenerationErrorCode } from '../generation/schemas';
@@ -280,6 +281,12 @@ export interface ExternalTurnPart {
    * continue it, so the reply was written without the earlier messages. The footer says so.
    */
   conversationReset?: ExternalConversationResetReason;
+  /**
+   * Set while the hub is holding a turn the vendor has not received, resubmitting it until the
+   * runtime can take it. Cleared when the vendor accepts the turn or the turn ends. Written to the
+   * record so a reload mid-wait says what the live stream said.
+   */
+  waiting?: ExternalTurnWaitCause;
 }
 
 /**

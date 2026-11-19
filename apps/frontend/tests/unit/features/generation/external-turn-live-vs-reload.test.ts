@@ -29,6 +29,7 @@ import {
   externalSessionStartedChunk,
   externalSteerChunk,
   externalTurnCompletedChunk,
+  externalTurnWaitingChunk,
 } from '@mangostudio/shared/streaming';
 import type { ExternalActivityPart, MessagePart } from '@mangostudio/shared/types';
 
@@ -411,6 +412,46 @@ describe('external turn: live stream vs reloaded transcript', () => {
     expect(comparable(live.parts)).toEqual(comparable(stored.parts));
     const text = live.parts.find((part) => part.type === 'text');
     expect(text).toMatchObject({ incomplete: true });
+  });
+
+  /**
+   * A wait is announced and cleared on both projections: the transcript's `markWaiting` and the
+   * reducer's `external_turn_waiting` case. Mid-wait they carry the cause; once the turn settles
+   * neither keeps it.
+   */
+  it.each([
+    ['while the wait lasts', false],
+    ['after the turn settles', true],
+  ] as const)('agrees on a wait %s', (_label, settles) => {
+    const stored = new ExternalTurnTranscript({
+      targetId: 'codex',
+      sessionId: 'hub-session-1',
+      startedAt: 0,
+    });
+    stored.markWaiting('runtime-busy');
+    const chunks: StreamChunk[] = [
+      externalSessionStartedChunk({
+        sessionId: 'hub-session-1',
+        targetId: 'codex',
+        resumed: false,
+      }),
+      externalTurnWaitingChunk('runtime-busy'),
+    ];
+    if (settles) {
+      stored.finalize('cancelled-by-user', 0);
+      chunks.push(externalTurnCompletedChunk('cancelled-by-user'));
+    }
+    const live = chunks.reduce(
+      (current, chunk) => reduceTextGenerationStreamChunk(current, chunk, REDUCER_OPTIONS),
+      createTextGenerationStreamState({ userMessageId: 'user-1', aiMessageId: 'ai-1' })
+    );
+
+    expect(comparable(live.parts)).toEqual(comparable(stored.parts));
+    const turn = live.parts.find((part) => part.type === 'external_turn');
+    expect(
+      turn?.type === 'external_turn' ? turn.waiting : 'no external_turn part',
+      'expected the wait to survive only while the turn is unsettled'
+    ).toBe(settles ? undefined : 'runtime-busy');
   });
 
   /**
