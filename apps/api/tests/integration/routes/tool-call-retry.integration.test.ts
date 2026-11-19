@@ -5,8 +5,13 @@ import { isTurnCheckpointPart, type TurnCheckpointPart } from '@mangostudio/shar
 import type { MessagePart } from '@mangostudio/shared/types';
 
 import { getDb } from '../../../src/db/database';
-import { isActiveTurn } from '../../../src/modules/generation/application/active-turn-registry';
+import {
+  cancelActiveTurn,
+  isActiveTurn,
+} from '../../../src/modules/generation/application/active-turn-registry';
+import { reserveToolCallRetry } from '../../../src/modules/generation/application/tool-call-retry';
 import { createTurnCheckpointPart } from '../../../src/modules/generation/application/turn-checkpoint';
+import { interruptCheckpointedMessage } from '../../../src/modules/generation/application/turn-recovery';
 import { toolCallRetryRoutes } from '../../../src/modules/generation/http/tool-call-retry-routes';
 import { insertMessage } from '../../../src/modules/messages/infrastructure/message-repository';
 import type { RegisteredTool } from '../../../src/services/tools/types';
@@ -507,5 +512,91 @@ describe('POST /chats/:id/messages/:messageId/tool-calls/:callId/retry run', () 
     expect(parseSseEvents(await body).at(-1)).toMatchObject({ type: 'done' });
     expect((await readMessage(first.messageId)).isGenerating).toBe(0);
     expect(isActiveTurn(first.messageId)).toBe(false);
+  });
+});
+
+describe('concurrent retries of one message', () => {
+  it('keeps the winner registered and cancellable, and refuses the loser', async () => {
+    const chat = await insertTestChat(testUser.id);
+    const { messageId } = await seedMessage(
+      chat.id,
+      endedCall('call-1', BLOCKING_TOOL, { status: 'timed_out', reasonCode: 'timeout' })
+    );
+    const app = appFor();
+
+    const responses = await Promise.all([
+      app.handle(retryRequest(chat.id, messageId, 'call-1')),
+      app.handle(retryRequest(chat.id, messageId, 'call-1')),
+    ]);
+
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    const winner = responses.find((response) => response.status === 200);
+    if (winner === undefined) throw new Error('expected one retry to win with status 200');
+    const body = winner.text();
+    await blockingToolEntered;
+
+    // The loser's cleanup ran; the winner must still be the registered turn.
+    expect(isActiveTurn(messageId)).toBe(true);
+    expect(cancelActiveTurn(messageId, testUser.id, chat.id, 'user_cancelled')).toBe(true);
+    releaseBlockingTool?.();
+    await body;
+    expect(isActiveTurn(messageId)).toBe(false);
+    expect(toolRuns).toHaveLength(1);
+  });
+});
+
+describe('a retry interrupted by a crash', () => {
+  it('does not offer to continue the original turn, and seals the new call', async () => {
+    const chat = await insertTestChat(testUser.id);
+    const { messageId, checkpoint } = await seedMessage(
+      chat.id,
+      endedCall('call-1', BLOCKING_TOOL, { status: 'timed_out', reasonCode: 'timeout' })
+    );
+    const running = await appFor().handle(retryRequest(chat.id, messageId, 'call-1'));
+    const body = running.text();
+    await blockingToolEntered;
+
+    // What the boot sweep does to a row left generating by a dead process.
+    const swept = await interruptCheckpointedMessage(
+      { messageId, reasonCode: 'server_restart' },
+      getDb()
+    );
+
+    expect(swept).toBe(true);
+    const message = await readMessage(messageId);
+    expect(message.isGenerating).toBe(0);
+    // An `interrupted` checkpoint is what makes the chat offer "continue interrupted turn".
+    expect(message.parts.find(isTurnCheckpointPart)).toEqual(checkpoint);
+    const retried = toolCallsOf(message.parts).find((call) => call.retryOf === 'call-1');
+    expect(retried?.execution?.status).not.toBe('running');
+
+    releaseBlockingTool?.();
+    await body;
+  });
+
+  it('is already marked when the message is reopened, before any tool work', async () => {
+    const chat = await insertTestChat(testUser.id);
+    const { messageId } = await seedMessage(
+      chat.id,
+      endedCall('call-1', READ_TOOL, { status: 'timed_out', reasonCode: 'timeout' })
+    );
+
+    await reserveToolCallRetry(
+      {
+        chatId: chat.id,
+        messageId,
+        callId: 'call-1',
+        userId: testUser.id,
+        confirmed: true,
+        onTurnReserved: () => {},
+      },
+      getDb()
+    );
+    await interruptCheckpointedMessage({ messageId, reasonCode: 'server_restart' }, getDb());
+
+    const message = await readMessage(messageId);
+    expect(message.isGenerating).toBe(0);
+    expect(message.parts.find(isTurnCheckpointPart)?.status).toBe('completed');
+    expect(toolRuns).toEqual([]);
   });
 });

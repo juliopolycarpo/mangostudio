@@ -28,7 +28,7 @@ import { AgentSettingsError } from '../../agents/domain/agent-profile';
 import { getOwnedChat, type OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
 import { publishGitTurnCompletionInvalidation } from '../../git/application/git-realtime-service';
 import { finalizeCheckpointedAiResponse } from '../infrastructure/conversation-persistence';
-import { findActiveTurnByChat } from './active-turn-registry';
+import { ActiveTurnConflictError, findActiveTurnByChat } from './active-turn-registry';
 import { resolveRunnerAgentProfile } from './resolve-runner-agent';
 import { resolveTurnToolRuntime, type TurnToolRuntime } from './resolve-turn-context';
 import { executeStandardToolCallsWithProgress } from './standard-tool-execution';
@@ -73,6 +73,8 @@ const REFUSAL_MESSAGES: Readonly<Record<ToolCallRetryRefusal, string>> = {
   needs_model: 'it needs a model turn to finish.',
 };
 
+type RetryCallPart = Extract<MessagePart, { type: 'tool_call' }>;
+
 export interface ReserveToolCallRetryInput {
   readonly chatId: string;
   readonly messageId: string;
@@ -83,7 +85,9 @@ export interface ReserveToolCallRetryInput {
   readonly confirmed: boolean;
   /**
    * Called with the message id before the message is reopened, so the turn is
-   * registered by the time any reader can see it generating.
+   * registered by the time any reader can see it generating. It throws
+   * `ActiveTurnConflictError` when another retry already holds the message;
+   * the caller releases its registration if this function then throws.
    */
   readonly onTurnReserved: (messageId: string) => void;
 }
@@ -93,11 +97,8 @@ export interface ReservedToolCallRetry {
   readonly chatId: string;
   readonly userId: string;
   readonly messageId: string;
-  /** The new call's id. */
-  readonly callId: string;
-  readonly retryOf: string;
-  readonly name: string;
-  readonly args: Record<string, unknown>;
+  /** The new call, as stored when the message was reopened. */
+  readonly retryCall: RetryCallPart;
   /** The message as it stood before the retry; the original call is in here untouched. */
   readonly parts: MessagePart[];
   readonly text: string;
@@ -187,14 +188,36 @@ export async function reserveToolCallRetry(
     );
   }
 
-  input.onTurnReserved(input.messageId);
+  try {
+    input.onTurnReserved(input.messageId);
+  } catch (error) {
+    // Another retry of this message registered first and owns its live turn.
+    if (error instanceof ActiveTurnConflictError) {
+      throw new ToolCallRetryConflictError('A turn is running in this chat.');
+    }
+    throw error;
+  }
+  // The new call is stored with the reopen, queued and with no result yet: that
+  // is what tells a crash sweep this generating row is a tool-only retry (see
+  // `isToolOnlyRetryInProgress`) and not a model turn to offer to continue.
+  const retryCall: RetryCallPart = {
+    type: 'tool_call',
+    toolCallId: generateId(),
+    name: original.name,
+    args: original.args,
+    retryOf: original.toolCallId,
+    initiatedBy: 'user',
+  };
   const reopened = await db
     .updateTable('messages')
-    .set({ isGenerating: 1 })
+    .set({ isGenerating: 1, parts: JSON.stringify([...parts, retryCall]) })
     .where('id', '=', input.messageId)
     .where('chatId', '=', input.chatId)
     .where('role', '=', 'ai')
     .where('isGenerating', '=', 0)
+    // The parts this decision read: another retry that settled since would
+    // otherwise be overwritten, and its call retried a second time.
+    .where('parts', '=', message.parts)
     .where((eb) =>
       eb.not(
         eb.exists(
@@ -208,7 +231,9 @@ export async function reserveToolCallRetry(
     )
     .executeTakeFirst();
   if (reopened.numUpdatedRows === 0n) {
-    throw new ToolCallRetryConflictError('A turn is running in this chat.');
+    throw new ToolCallRetryConflictError(
+      'A turn is running in this chat, or the message changed; try again.'
+    );
   }
 
   return {
@@ -216,10 +241,7 @@ export async function reserveToolCallRetry(
     chatId: input.chatId,
     userId: input.userId,
     messageId: input.messageId,
-    callId: generateId(),
-    retryOf: original.toolCallId,
-    name: original.name,
-    args: original.args,
+    retryCall,
     parts,
     text: message.text,
     providerState: message.providerState,
@@ -310,17 +332,10 @@ export async function* runToolCallRetry(
   signal: AbortSignal
 ): AsyncGenerator<StreamEvent> {
   const startedAt = Date.now();
-  const parts = [...reserved.parts];
+  const { retryCall } = reserved;
   // The new call sits beside the original. Its own part carries the link and
   // the origin, and the pipeline upserts its lifecycle into this same part.
-  parts.push({
-    type: 'tool_call',
-    toolCallId: reserved.callId,
-    name: reserved.name,
-    args: reserved.args,
-    retryOf: reserved.retryOf,
-    initiatedBy: 'user',
-  });
+  const parts: MessagePart[] = [...reserved.parts, { ...retryCall }];
 
   // A copy of the checkpoint that is not in `parts`: the writer advances its
   // own sequence and status, while the message keeps the checkpoint the turn
@@ -347,7 +362,7 @@ export async function* runToolCallRetry(
   let failure: unknown;
   try {
     for await (const item of executeStandardToolCallsWithProgress(
-      [[reserved.callId, { name: reserved.name, argsStr: JSON.stringify(reserved.args) }]],
+      [[retryCall.toolCallId, { name: retryCall.name, argsStr: JSON.stringify(retryCall.args) }]],
       {
         userId: reserved.userId,
         chatId: reserved.chatId,

@@ -270,6 +270,26 @@ function isExternalTurnPart(
   return part.type === 'external_turn';
 }
 
+/**
+ * Whether a generating message is a user's tool-call retry, not a model turn.
+ *
+ * Only a retry stores a call with `initiatedBy: 'user'`, and it stores it when it
+ * reopens the message, so the mark is durable before any tool work starts. A
+ * model turn never reopens a message, so a call with no result here can only
+ * belong to the retry still running (or crashed).
+ */
+export function isToolOnlyRetryInProgress(parts: readonly MessagePart[]): boolean {
+  const resolvedCallIds = new Set(
+    parts.filter((part) => part.type === 'tool_result').map((part) => part.toolCallId)
+  );
+  return parts.some(
+    (part) =>
+      part.type === 'tool_call' &&
+      part.initiatedBy === 'user' &&
+      !resolvedCallIds.has(part.toolCallId)
+  );
+}
+
 export async function interruptCheckpointedMessage(
   input: {
     readonly messageId: string;
@@ -310,12 +330,16 @@ async function interruptCheckpointedMessageIn(
   ) {
     return false;
   }
+  const toolOnlyRetry = isToolOnlyRetryInProgress(parsed);
   reconcileInterruptedMessageParts(parsed);
   // A row without a readable checkpoint predates turn recovery or came from the
   // message create route. It carries no resumable state, but clearing
   // `isGenerating` still matters: otherwise it spins in the UI forever and every
   // later reconcile pass re-reads it.
-  if (checkpoint) {
+  // A tool-only retry has no model work left to continue: its checkpoint is the
+  // one the original turn ended with, so flipping it to `interrupted` would offer
+  // to resume that turn. The call is sealed below and offers its own retry.
+  if (checkpoint && !toolOnlyRetry) {
     refreshTurnCheckpointPart(
       checkpoint,
       { text: row.text, parts: parsed, providerState: row.providerState },

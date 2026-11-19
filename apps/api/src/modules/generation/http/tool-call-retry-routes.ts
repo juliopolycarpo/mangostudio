@@ -21,7 +21,7 @@ import {
 import { getErrorCode } from '../../../lib/error-code';
 import { SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_INTERVAL_MS } from '../../../lib/hub-connection-limits';
 import { requireAuth } from '../../../plugins/auth-middleware';
-import { registerActiveTurn, unregisterActiveTurn } from '../application/active-turn-registry';
+import { registerActiveTurn } from '../application/active-turn-registry';
 import {
   reserveToolCallRetry,
   runToolCallRetry,
@@ -43,11 +43,12 @@ export const toolCallRetryRoutes = (app: Elysia) =>
         const userId = user?.id ?? '';
         const db = getDb();
         const abortController = new AbortController();
-        let registeredMessageId: string | null = null;
+        // Set only by a registration this request won; the release it holds
+        // removes that entry and never another request's for the same message.
+        let releaseTurn: (() => void) | null = null;
         const unregisterTurn = () => {
-          if (!registeredMessageId) return;
-          unregisterActiveTurn(registeredMessageId);
-          registeredMessageId = null;
+          releaseTurn?.();
+          releaseTurn = null;
         };
 
         let reserved: Awaited<ReturnType<typeof reserveToolCallRetry>>;
@@ -60,8 +61,7 @@ export const toolCallRetryRoutes = (app: Elysia) =>
               userId,
               confirmed: body.confirmed === true,
               onTurnReserved: (messageId) => {
-                registeredMessageId = messageId;
-                registerActiveTurn(messageId, {
+                releaseTurn = registerActiveTurn(messageId, {
                   userId,
                   chatId: params.id,
                   abort: (reasonCode) => abortController.abort(reasonCode),

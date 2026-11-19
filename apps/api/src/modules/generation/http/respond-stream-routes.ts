@@ -44,7 +44,7 @@ import {
   settleOperation,
 } from '../../operations/application/product-operation';
 import { trackProductOperationWork } from '../../operations/application/product-operation-work';
-import { registerActiveTurn, unregisterActiveTurn } from '../application/active-turn-registry';
+import { registerActiveTurn } from '../application/active-turn-registry';
 import {
   NoModelAvailableError,
   type ResolvedModel,
@@ -207,19 +207,23 @@ async function respondStream(
   }
 
   const abortController = new AbortController();
-  let activeAssistantMessageId: string | null = null;
+  let registeredTurn: { readonly messageId: string; readonly release: () => void } | null = null;
   const registerTurn = (messageId: string) => {
-    activeAssistantMessageId = messageId;
-    registerActiveTurn(messageId, {
-      userId,
-      chatId: body.chatId,
-      abort: (reasonCode) => abortController.abort(reasonCode),
-    });
+    // A recovery resume registers when it reserves its rows, and streamTextTurn
+    // then announces the same prepared turn again.
+    if (registeredTurn?.messageId === messageId) return;
+    registeredTurn = {
+      messageId,
+      release: registerActiveTurn(messageId, {
+        userId,
+        chatId: body.chatId,
+        abort: (reasonCode) => abortController.abort(reasonCode),
+      }),
+    };
   };
   const unregisterTurn = () => {
-    if (!activeAssistantMessageId) return;
-    unregisterActiveTurn(activeAssistantMessageId);
-    activeAssistantMessageId = null;
+    registeredTurn?.release();
+    registeredTurn = null;
   };
 
   let reservedRecovery: Awaited<ReturnType<typeof reserveInterruptedTurnResume>> | null = null;
