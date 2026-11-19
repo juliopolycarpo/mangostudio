@@ -1551,6 +1551,9 @@ export const messages = {
     searchPlaceholder: 'Buscar chats…',
     searchNoResultsHint: 'Tente outro título, pasta ou agente.',
     clearSearch: 'Limpar busca',
+    loadingMore: 'Carregando mais chats…',
+    loadMore: 'Carregar mais chats',
+    currentChatGroup: 'Chat aberto',
     // Rótulos de harness estilo terminal — nomes de marca, iguais nos dois idiomas.
     runner: {
       mango: 'mango',

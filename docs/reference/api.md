@@ -39,17 +39,36 @@ examples.
 
 | Method   | Path                   | Auth | Purpose                    |
 | -------- | ---------------------- | ---- | -------------------------- |
-| `GET`    | `/api/chats`           | Yes  | List user's chats          |
+| `GET`    | `/api/chats`           | Yes  | Page user's chats          |
+| `GET`    | `/api/chats/:id`       | Yes  | One chat by id             |
 | `POST`   | `/api/chats`           | Yes  | Create new chat            |
 | `PUT`    | `/api/chats/:id`       | Yes  | Update chat (title, model) |
 | `DELETE` | `/api/chats/:id`       | Yes  | Delete chat                |
 | `GET`    | `/api/chats/:id/todos` | Yes  | Current todo list state    |
 
+`GET /api/chats` returns one page, `{ items, nextCursor }` (`ChatListPage` from
+`@mangostudio/shared/chat`), most recently updated first. `limit` is 1 to 100 (default 50). Pass
+the previous page's `nextCursor` as `cursor` to read the next; `nextCursor` is `null` on the last
+page. A malformed `cursor` answers 400 with `code: "VALIDATION"`.
+
+`q` keeps only the chats whose title, workdir folder name (the last path segment) or runner label
+(`mango` for the built-in runner, the target id for a vendor) contains it. Matching is a literal
+substring (`%` and `_` are ordinary characters) that ignores ASCII case, surrounding whitespace is
+trimmed, and a blank `q` lists everything. `q` is at most 100 characters (`CHAT_SEARCH_MAX_LENGTH`),
+else 422. The matches page with the same `limit` and `cursor`. A substring match cannot use an
+index, so SQLite walks the account's chats newest first and tests each until the page is full: a
+common term returns after the first page's worth of rows, while a rare or absent term reads every
+chat the account has (about 5 ms at 2,000 chats and 21 ms at 10,000 on the development machine).
+
+`GET /api/chats/:id` returns the chat as the list shows it, for a client that holds only some pages
+of the list. A chat that does not exist and one another account owns both answer 404 with
+`code: "NOT_FOUND"`.
+
 `GET /api/chats/:id/todos` returns `{ todos, updatedAt }` (`ChatTodosResponse` from
 `@mangostudio/shared/todos`); `updatedAt` is `null` when the chat has no todo list yet.
 The list is kept live during streaming by the `todo_update` SSE chunk.
 
-There is no mounted `GET /api/chats/:id` route. Read chat metadata from the authenticated chat list; use `PUT /api/chats/:id` with `UpdateChatBodySchema` to update it.
+Use `PUT /api/chats/:id` with `UpdateChatBodySchema` to update a chat.
 
 ## Message Endpoints
 

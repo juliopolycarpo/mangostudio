@@ -201,6 +201,10 @@ function AuthenticatedLayout() {
         currentPage={activePage}
         onNavigate={(page) => app.handleNavigate(page)}
         chats={app.chats}
+        chatPaging={app.chatPaging}
+        chatSearch={app.chatSearch}
+        onChatSearchTextChange={app.setChatSearchText}
+        pinnedChat={app.pinnedChat}
         currentChatId={app.currentChatId}
         onSelectChat={app.handleSelectChat}
         onUpdateChatTitle={(chatId, title) => void app.handleUpdateChatTitle(chatId, title)}

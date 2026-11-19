@@ -14,6 +14,6 @@ export interface ConnectedPaletteProps extends PaletteFrameState {
 }
 
 export function ConnectedPalette({ onClose, ...frame }: ConnectedPaletteProps) {
-  const { items, isLoading } = useCommandRegistry(onClose);
+  const { items, isLoading } = useCommandRegistry(onClose, frame.query);
   return <PaletteResults {...frame} items={items} isLoading={isLoading} />;
 }

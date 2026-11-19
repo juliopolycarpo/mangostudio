@@ -18,6 +18,7 @@ import type { Chat } from '@mangostudio/shared/chat';
 import { useQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
+import { type ChatPaging, NO_MORE_CHATS } from '@/features/chat/chat-list-pages';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import { onGithubCreatePrRequest } from '@/features/github/lib/github-panel-request';
 import { githubPrsQueryOptions } from '@/features/github/queries';
@@ -61,10 +62,11 @@ const agents: AgentProfile[] = [];
  * One render's worth of shell state. Deliberately rebuilt per call with the
  * same field values — that is exactly what a streamed token produces.
  */
-function appState(): AppState {
+function appState(chatPaging: ChatPaging = NO_MORE_CHATS): AppState {
   return {
     agents,
     chats,
+    chatPaging,
     currentChatId: 'c1',
     currentEnvironmentId: null,
     runner: { kind: 'mangostudio', agentId: 'default' },
@@ -79,24 +81,41 @@ function appState(): AppState {
 }
 
 /** The registry hook's own context, since the shared harness owns the wrapper. */
+interface Seen {
+  items: readonly CommandItem[];
+  isLoading?: boolean;
+}
+
 function Probe({
   app,
   onRun,
   seen,
+  query,
 }: {
   app: AppState;
   onRun: () => void;
-  seen: { items: readonly CommandItem[] };
+  seen: Seen;
+  query?: string;
 }) {
   return (
     <AppContext value={app}>
-      <Registry onRun={onRun} seen={seen} />
+      <Registry onRun={onRun} seen={seen} query={query} />
     </AppContext>
   );
 }
 
-function Registry({ onRun, seen }: { onRun: () => void; seen: { items: readonly CommandItem[] } }) {
-  seen.items = useCommandRegistry(onRun).items;
+function Registry({
+  onRun,
+  seen,
+  query,
+}: {
+  onRun: () => void;
+  seen: Seen;
+  query: string | undefined;
+}) {
+  const registry = useCommandRegistry(onRun, query);
+  seen.items = registry.items;
+  seen.isLoading = registry.isLoading;
   return null;
 }
 
@@ -161,6 +180,109 @@ async function setup(
     );
   return { scenario, seen, onRun, rerender: rerenderRegistry };
 }
+
+describe('useCommandRegistry sessions beyond the loaded pages', () => {
+  const DEEP = {
+    id: 'deep-1',
+    title: 'Plugin LSP archive',
+    updatedAt: 0,
+    runner: { kind: 'mangostudio' },
+  };
+
+  function installHub() {
+    const scenario = createFetchScenario();
+    scenario.install();
+    scenario.respondWithJson('GET', '/api/environments', { body: [] });
+    scenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
+      body: { agents: [] },
+    });
+    return scenario;
+  }
+
+  /** The chat-list requests the hub saw, as `path?query`. */
+  function chatListRequests(scenario: ReturnType<typeof createFetchScenario>): string[] {
+    return (
+      scenario.fetchMock.mock.calls
+        .map(([input]) => String(input instanceof Request ? input.url : input))
+        .map((url) => url.replace(/^https?:\/\/[^/]+/, ''))
+        // The list itself, not `/api/chats/<id>/...` reads of one chat.
+        .filter((path) => /^\/api\/chats(\?|$)/.test(path))
+    );
+  }
+
+  const sessionIds = (seen: Seen) =>
+    seen.items.filter((item) => item.section === 'sessions').map((item) => item.id);
+
+  it('reads no further page of the chat list when it opens', async () => {
+    const loadMore = jest.fn(() => Promise.resolve());
+    const scenario = installHub();
+    const seen: Seen = { items: [] };
+
+    render(
+      <Probe
+        app={appState({ hasMore: true, isLoadingMore: false, loadFailed: false, loadMore })}
+        onRun={jest.fn()}
+        seen={seen}
+      />
+    );
+    await flushAsyncRender();
+
+    expect(loadMore, 'expected opening the palette to read no chat page').not.toHaveBeenCalled();
+    expect(chatListRequests(scenario), 'expected no chat list request before typing').toEqual([]);
+    scenario.restore();
+  });
+
+  it('searches the hub for what is typed and offers the sessions it finds beyond the loaded pages', async () => {
+    const scenario = installHub();
+    scenario.respondWithJson('GET', '/api/chats?limit=50&q=lsp', {
+      body: {
+        items: [DEEP, { ...chats[0], title: 'Plugin LSP' }],
+        nextCursor: null,
+      },
+    });
+    const seen: Seen = { items: [] };
+
+    render(<Probe app={appState()} onRun={jest.fn()} seen={seen} query="lsp" />);
+
+    await waitFor(() => expect(sessionIds(seen)).toContain('session:deep-1'));
+    expect(chatListRequests(scenario)).toEqual(['/api/chats?limit=50&q=lsp']);
+    expect(
+      sessionIds(seen).filter((id) => id === 'session:c1'),
+      'expected a chat both loaded and found to be listed once'
+    ).toHaveLength(1);
+    scenario.restore();
+  });
+
+  it('is loading until the hub has answered the typed text', async () => {
+    const scenario = installHub();
+    scenario.respondWithJson('GET', '/api/chats?limit=50&q=lsp', {
+      body: { items: [], nextCursor: null },
+    });
+    const seen: Seen = { items: [] };
+
+    render(<Probe app={appState()} onRun={jest.fn()} seen={seen} query="lsp" />);
+    await flushAsyncRender();
+    expect(seen.isLoading, 'before the reply').toBe(true);
+
+    await waitFor(() => expect(seen.isLoading).toBe(false));
+    scenario.restore();
+  });
+
+  it('keeps the loaded sessions when the search is refused', async () => {
+    const scenario = installHub();
+    scenario.respondWithJson('GET', '/api/chats?limit=50&q=lsp', {
+      status: 500,
+      body: { error: 'boom', code: 'INTERNAL' },
+    });
+    const seen: Seen = { items: [] };
+
+    render(<Probe app={appState()} onRun={jest.fn()} seen={seen} query="lsp" />);
+
+    await waitFor(() => expect(seen.isLoading).toBe(false));
+    expect(sessionIds(seen)).toEqual(['session:c1']);
+    scenario.restore();
+  });
+});
 
 describe('useCommandRegistry', () => {
   it('rebuilds no rows when only the shell object identity changed', async () => {

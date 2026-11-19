@@ -91,8 +91,11 @@ assertType<
   >
 >();
 
-// 6. A list route stays an array of the same entity rather than `unknown[]`.
-assertType<Equals<ChatsGetResponse['data'], ChatData[] | null>>();
+// 6. A list route stays a page of the same entity, with the cursor to the next
+//    page, rather than `unknown[]`.
+assertType<
+  Equals<ChatsGetResponse['data'], { items: ChatData[]; nextCursor: string | null } | null>
+>();
 
 // 7. The socket-adjacent route is still reachable through the same client, so
 //    a WebSocket route dropping out of `App` fails here rather than at runtime.

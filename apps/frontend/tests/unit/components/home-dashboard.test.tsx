@@ -15,7 +15,7 @@ import { describe, expect, it, jest } from 'bun:test';
 import type { Chat } from '@mangostudio/shared/chat';
 import type { Environment } from '@mangostudio/shared/environments';
 import { createMockChat } from '@mangostudio/shared/test-utils';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { HomePage, type HomePageProps } from '../../../src/features/home/HomePage';
@@ -108,7 +108,9 @@ interface ScenarioOverrides {
 function installScenario(overrides: ScenarioOverrides = {}) {
   const scenario = createFetchScenario();
   scenario
-    .respondWithJson('GET', '/api/chats', { body: overrides.chats ?? [] })
+    .respondWithJson('GET', '/api/chats?limit=50', {
+      body: { items: overrides.chats ?? [], nextCursor: null },
+    })
     .respondWithJson('POST', '/api/git/state/batch', {
       body: { states: overrides.gitBatch ?? {} },
     })
@@ -217,7 +219,9 @@ describe('HomePage', () => {
       const tiles = await screen.findAllByTestId('workspace-tile');
       expect(tiles).toHaveLength(2);
       expect(tiles[0]).toHaveTextContent('mango');
-      expect(tiles[0]).toHaveTextContent('feat/lsp-plugin');
+      // The tiles draw from the chat list; the branch and tree state arrive
+      // with the batched Git read that list's ids feed, one request later.
+      await waitFor(() => expect(tiles[0]).toHaveTextContent('feat/lsp-plugin'));
       expect(tiles[0]).toHaveTextContent('3 files changed');
       expect(tiles[0]).toHaveTextContent('2 chats');
       expect(tiles[1]).toHaveTextContent('lsp-store');

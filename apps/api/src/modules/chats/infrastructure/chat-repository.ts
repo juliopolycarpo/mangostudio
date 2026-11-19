@@ -12,10 +12,11 @@ import {
   usableVendorId,
   vendorSelection,
 } from '@mangostudio/shared/external-agents';
-import { type Kysely, type Selectable, sql, type Updateable } from 'kysely';
+import { type Kysely, type RawBuilder, type Selectable, sql, type Updateable } from 'kysely';
 
 import type { Database } from '../../../db/types';
 import { generateId } from '../../../utils/id';
+import type { ChatListCursor } from '../domain/chat-list-cursor';
 
 class ChatRunnerCorruptionError extends Error {
   constructor(chatId: string, reason: string) {
@@ -231,24 +232,83 @@ export interface ChatRecordWithState extends ChatRecord {
 }
 
 /**
- * Every chat one user owns, most recently updated first, with the state the
- * list needs to show each chat's context usage. Chats that share a millisecond
- * keep creation order (`rowid` ascending), as messages do with `timestamp, rowid`.
- * The `(userId, updatedAt DESC)` index supplies both keys, so SQLite streams rows
- * instead of sorting them; `rowid DESC` or `id` would bring the sort back.
+ * Whether `needle` occurs in what the sidebar's search box reads from a chat:
+ * its title, its workdir's last path segment and its runner label (`mango` for
+ * the built-in runner, the target id for a vendor), the same three fields as
+ * `chatSearchText` on the client. They are joined by a newline, which a search
+ * box cannot type, so no match straddles two fields.
+ *
+ * `instr` rather than `LIKE`: the needle is taken literally, so `%` and `_`
+ * need no escaping. `lower()` folds ASCII only, so a non-ASCII letter matches
+ * only in the case it was stored in. The last segment tolerates trailing and
+ * Windows separators like `workdirBasename`.
  */
-export async function listByUserId(
+function chatSearchMatch(needle: string): RawBuilder<boolean> {
+  const normalized = sql`rtrim(replace(coalesce(workdir, ''), char(92), '/'), '/')`;
+  const basename = sql`replace(${normalized}, rtrim(${normalized}, replace(${normalized}, '/', '')), '')`;
+  const runnerLabel = sql`CASE runnerKind WHEN 'mangostudio' THEN 'mango' ELSE coalesce(runnerTargetId, '') END`;
+  return sql<boolean>`instr(lower(title || char(10) || ${basename} || char(10) || ${runnerLabel}), lower(${needle})) > 0`;
+}
+
+/** A listed chat with the `rowid` that places it inside a tie of `updatedAt`. */
+export interface ListedChat extends ChatRecordWithState {
+  rowid: number;
+}
+
+/** One page of one user's chats, in list order. */
+export interface ChatListSlice {
+  chats: ListedChat[];
+  /** Whether a chat follows the last one returned. */
+  hasMore: boolean;
+}
+
+/**
+ * One page of the chats one user owns, most recently updated first, with the
+ * state the list needs to show each chat's context usage. Chats that share a
+ * millisecond keep creation order (`rowid` ascending), as messages do with
+ * `timestamp, rowid`. `after` is the last chat of the previous page: the page
+ * starts at the first chat behind it in that order, so a chat created, bumped
+ * or deleted between two requests moves no row of a later page.
+ *
+ * The `(userId, updatedAt DESC)` index supplies both keys, so SQLite streams
+ * rows instead of sorting them; `rowid DESC` or `id` would bring the sort back.
+ * The `updatedAt <=` bound is what the index can seek on; the `OR` beneath it
+ * then drops only the chats of the tied millisecond that precede the cursor.
+ * One extra row is read to learn whether another page exists.
+ *
+ * `search` keeps only the chats it matches (see {@link chatSearchMatch}). The
+ * match cannot use an index, so SQLite still walks the user's chats in index
+ * order and tests each one, stopping at the first `limit + 1` that match.
+ */
+export async function listPageByUserId(
   userId: string,
+  page: { limit: number; after?: ChatListCursor; search?: string },
   db: Kysely<Database>
-): Promise<ChatRecordWithState[]> {
-  const rows = await db
+): Promise<ChatListSlice> {
+  let query = db
     .selectFrom('chats')
-    .select([...CHAT_COLUMNS, ...CHAT_STATE_COLUMNS])
-    .where('userId', '=', userId)
+    .select([...CHAT_COLUMNS, ...CHAT_STATE_COLUMNS, sql<number>`rowid`.as('rowid')])
+    .where('userId', '=', userId);
+  if (page.search) query = query.where(chatSearchMatch(page.search));
+  const { after } = page;
+  if (after) {
+    query = query
+      .where('updatedAt', '<=', after.updatedAt)
+      .where((eb) =>
+        eb.or([eb('updatedAt', '<', after.updatedAt), eb(sql`rowid`, '>', after.rowid)])
+      );
+  }
+  const rows = await query
     .orderBy('updatedAt', 'desc')
     .orderBy(sql`rowid`, 'asc')
+    .limit(page.limit + 1)
     .execute();
-  return rows.map(mapChatRowWithState);
+  return {
+    chats: rows
+      .slice(0, page.limit)
+      .map((row) => ({ ...mapChatRowWithState(row), rowid: row.rowid })),
+    hasMore: rows.length > page.limit,
+  };
 }
 
 /** Exactly what the batched git state read consumes; narrow on purpose so a

@@ -1,6 +1,6 @@
 import { realpathSync } from 'node:fs';
 
-import { type Chat, ChatListSchema, ChatSchema } from '@mangostudio/shared/chat';
+import { type Chat, ChatListPageSchema, ChatSchema } from '@mangostudio/shared/chat';
 import { EnvironmentSchema, RuntimeLifecycleViewSchema } from '@mangostudio/shared/environments';
 import { ApiErrorResponseSchema } from '@mangostudio/shared/errors';
 import { RealtimeServerMessageSchema } from '@mangostudio/shared/realtime';
@@ -163,7 +163,12 @@ export async function smokeBinaryApplication(options: ApplicationSmokeOptions): 
   const updated = await json(`/api/chats/${chat.id}`, 'PUT', { title: updatedTitle });
   assertSuccess(updated, 'update chat');
   const requireStoredChat = async (): Promise<void> => {
-    const chats = assertSmokeSchema(ChatListSchema, await json('/api/chats/'), 'chat list');
+    // The smoke account holds one chat, so the first page is the whole list.
+    const { items: chats } = assertSmokeSchema(
+      ChatListPageSchema,
+      await json('/api/chats/'),
+      'chat list'
+    );
     if (!chats.some((item) => item.id === chat.id && item.title === updatedTitle)) {
       throw new Error(
         `chat list: expected persisted ${chat.id} with title ${updatedTitle} | received ${JSON.stringify(chats)}`
@@ -233,8 +238,8 @@ export async function smokeBinaryApplication(options: ApplicationSmokeOptions): 
   await options.restart();
   await requireStoredChat();
   assertSuccess(await json(`/api/chats/${chat.id}`, 'DELETE'), 'delete chat');
-  const remaining = assertSmokeSchema(
-    ChatListSchema,
+  const { items: remaining } = assertSmokeSchema(
+    ChatListPageSchema,
     await json('/api/chats/'),
     'chat list after delete'
   );

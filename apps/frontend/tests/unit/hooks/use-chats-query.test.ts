@@ -44,6 +44,17 @@ void mock.module('../../../src/lib/api-client', () => ({
 const { chatKeys, useCreateChatMutation, useDeleteChatMutation, useUpdateChatMutation } =
   await import('../../../src/features/chat/queries');
 
+/** The cache entry of a chat list holding these pages, newest first. */
+function chatPages(...pages: Chat[][]) {
+  return {
+    pages: pages.map((items, index) => ({
+      items,
+      nextCursor: index < pages.length - 1 ? `cursor-${index}` : null,
+    })),
+    pageParams: pages.map((_, index) => (index === 0 ? null : `cursor-${index - 1}`)),
+  };
+}
+
 function ok<T>(data: T) {
   return { data, error: null };
 }
@@ -135,7 +146,7 @@ describe('useCreateChatMutation', () => {
     });
 
     act(() => {
-      result.current.queryClient.setQueryData(chatKeys.lists(), [EXISTING_CHAT]);
+      result.current.queryClient.setQueryData(chatKeys.lists(), chatPages([EXISTING_CHAT]));
     });
 
     await act(async () => {
@@ -144,12 +155,41 @@ describe('useCreateChatMutation', () => {
 
     // `expect<unknown>` because `getQueryData` has no `TQueryFnData` here and
     // bun-types types `toEqual` against the received type.
-    expect<unknown>(result.current.queryClient.getQueryData(chatKeys.lists())).toEqual([
-      newChat,
-      EXISTING_CHAT,
-    ]);
+    expect<unknown>(result.current.queryClient.getQueryData(chatKeys.lists())).toEqual(
+      chatPages([newChat, EXISTING_CHAT])
+    );
     expect<unknown>(result.current.queryClient.getQueryData(chatKeys.detail(newChat.id))).toEqual(
       newChat
+    );
+    await drainCapabilityInvalidation();
+  });
+
+  it('puts the new chat on the newest page and leaves the cursors to the older pages alone', async () => {
+    const newChat = createMockChat({ id: 'chat-new', title: 'New', createdAt: 9, updatedAt: 9 });
+    const olderChat = createMockChat({
+      id: 'chat-older',
+      title: 'Older',
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    mockPost.mockResolvedValue(ok(newChat));
+    const { result } = renderHook(() => ({
+      mutation: useCreateChatMutation(),
+      queryClient: useQueryClient(),
+    }));
+    act(() => {
+      result.current.queryClient.setQueryData(
+        chatKeys.lists(),
+        chatPages([EXISTING_CHAT], [olderChat])
+      );
+    });
+
+    await act(async () => {
+      await result.current.mutation.mutateAsync({ title: 'New' });
+    });
+
+    expect<unknown>(result.current.queryClient.getQueryData(chatKeys.lists())).toEqual(
+      chatPages([newChat, EXISTING_CHAT], [olderChat])
     );
     await drainCapabilityInvalidation();
   });
@@ -238,8 +278,8 @@ describe('useUpdateChatMutation', () => {
       const mutation = useUpdateChatMutation();
       const listQuery = useQuery({
         queryKey: chatKeys.lists(),
-        queryFn: () => Promise.resolve([EXISTING_CHAT]),
-        initialData: [EXISTING_CHAT],
+        queryFn: () => Promise.resolve(chatPages([EXISTING_CHAT])),
+        initialData: chatPages([EXISTING_CHAT]),
         staleTime: Number.POSITIVE_INFINITY,
       });
       const detailQuery = useQuery({
@@ -258,8 +298,39 @@ describe('useUpdateChatMutation', () => {
       });
     });
 
-    await waitFor(() => expect(result.current.chats).toEqual([updatedChat]));
+    await waitFor(() => expect(result.current.chats).toEqual(chatPages([updatedChat])));
     expect(result.current.detail).toEqual(updatedChat);
+    await drainCapabilityInvalidation();
+  });
+
+  it('renames a chat that sits on an older page in place', async () => {
+    const olderChat = createMockChat({
+      id: 'chat-older',
+      title: 'Older',
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    const { result } = renderHook(() => ({
+      mutation: useUpdateChatMutation(),
+      queryClient: useQueryClient(),
+    }));
+    act(() => {
+      result.current.queryClient.setQueryData(
+        chatKeys.lists(),
+        chatPages([EXISTING_CHAT], [olderChat])
+      );
+    });
+
+    await act(async () => {
+      await result.current.mutation.mutateAsync({
+        id: olderChat.id,
+        updates: { title: 'Renamed' },
+      });
+    });
+
+    expect<unknown>(result.current.queryClient.getQueryData(chatKeys.lists())).toEqual(
+      chatPages([EXISTING_CHAT], [{ ...olderChat, title: 'Renamed' }])
+    );
     await drainCapabilityInvalidation();
   });
 
@@ -277,7 +348,7 @@ describe('useUpdateChatMutation', () => {
     });
 
     act(() => {
-      result.current.queryClient.setQueryData(chatKeys.lists(), [chatWithWorkdir]);
+      result.current.queryClient.setQueryData(chatKeys.lists(), chatPages([chatWithWorkdir]));
       result.current.queryClient.setQueryData(chatKeys.detail(chatWithWorkdir.id), chatWithWorkdir);
     });
 
@@ -295,7 +366,9 @@ describe('useUpdateChatMutation', () => {
     };
     // `expect<unknown>` because `getQueryData` has no `TQueryFnData` here and
     // bun-types types `toEqual` against the received type.
-    expect<unknown>(result.current.queryClient.getQueryData(chatKeys.lists())).toEqual([expected]);
+    expect<unknown>(result.current.queryClient.getQueryData(chatKeys.lists())).toEqual(
+      chatPages([expected])
+    );
     expect<unknown>(
       result.current.queryClient.getQueryData(chatKeys.detail(chatWithWorkdir.id))
     ).toEqual(expected);
@@ -316,7 +389,7 @@ describe('useUpdateChatMutation', () => {
     });
 
     act(() => {
-      result.current.queryClient.setQueryData(chatKeys.lists(), [chatWithWorkdir]);
+      result.current.queryClient.setQueryData(chatKeys.lists(), chatPages([chatWithWorkdir]));
       result.current.queryClient.setQueryData(chatKeys.detail(chatWithWorkdir.id), chatWithWorkdir);
     });
 
@@ -337,7 +410,9 @@ describe('useUpdateChatMutation', () => {
     };
     // `expect<unknown>` because `getQueryData` has no `TQueryFnData` here and
     // bun-types types `toEqual` against the received type.
-    expect<unknown>(result.current.queryClient.getQueryData(chatKeys.lists())).toEqual([expected]);
+    expect<unknown>(result.current.queryClient.getQueryData(chatKeys.lists())).toEqual(
+      chatPages([expected])
+    );
     expect<unknown>(
       result.current.queryClient.getQueryData(chatKeys.detail(chatWithWorkdir.id))
     ).toEqual(expected);
@@ -507,7 +582,7 @@ describe('useDeleteChatMutation', () => {
     });
 
     act(() => {
-      result.current.queryClient.setQueryData(chatKeys.lists(), [EXISTING_CHAT]);
+      result.current.queryClient.setQueryData(chatKeys.lists(), chatPages([EXISTING_CHAT]));
       result.current.queryClient.setQueryData(chatKeys.detail(EXISTING_CHAT.id), EXISTING_CHAT);
     });
 
@@ -517,10 +592,40 @@ describe('useDeleteChatMutation', () => {
 
     // `expect<unknown>` because `getQueryData` has no `TQueryFnData` here and
     // bun-types types `toEqual` against the received type.
-    expect<unknown>(result.current.queryClient.getQueryData(chatKeys.lists())).toEqual([]);
+    expect<unknown>(result.current.queryClient.getQueryData(chatKeys.lists())).toEqual(
+      chatPages([])
+    );
     expect(
       result.current.queryClient.getQueryData(chatKeys.detail(EXISTING_CHAT.id))
     ).toBeUndefined();
+    await drainCapabilityInvalidation();
+  });
+
+  it('removes a chat from an older page without touching the cursors', async () => {
+    const olderChat = createMockChat({
+      id: 'chat-older',
+      title: 'Older',
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    const { result } = renderHook(() => ({
+      mutation: useDeleteChatMutation(),
+      queryClient: useQueryClient(),
+    }));
+    act(() => {
+      result.current.queryClient.setQueryData(
+        chatKeys.lists(),
+        chatPages([EXISTING_CHAT], [olderChat])
+      );
+    });
+
+    await act(async () => {
+      await result.current.mutation.mutateAsync(olderChat.id);
+    });
+
+    expect<unknown>(result.current.queryClient.getQueryData(chatKeys.lists())).toEqual(
+      chatPages([EXISTING_CHAT], [])
+    );
     await drainCapabilityInvalidation();
   });
 });

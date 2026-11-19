@@ -8,13 +8,12 @@
  */
 
 import type { Chat } from '@mangostudio/shared/chat';
-import { useQuery } from '@tanstack/react-query';
 import { GitBranch } from 'lucide-react';
 import { useMemo } from 'react';
 
 import { SectionCard } from '@/components/ui/SectionCard';
 import { chatTitleLabel } from '@/features/chat/lib/chat-title';
-import { chatListQueryOptions } from '@/features/chat/queries';
+import { useLoadedChatsQuery } from '@/features/chat/queries';
 import { useBatchedGitSummaries } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
 import { usePlural } from '@/hooks/use-plural';
@@ -37,7 +36,7 @@ export function UncommittedWorkCard({ currentChatId, onSelectChat }: Uncommitted
   const labels = t.home.uncommitted;
   // One shared empty array, not a fresh `?? []`: an unsettled query would
   // otherwise hand every render a new identity and defeat the memo below.
-  const chats: readonly Chat[] = useQuery(chatListQueryOptions()).data ?? NO_CHATS;
+  const chats: readonly Chat[] = useLoadedChatsQuery().data ?? NO_CHATS;
   // Memoized for the same reason the layout's caller is: this list feeds a
   // `useQueries` whose ids derive from the array's identity.
   const gitChatIds = useMemo(

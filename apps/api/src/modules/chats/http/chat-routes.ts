@@ -1,5 +1,5 @@
 import {
-  ChatListSchema,
+  ChatListPageSchema,
   ChatSchema,
   CompactChatBodySchema,
   ContextCompactionResponseSchema,
@@ -7,6 +7,7 @@ import {
   GenerateChatTitleBodySchema,
   GenerateChatTitleResponseSchema,
   ListChatMessagesQuerySchema,
+  ListChatsQuerySchema,
   MessagesPageSchema,
   SummarizeToNewChatBodySchema,
   UpdateChatBodySchema,
@@ -43,19 +44,29 @@ import {
   EmptyChatTitlePromptError,
   generateChatTitleUseCase,
 } from '../application/generate-chat-title';
+import { getChatUseCase } from '../application/get-chat';
 import { getChatMessagesUseCase } from '../application/get-chat-messages';
-import { listChatsUseCase } from '../application/list-chats';
+import { type ListChatsInput, listChatsUseCase } from '../application/list-chats';
 import { EnvironmentSelectionError, updateChatUseCase } from '../application/update-chat';
+import {
+  type ChatListCursor,
+  decodeChatListCursor,
+  InvalidChatListCursorError,
+} from '../domain/chat-list-cursor';
 import { ChatNotFoundError } from '../domain/chat-ownership';
 import { RunnerKindImmutableError } from '../infrastructure/chat-repository';
 
 /**
- * The chat list is the largest response on the first screen and grows with
- * history, so it is encoded through a compiled validator rather than the
- * framework's per-item interpreted check. The route still declares
- * `ChatListSchema` for OpenAPI and client types.
+ * The chat list is the largest response on the first screen, so a page is
+ * encoded through a compiled validator rather than the framework's per-item
+ * interpreted check. The route still declares `ChatListPageSchema` for OpenAPI
+ * and client types.
  */
-const encodeChatList = createJsonResponseEncoder(ChatListSchema);
+const encodeChatList = createJsonResponseEncoder(ChatListPageSchema);
+
+async function encodeChatListPage(input: ListChatsInput): Promise<Response> {
+  return encodeChatList(await listChatsUseCase(input, getDb()));
+}
 
 function apiError(error: string, code: string): ApiErrorResponse {
   return { error, code };
@@ -90,10 +101,60 @@ export const chatRoutes = (app: Elysia) =>
   app.group('/chats', (app) =>
     app
       .use(requireAuth)
-      /** List all chats for the authenticated user ordered by most recently updated. */
-      .get('/', { response: { 200: ChatListSchema } }, async ({ user }) => {
-        return encodeChatList(await listChatsUseCase(user?.id ?? '', getDb()));
-      })
+      /**
+       * One page of the authenticated user's chats, most recently updated first.
+       * `nextCursor` of a page is the `cursor` of the next; it is `null` on the last.
+       */
+      .get(
+        '/',
+        {
+          query: ListChatsQuerySchema,
+          response: { 200: ChatListPageSchema, 400: ApiErrorResponseSchema },
+        },
+        // Not `async`: the answer is either a `Response` (the compiled encoder's)
+        // or a typed 400, and Elysia accepts those two only as separate return
+        // types, not as the two halves of one promise. So the cursor is read
+        // synchronously, before the page is.
+        ({ query, user }) => {
+          let after: ChatListCursor | undefined;
+          try {
+            after = query.cursor === undefined ? undefined : decodeChatListCursor(query.cursor);
+          } catch (err) {
+            if (err instanceof InvalidChatListCursorError) {
+              return status(400, apiError(err.message, ERROR_CODES.VALIDATION));
+            }
+            throw err;
+          }
+          return encodeChatListPage({
+            userId: user?.id ?? '',
+            after,
+            limit: query.limit,
+            search: query.q,
+          });
+        }
+      )
+
+      /**
+       * One chat of the authenticated user, for a client that holds only some
+       * pages of the list. Another account's chat answers like a missing one.
+       */
+      .get(
+        '/:id',
+        {
+          params: t.Object({ id: t.String() }),
+          response: { 200: ChatSchema, 404: ApiErrorResponseSchema },
+        },
+        async ({ params, user }) => {
+          try {
+            return await getChatUseCase({ chatId: params.id, userId: user?.id ?? '' }, getDb());
+          } catch (err) {
+            if (err instanceof ChatNotFoundError) {
+              return status(404, apiError('Chat not found', ERROR_CODES.NOT_FOUND));
+            }
+            throw err;
+          }
+        }
+      )
 
       /** Create a new chat for the authenticated user. */
       .post(

@@ -23,8 +23,8 @@ import {
   getByIdWithState,
   getOwnedChat,
   listByIdsForUser,
-  listByUserId,
   listOtherChatBindings,
+  listPageByUserId,
   verifyChatOwnership,
 } from '../../../src/modules/chats/infrastructure/chat-repository';
 import { updateChatAfterTurn } from '../../../src/modules/generation/infrastructure/conversation-persistence';
@@ -65,6 +65,11 @@ async function indexSql(name: string): Promise<string | null> {
     sql: string;
   }>`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ${name}`.execute(db);
   return result.rows[0]?.sql ?? null;
+}
+
+/** The whole list in one page, the way the old unpaged read returned it. */
+async function listByUserId(userId: string, database: Kysely<Database>) {
+  return (await listPageByUserId(userId, { limit: 1_000 }, database)).chats;
 }
 
 /** Plans one captured query on a fresh statement, as the dialect prepares one per query. */
@@ -254,6 +259,58 @@ describe('the chat list plan', () => {
     const plan = planOf(await capturedChatsRead(() => listByUserId(OWNER, typedDb())));
 
     expect(plan).toEqual([`SEARCH chats USING INDEX ${NEW_INDEX} (userId=?)`]);
+  });
+
+  it('seeks to the cursor on the index, without a sort, for a later page', async () => {
+    await migrateTo(TARGET);
+
+    const plan = planOf(
+      await capturedChatsRead(() =>
+        listPageByUserId(OWNER, { limit: 50, after: { updatedAt: 5_005, rowid: 20 } }, typedDb())
+      )
+    );
+
+    expect(plan).toEqual([`SEARCH chats USING INDEX ${NEW_INDEX} (userId=? AND updatedAt<?)`]);
+  });
+});
+
+describe('paging the chat list', () => {
+  it('joins pages into the same list as one read, ties included', async () => {
+    await migrateTo(TARGET);
+    await seedChats();
+    const whole = (await listByUserId(OWNER, typedDb())).map((chat) => chat.id);
+
+    for (const limit of [1, 3, 4, 7, 40, 41]) {
+      const ids: string[] = [];
+      let after: { updatedAt: number; rowid: number } | undefined;
+      for (let guard = 0; guard < 50; guard++) {
+        const slice = await listPageByUserId(
+          OWNER,
+          { limit, ...(after ? { after } : {}) },
+          typedDb()
+        );
+        ids.push(...slice.chats.map((chat) => chat.id));
+        const last = slice.chats.at(-1);
+        if (!slice.hasMore || !last) break;
+        after = { updatedAt: last.updatedAt, rowid: last.rowid };
+      }
+      expect(ids, `(limit ${limit}): expected the pages to join into the whole list`).toEqual(
+        whole
+      );
+    }
+  });
+
+  it('reports hasMore only when a chat follows the page', async () => {
+    await migrateTo(TARGET);
+    await seedChats();
+
+    const exact = await listPageByUserId(OWNER, { limit: 40 }, typedDb());
+    const short = await listPageByUserId(OWNER, { limit: 39 }, typedDb());
+
+    expect(exact).toMatchObject({ hasMore: false });
+    expect(exact.chats).toHaveLength(40);
+    expect(short).toMatchObject({ hasMore: true });
+    expect(short.chats).toHaveLength(39);
   });
 });
 
