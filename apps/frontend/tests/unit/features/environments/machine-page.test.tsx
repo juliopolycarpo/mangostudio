@@ -438,6 +438,32 @@ describe('MachinePage', () => {
         detail:
           'Provedor descontinuado. Use o runner Cursor CLI no seletor de runner do chat; esta chave não executa mais turnos.',
       },
+      {
+        section: 'ChatGPT tokens',
+        check: {
+          label: 'ChatGPT tokens',
+          labelKey: 'chatgpt.label.tokens',
+          status: 'warn',
+          detail: '****.com (plus) — access token expired 5m ago (refreshes on next use)',
+          detailKey: 'chatgpt.detail.tokensExpired',
+          params: { account: '****.com (plus)', duration: '5m' },
+        },
+        label: 'Tokens do ChatGPT',
+        detail: '****.com (plus) — o token de acesso expirou há 5m (renova no próximo uso)',
+      },
+      {
+        section: 'ChatGPT port',
+        check: {
+          label: 'ChatGPT port',
+          labelKey: 'chatgpt.label.port',
+          status: 'ok',
+          detail: '1455 free (OAuth sign-in callback)',
+          detailKey: 'chatgpt.detail.portFree',
+          params: { port: '1455' },
+        },
+        label: 'Porta do ChatGPT',
+        detail: '1455 livre (callback de login OAuth)',
+      },
     ];
 
     it.each(SECTION_ROWS.map((entry) => [entry.section, entry] as const))(

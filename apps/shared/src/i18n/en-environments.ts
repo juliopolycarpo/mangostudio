@@ -744,6 +744,35 @@ export const messages: FeatureMessages<'environments'> = {
           'cursor.label.connector': 'Cursor connector',
           'cursor.detail.deprecated':
             'Deprecated provider. Use the Cursor CLI runner in the chat runner selector; this key no longer runs turns.',
+          'chatgpt.label.secrets': 'ChatGPT secrets',
+          'chatgpt.label.tokens': 'ChatGPT tokens',
+          'chatgpt.label.refresh': 'ChatGPT refresh',
+          'chatgpt.label.port': 'ChatGPT port',
+          'chatgpt.label.auth': 'ChatGPT auth',
+          'chatgpt.label.backend': 'ChatGPT backend',
+          'chatgpt.detail.secretStoreUnavailable':
+            'secret store unavailable — stored ChatGPT tokens cannot be read',
+          'chatgpt.detail.secretStoreCorrupted':
+            'secret store returned corrupted data for a token-sized write',
+          'chatgpt.detail.secretStoreReachable':
+            'secret store reachable (token-sized write verified)',
+          'chatgpt.detail.secretStoreWriteFailed': 'token-sized write failed — {error}',
+          'chatgpt.detail.connectorError': '{connector}: {error}',
+          'chatgpt.detail.tokensReauthRequired':
+            '{account} — session expired; sign in with ChatGPT again',
+          'chatgpt.detail.tokensExpired':
+            '{account} — access token expired {duration} ago (refreshes on next use)',
+          'chatgpt.detail.tokensValid': '{account} — access token expires in {duration}',
+          'chatgpt.detail.refreshSkipped': '{connector}: skipped — no readable token bundle',
+          'chatgpt.detail.refreshRotated':
+            '{account} — refresh token rotated; new access token expires in {duration}',
+          'chatgpt.detail.refreshRejected':
+            '{connector}: refresh rejected (invalid_grant) — sign in with ChatGPT again',
+          'chatgpt.detail.portFree': '{port} free (OAuth sign-in callback)',
+          'chatgpt.detail.portInUse':
+            '{port} in use — new ChatGPT sign-ins will fail until it is released (Codex CLI uses the same port)',
+          'chatgpt.detail.endpointReachable': '{url} (HTTP {status})',
+          'chatgpt.detail.endpointFailed': '{url} ({error})',
         },
       },
       logs: {

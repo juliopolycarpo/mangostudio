@@ -2885,6 +2885,37 @@ export const messages = {
           'cursor.label.connector': 'Conector Cursor',
           'cursor.detail.deprecated':
             'Provedor descontinuado. Use o runner Cursor CLI no seletor de runner do chat; esta chave não executa mais turnos.',
+          'chatgpt.label.secrets': 'Segredos do ChatGPT',
+          'chatgpt.label.tokens': 'Tokens do ChatGPT',
+          'chatgpt.label.refresh': 'Renovação do ChatGPT',
+          'chatgpt.label.port': 'Porta do ChatGPT',
+          'chatgpt.label.auth': 'Autenticação do ChatGPT',
+          'chatgpt.label.backend': 'Backend do ChatGPT',
+          'chatgpt.detail.secretStoreUnavailable':
+            'armazenamento de segredos indisponível — os tokens salvos do ChatGPT não podem ser lidos',
+          'chatgpt.detail.secretStoreCorrupted':
+            'o armazenamento de segredos devolveu dados corrompidos em uma gravação do tamanho de um token',
+          'chatgpt.detail.secretStoreReachable':
+            'armazenamento de segredos acessível (gravação do tamanho de um token verificada)',
+          'chatgpt.detail.secretStoreWriteFailed':
+            'a gravação do tamanho de um token falhou — {error}',
+          'chatgpt.detail.connectorError': '{connector}: {error}',
+          'chatgpt.detail.tokensReauthRequired':
+            '{account} — a sessão expirou; entre com o ChatGPT novamente',
+          'chatgpt.detail.tokensExpired':
+            '{account} — o token de acesso expirou há {duration} (renova no próximo uso)',
+          'chatgpt.detail.tokensValid': '{account} — o token de acesso expira em {duration}',
+          'chatgpt.detail.refreshSkipped':
+            '{connector}: ignorado — nenhum pacote de tokens legível',
+          'chatgpt.detail.refreshRotated':
+            '{account} — token de renovação rotacionado; o novo token de acesso expira em {duration}',
+          'chatgpt.detail.refreshRejected':
+            '{connector}: renovação recusada (invalid_grant) — entre com o ChatGPT novamente',
+          'chatgpt.detail.portFree': '{port} livre (callback de login OAuth)',
+          'chatgpt.detail.portInUse':
+            '{port} em uso — novos logins do ChatGPT falharão até que seja liberada (o Codex CLI usa a mesma porta)',
+          'chatgpt.detail.endpointReachable': '{url} (HTTP {status})',
+          'chatgpt.detail.endpointFailed': '{url} ({error})',
         },
       },
       logs: {

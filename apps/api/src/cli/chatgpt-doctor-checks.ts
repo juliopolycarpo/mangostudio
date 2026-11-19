@@ -34,7 +34,7 @@ import {
 } from '../services/providers/core/probe-timeout';
 import { bunSecretStore, type SecretStore } from '../services/secret-store/store';
 import { maskSecret } from '../utils/secrets';
-import { type CheckResult, fail, ok, warn } from './doctor-checks';
+import { type CheckResult, keyedCheck } from './doctor-checks';
 
 /** Injectable seams so every check runs against fakes in tests. */
 export interface ChatGptDoctorDeps {
@@ -84,8 +84,8 @@ export async function collectChatGptDoctorChecks(
   }
 
   results.push(await checkCallbackPort(deps));
-  results.push(await probeEndpoint('ChatGPT auth', config.chatgpt.authBaseUrl, deps));
-  results.push(await probeEndpoint('ChatGPT backend', config.chatgpt.apiBaseUrl, deps));
+  results.push(await probeEndpoint('chatgpt.label.auth', config.chatgpt.authBaseUrl, deps));
+  results.push(await probeEndpoint('chatgpt.label.backend', config.chatgpt.apiBaseUrl, deps));
   return results;
 }
 
@@ -94,9 +94,9 @@ const SECRET_PROBE_BYTES = 8192;
 const SECRET_PROBE_DESCRIPTOR = { service: 'mangostudio', name: '__doctor-write-probe__' };
 
 async function checkSecretStorage(secretStore: SecretStore): Promise<CheckResult> {
-  const label = 'ChatGPT secrets';
+  const label = 'chatgpt.label.secrets';
   if (!(await secretStore.isAvailable())) {
-    return fail(label, 'secret store unavailable — stored ChatGPT tokens cannot be read');
+    return keyedCheck('fail', label, 'chatgpt.detail.secretStoreUnavailable');
   }
 
   try {
@@ -104,11 +104,13 @@ async function checkSecretStorage(secretStore: SecretStore): Promise<CheckResult
     await secretStore.setSecret(SECRET_PROBE_DESCRIPTOR, payload);
     const readBack = await secretStore.getSecret(SECRET_PROBE_DESCRIPTOR);
     if (readBack !== payload) {
-      return fail(label, 'secret store returned corrupted data for a token-sized write');
+      return keyedCheck('fail', label, 'chatgpt.detail.secretStoreCorrupted');
     }
-    return ok(label, 'secret store reachable (token-sized write verified)');
+    return keyedCheck('ok', label, 'chatgpt.detail.secretStoreReachable');
   } catch (error) {
-    return fail(label, `token-sized write failed — ${errorMessage(error)}`);
+    return keyedCheck('fail', label, 'chatgpt.detail.secretStoreWriteFailed', {
+      error: errorMessage(error),
+    });
   } finally {
     await secretStore.deleteSecret(SECRET_PROBE_DESCRIPTOR).catch(() => {
       // Best-effort cleanup; a leftover probe entry is harmless.
@@ -125,18 +127,24 @@ async function checkTokenState(
   connector: SecretMetadataRow,
   deps: ChatGptDoctorDeps
 ): Promise<TokenStateResult> {
-  const label = 'ChatGPT tokens';
+  const label = 'chatgpt.label.tokens';
   let bundle: ChatGptTokenBundle;
   try {
     bundle = await deps.readBundle(connector);
   } catch (error) {
-    return { result: fail(label, `${connector.name}: ${errorMessage(error)}`), bundle: null };
+    return {
+      result: keyedCheck('fail', label, 'chatgpt.detail.connectorError', {
+        connector: connector.name,
+        error: errorMessage(error),
+      }),
+      bundle: null,
+    };
   }
 
   const account = describeAccount(bundle, connector);
   if (connector.lastValidationError === CHATGPT_REAUTH_REQUIRED_CODE) {
     return {
-      result: fail(label, `${account} — session expired; sign in with ChatGPT again`),
+      result: keyedCheck('fail', label, 'chatgpt.detail.tokensReauthRequired', { account }),
       bundle,
     };
   }
@@ -144,15 +152,18 @@ async function checkTokenState(
   const remainingMs = bundle.expiresAt - deps.now();
   if (remainingMs <= 0) {
     return {
-      result: warn(
-        label,
-        `${account} — access token expired ${formatDuration(-remainingMs)} ago (refreshes on next use)`
-      ),
+      result: keyedCheck('warn', label, 'chatgpt.detail.tokensExpired', {
+        account,
+        duration: formatDuration(-remainingMs),
+      }),
       bundle,
     };
   }
   return {
-    result: ok(label, `${account} — access token expires in ${formatDuration(remainingMs)}`),
+    result: keyedCheck('ok', label, 'chatgpt.detail.tokensValid', {
+      account,
+      duration: formatDuration(remainingMs),
+    }),
     bundle,
   };
 }
@@ -162,9 +173,11 @@ async function probeRefresh(
   bundle: ChatGptTokenBundle | null,
   deps: ChatGptDoctorDeps
 ): Promise<CheckResult> {
-  const label = 'ChatGPT refresh';
+  const label = 'chatgpt.label.refresh';
   if (!bundle) {
-    return fail(label, `${connector.name}: skipped — no readable token bundle`);
+    return keyedCheck('fail', label, 'chatgpt.detail.refreshSkipped', {
+      connector: connector.name,
+    });
   }
 
   try {
@@ -173,34 +186,32 @@ async function probeRefresh(
       `refresh probe timed out after ${deps.timeoutMs}ms`,
       deps.timeoutMs
     );
-    const remaining = formatDuration(rotated.expiresAt - deps.now());
-    return ok(
-      label,
-      `${describeAccount(rotated, connector)} — refresh token rotated; new access token expires in ${remaining}`
-    );
+    return keyedCheck('ok', label, 'chatgpt.detail.refreshRotated', {
+      account: describeAccount(rotated, connector),
+      duration: formatDuration(rotated.expiresAt - deps.now()),
+    });
   } catch (error) {
     if (error instanceof OAuthReauthRequiredError) {
-      return fail(
-        label,
-        `${connector.name}: refresh rejected (invalid_grant) — sign in with ChatGPT again`
-      );
+      return keyedCheck('fail', label, 'chatgpt.detail.refreshRejected', {
+        connector: connector.name,
+      });
     }
-    return fail(label, `${connector.name}: ${errorMessage(error)}`);
+    return keyedCheck('fail', label, 'chatgpt.detail.connectorError', {
+      connector: connector.name,
+      error: errorMessage(error),
+    });
   }
 }
 
 async function checkCallbackPort(deps: ChatGptDoctorDeps): Promise<CheckResult> {
-  const label = 'ChatGPT port';
+  const label = 'chatgpt.label.port';
   return (await deps.isPortFree(CHATGPT_OAUTH_CALLBACK_PORT))
-    ? ok(label, `${CHATGPT_OAUTH_CALLBACK_PORT} free (OAuth sign-in callback)`)
-    : warn(
-        label,
-        `${CHATGPT_OAUTH_CALLBACK_PORT} in use — new ChatGPT sign-ins will fail until it is released (Codex CLI uses the same port)`
-      );
+    ? keyedCheck('ok', label, 'chatgpt.detail.portFree', { port: CHATGPT_OAUTH_CALLBACK_PORT })
+    : keyedCheck('warn', label, 'chatgpt.detail.portInUse', { port: CHATGPT_OAUTH_CALLBACK_PORT });
 }
 
 async function probeEndpoint(
-  label: string,
+  label: 'chatgpt.label.auth' | 'chatgpt.label.backend',
   baseUrl: string,
   deps: ChatGptDoctorDeps
 ): Promise<CheckResult> {
@@ -210,9 +221,15 @@ async function probeEndpoint(
       `timed out after ${deps.timeoutMs}ms`,
       deps.timeoutMs
     );
-    return ok(label, `${baseUrl} (HTTP ${response.status})`);
+    return keyedCheck('ok', label, 'chatgpt.detail.endpointReachable', {
+      url: baseUrl,
+      status: response.status,
+    });
   } catch (error) {
-    return fail(label, `${baseUrl} (${errorMessage(error)})`);
+    return keyedCheck('fail', label, 'chatgpt.detail.endpointFailed', {
+      url: baseUrl,
+      error: errorMessage(error),
+    });
   }
 }
 
