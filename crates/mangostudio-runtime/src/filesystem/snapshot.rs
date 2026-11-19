@@ -203,7 +203,7 @@ impl Service {
             let policy =
                 self.compile_policy("snapshot.hash", &None, &[&params.path], false, &cancel)?;
             let hash = io::hash_file_if_present_cancellable(&policy, &params.path, &cancel)?;
-            Ok(json!({"hash":hash}))
+            hash_result(&policy, &params.path, hash)
         })
         .await
     }
@@ -487,6 +487,30 @@ impl SnapshotRevertOperation {
         };
         std::iter::once(first).chain(second)
     }
+}
+
+/// The `snapshot.hash` result: the digest, and for a present file the size,
+/// modification time and link-ness of the path's own entry. A checkpoint caller
+/// that must not trust a followed symlink, load more bytes than it budgeted, or
+/// claim another process's write reads them from here; an older runtime omits
+/// them and the caller degrades.
+fn hash_result(
+    policy: &super::policy::CompiledPolicy,
+    path: &Path,
+    hash: Option<String>,
+) -> Result<Value, RemoteError> {
+    let mut result = json!({ "hash": hash });
+    if result["hash"].is_null() {
+        return Ok(result);
+    }
+    if let Some(stat) = io::snapshot_stat(policy, path)? {
+        result["size"] = json!(stat.len);
+        result["symlink"] = json!(stat.symlink);
+        if let Some(modified_ms) = stat.modified_ms {
+            result["modifiedAtMs"] = json!(modified_ms);
+        }
+    }
+    Ok(result)
 }
 
 fn revert_paths(params: &SnapshotRevertParams) -> Vec<PathBuf> {
@@ -1492,6 +1516,66 @@ mod tests {
             .await
             .unwrap();
         assert!(directory["hash"].is_null());
+    }
+
+    #[tokio::test]
+    async fn hash_reports_size_and_modification_time_of_a_present_file_only() {
+        let (home, service) = fixture();
+        let present = home.join("stat-bytes");
+        std::fs::write(&present, [1, 2, 3, 4, 5]).unwrap();
+        let before_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64()
+            * 1000.0;
+        let result = Arc::clone(&service)
+            .hash_snapshot(
+                SnapshotHashParams { path: present },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["size"], 5, "expected size 5 | received {result}");
+        assert_eq!(result["symlink"], false, "received {result}");
+        let modified = result["modifiedAtMs"].as_f64().unwrap();
+        // The file was written a moment before `before_ms` was read; a second of
+        // slack covers coarse filesystem timestamps without hiding a wrong unit.
+        assert!(
+            (before_ms - 5_000.0..=before_ms + 1_000.0).contains(&modified),
+            "expected modifiedAtMs within seconds of {before_ms} | received {modified}"
+        );
+
+        let absent = Arc::clone(&service)
+            .hash_snapshot(
+                SnapshotHashParams {
+                    path: home.join("stat-absent"),
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            absent.get("size").is_none() && absent.get("modifiedAtMs").is_none(),
+            "an absent path has no stat | received {absent}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn hash_flags_a_symlink_instead_of_reporting_its_target_as_a_file() {
+        let (home, service) = fixture();
+        let target = home.join("link-target");
+        std::fs::write(&target, b"target").unwrap();
+        let link = home.join("link");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let result = Arc::clone(&service)
+            .hash_snapshot(SnapshotHashParams { path: link }, CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            result["symlink"], true,
+            "expected a symlink flag | received {result}"
+        );
     }
 
     #[test]

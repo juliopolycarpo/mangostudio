@@ -19,6 +19,8 @@ interface RevertFileChangesButtonProps {
    * place before the user confirms.
    */
   uncheckpointedSources?: ReadonlyArray<UncheckpointedWriteSource>;
+  /** From the preview: at least one row came from a shell workspace capture. */
+  includesShellCapture?: boolean;
 }
 
 type RevertErrorMessages = { conflict: string; outsideWorkdir: string; failed: string };
@@ -43,6 +45,7 @@ export function RevertFileChangesButton({
   chatId,
   messageId,
   uncheckpointedSources,
+  includesShellCapture,
 }: RevertFileChangesButtonProps) {
   const { t, locale } = useI18n();
   const { toast } = useToast();
@@ -93,6 +96,7 @@ export function RevertFileChangesButton({
         <RevertFileChangesDialog
           isReverting={revert.isPending}
           uncheckpointedSources={uncheckpointedSources}
+          includesShellCapture={includesShellCapture}
           onConfirm={handleConfirm}
           onCancel={() => setIsConfirming(false)}
         />

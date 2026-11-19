@@ -24,7 +24,12 @@ export async function listChatFileCheckpointSummaries(
   const rows = await listActiveCheckpointsForChat(db, chatId);
   const byMessage = new Map<
     string,
-    { paths: Set<string>; ops: Set<FileCheckpointOp>; createdAt: number }
+    {
+      paths: Set<string>;
+      ops: Set<FileCheckpointOp>;
+      includesShellCapture: boolean;
+      createdAt: number;
+    }
   >();
 
   for (const row of rows) {
@@ -34,6 +39,7 @@ export async function listChatFileCheckpointSummaries(
       byMessage.set(row.messageId, {
         paths: new Set([row.path]),
         ops: new Set([op]),
+        includesShellCapture: row.source === 'shell',
         createdAt: row.createdAt,
       });
       continue;
@@ -41,6 +47,7 @@ export async function listChatFileCheckpointSummaries(
     // Paths, not rows: a message may snapshot the same file more than once.
     existing.paths.add(row.path);
     existing.ops.add(op);
+    existing.includesShellCapture ||= row.source === 'shell';
     existing.createdAt = Math.min(existing.createdAt, row.createdAt);
   }
 
@@ -56,6 +63,7 @@ export async function listChatFileCheckpointSummaries(
       fileCount: summary.paths.size,
       ops: [...summary.ops],
       uncheckpointedSources: uncheckpointedByMessage.get(messageId) ?? [],
+      includesShellCapture: summary.includesShellCapture,
       createdAt: summary.createdAt,
     }))
     .sort((left, right) => right.createdAt - left.createdAt);

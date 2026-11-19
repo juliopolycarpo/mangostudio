@@ -2297,6 +2297,15 @@
                 "type": "null"
               }
             ]
+          },
+          "size": {
+            "type": "number"
+          },
+          "modifiedAtMs": {
+            "type": "number"
+          },
+          "symlink": {
+            "type": "boolean"
           }
         }
       },

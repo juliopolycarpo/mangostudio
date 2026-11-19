@@ -310,7 +310,17 @@ interface FileCheckpointsTable {
   blobKey: string | null;
   createdAt: number;
   revertedAt: number | null;
+  /** How the row was found; see `FileCheckpointRowSource`. */
+  source: Generated<FileCheckpointRowSource>;
 }
+
+/**
+ * `builtin`: a mutator snapshotted the path under its lock, so the row holds
+ * exactly that call's change. `shell`: found by comparing the workspace before
+ * and after an opted-in command, so it also holds anything else that changed
+ * the path meanwhile.
+ */
+export type FileCheckpointRowSource = 'builtin' | 'shell';
 
 /**
  * Classes of tool a message ran whose writes no `file_checkpoints` row
