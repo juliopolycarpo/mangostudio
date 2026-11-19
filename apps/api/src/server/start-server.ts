@@ -140,9 +140,13 @@ async function startServerWithLock(options: StartOptions): Promise<ServerHandle>
     reconcileStaleTurns({ reasonCode: 'unknown', isActive: isActiveTurn }, getDb())
   );
   // Reclaims generated images no row references (a turn that died before it
-  // recorded them, a deleted user's files). The first pass runs in the
+  // recorded them, a deleted user's files). It waits for one reconcile pass
+  // first: that pass folds streaming checkpoint deltas, which can be the only
+  // thing naming an image, into their message rows. The first sweep runs in the
   // background; it never delays listening.
-  generatedImageSweep = startGeneratedImageSweep(() => sweepUnreferencedGeneratedImages(getDb()));
+  generatedImageSweep = startGeneratedImageSweep(() => sweepUnreferencedGeneratedImages(getDb()), {
+    after: staleTurnReconcileSweep.run(),
+  });
   stopTerminalIdleReaper = terminalSessionService.startIdleReaper();
   // Never under `bun test`: a check hits a real host, and nothing in the test
   // suite should depend on GitHub being reachable or on a 24h timer outliving
