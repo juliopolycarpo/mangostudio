@@ -524,6 +524,34 @@ The deliberate contrast is with checkpoints, which stream bytes to hub-owned blo
 only remaining copy of a file the machine owned, and it belongs where a restore can reach it
 without a hub.
 
+### Checkpoints of large files
+
+A file whose bytes fit one frame travels inline: `snapshot.capture` and a mutation's
+`before` carry `contentBase64`, and a revert operation carries it back. Past 1 MiB
+(`SNAPSHOT_INLINE_MAX_BYTES`) the bytes move as bounded slices instead, so no frame and no
+process buffer grows with the file:
+
+- **Capture.** The runtime copies the file into a per-process staging directory while
+  hashing it, and the `before` record carries `sizeBytes`, `hash` and a `stagedId` instead of
+  content. The hub reads the capture with `snapshot.read-chunk` (at most 1 MiB per call)
+  into a temporary blob that it renames to its content hash only once the digest matches,
+  then calls `snapshot.release`. A copy the hub never releases is swept after 15 minutes.
+- **Revert.** The hub uploads a stored blob over 1 MiB with `snapshot.stage-chunk` (sequential
+  offsets) and names it in the operation as `stagedId` plus `hash`. The runtime verifies every
+  staged upload against its hash before the first file changes, then streams each one through
+  the same temporary-file-and-rename write a small restore uses, checking the digest again as
+  it writes. A missing or corrupt upload therefore refuses the whole revert untouched.
+- **Limit.** `checkpoints.max_file_bytes` (env `MANGO_CHECKPOINTS_MAX_FILE_BYTES`, default
+  128 MiB) is sent as `snapshotMaxBytes` with every checkpointed mutation, and the runtime
+  clamps it to 1 GiB (`SNAPSHOT_HARD_MAX_BYTES`). A mutation of a bigger file is refused
+  before it changes anything, with a `snapshot_too_large` error that names the size and the
+  limit, so no edit lands that undo could not reverse. The 128 MiB default stays under the
+  256 MiB per-chat blob budget retention enforces.
+
+Edit, write and delete still require a complete earlier read, which caps a text file at
+10 MiB and a binary one at 256 KiB, so in practice `move_file` and revert are what reach
+files this large.
+
 Because of that, listing backups by reading manifests only works for machines the hub can
 reach — so an offline machine's sets would silently vanish from the page that promises them.
 A hub-side index (`library_backups`) says _that_ a set exists; the manifest on the machine
