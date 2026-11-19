@@ -11,9 +11,11 @@ import {
   gitTopic,
   parseGitTopic,
   REALTIME_CLOSE_CODES,
+  REALTIME_WRITER_ID_HEADER,
   RealtimeClientMessageSchema,
   RealtimeInvalidateMessageSchema,
   RealtimeServerMessageSchema,
+  RealtimeWriterIdSchema,
   SETTINGS_SCOPES,
   SETTINGS_TOPIC,
 } from '../../src/realtime';
@@ -293,6 +295,60 @@ describe('realtime server messages', () => {
         chatId: 'chat-b',
       })
     ).toBe(false);
+  });
+
+  it('carries an optional writer id on settings invalidations only', () => {
+    // Optional: an older hub never sends one and its frames must stay valid.
+    expect(
+      Value.Check(RealtimeInvalidateMessageSchema, {
+        type: 'invalidate',
+        topic: SETTINGS_TOPIC,
+        scopes: ['app'],
+      })
+    ).toBe(true);
+    expect(
+      Value.Check(RealtimeInvalidateMessageSchema, {
+        type: 'invalidate',
+        topic: SETTINGS_TOPIC,
+        scopes: ['app'],
+        writerId: 'tab-1',
+      })
+    ).toBe(true);
+    expect(
+      Value.Check(RealtimeServerMessageSchema, {
+        type: 'invalidate',
+        topic: SETTINGS_TOPIC,
+        writerId: 'w'.repeat(64),
+      })
+    ).toBe(true);
+
+    for (const writerId of ['', 'w'.repeat(65), 7, null]) {
+      expect(
+        Value.Check(RealtimeInvalidateMessageSchema, {
+          type: 'invalidate',
+          topic: SETTINGS_TOPIC,
+          writerId,
+        })
+      ).toBe(false);
+    }
+
+    // No other topic has an echo to recognise, so none accepts the field.
+    for (const topic of [CHATS_TOPIC, ACTIVITY_TOPIC, ENVIRONMENTS_TOPIC, gitTopic('chat-1')]) {
+      expect(
+        Value.Check(RealtimeInvalidateMessageSchema, {
+          type: 'invalidate',
+          topic,
+          writerId: 'tab-1',
+        })
+      ).toBe(false);
+    }
+  });
+
+  it('names the writer id header in lowercase and bounds the id', () => {
+    expect(REALTIME_WRITER_ID_HEADER).toBe('x-mangostudio-writer-id');
+    expect(Value.Check(RealtimeWriterIdSchema, 'tab-1')).toBe(true);
+    expect(Value.Check(RealtimeWriterIdSchema, '')).toBe(false);
+    expect(Value.Check(RealtimeWriterIdSchema, 'w'.repeat(65))).toBe(false);
   });
 });
 

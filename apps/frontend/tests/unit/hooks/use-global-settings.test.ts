@@ -6,6 +6,8 @@ import { en } from '@mangostudio/shared/i18n';
 import type { WorkspacePanelSettings } from '@mangostudio/shared/workspaces';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { getTabWriterId } from '@/lib/realtime/writer-id';
+
 import { act, flushAsyncRender, renderHook, screen, waitFor } from '../../support/harness/render';
 import {
   advanceTimersByTimeAsync,
@@ -17,6 +19,11 @@ import {
 // what the factory below hands back, so keep them instead.
 const mockGet = jest.fn();
 const mockPut = jest.fn();
+
+/** Every save names this tab as the writer next to its precondition. */
+function putOptions(revision: string) {
+  return { headers: { 'x-mangostudio-writer-id': getTabWriterId(), 'if-match': revision } };
+}
 
 void mock.module('../../../src/lib/api-client', () => ({
   client: {
@@ -111,7 +118,7 @@ describe('useGlobalSettings', () => {
       await advanceTimersByTimeAsync(300);
       expect(mockPut).toHaveBeenCalledTimes(1);
       expect(mockPut.mock.calls[0]?.[0].promptSettings.textSystemPrompt).toBe('older draft');
-      expect(mockPut.mock.calls[0]?.[1]).toEqual({ headers: { 'if-match': '"r1"' } });
+      expect(mockPut.mock.calls[0]?.[1]).toEqual(putOptions('"r1"'));
     } finally {
       await restoreRealTimers();
     }
@@ -128,8 +135,8 @@ describe('useGlobalSettings', () => {
     await act(async () => {
       await result.current.updateExternalAgentSettings({});
     });
-    expect(mockPut.mock.calls[0]?.[1]).toEqual({ headers: { 'if-match': '"r1"' } });
-    expect(mockPut.mock.calls[1]?.[1]).toEqual({ headers: { 'if-match': '"r2"' } });
+    expect(mockPut.mock.calls[0]?.[1]).toEqual(putOptions('"r1"'));
+    expect(mockPut.mock.calls[1]?.[1]).toEqual(putOptions('"r2"'));
   });
 
   it('clamps maxToolIterations before persisting', async () => {
@@ -570,7 +577,7 @@ describe('useGlobalSettings', () => {
           await advanceTimersByTimeAsync(0);
           if (succeeds) {
             expect(mockPut).toHaveBeenCalledTimes(2);
-            expect(mockPut.mock.calls[1]?.[1]).toEqual({ headers: { 'if-match': '"r2"' } });
+            expect(mockPut.mock.calls[1]?.[1]).toEqual(putOptions('"r2"'));
             expect(completed).toBe(false);
             await settle(
               settlePut[1],
@@ -614,7 +621,7 @@ describe('useGlobalSettings', () => {
         await advanceTimersByTimeAsync(0);
         expect(mockPut).toHaveBeenCalledTimes(2);
         expect(mockPut.mock.calls[1]?.[0].promptSettings.textSystemPrompt).toBe('second');
-        expect(mockPut.mock.calls[1]?.[1]).toEqual({ headers: { 'if-match': '"r2"' } });
+        expect(mockPut.mock.calls[1]?.[1]).toEqual(putOptions('"r2"'));
         await settle(
           settlePut[1],
           mockMutationResult({ ...DEFAULT_APP_SETTINGS, revision: '"r3"' })
@@ -647,7 +654,7 @@ describe('useGlobalSettings', () => {
         expect(result.current.promptSettings.textSystemPrompt).toBe('second');
         await advanceTimersByTimeAsync(300);
         expect(mockPut).toHaveBeenCalledTimes(2);
-        expect(mockPut.mock.calls[1]?.[1]).toEqual({ headers: { 'if-match': '"r2"' } });
+        expect(mockPut.mock.calls[1]?.[1]).toEqual(putOptions('"r2"'));
         await settle(settlePut[1], failedPut());
         await advanceTimersByTimeAsync(0);
         expect(result.current.promptSettings.textSystemPrompt).toBe('first');

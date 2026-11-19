@@ -33,7 +33,6 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { useToast } from '@/components/ui/Toast';
 import { updateAppSettings } from '@/features/settings/app/api';
-import { markAppSettingsLocalWrite } from '@/features/settings/app/local-write-window';
 import {
   appSettingsConfirmedWrite,
   appSettingsConflictEpoch,
@@ -167,11 +166,6 @@ export function useGlobalSettings() {
       }
     },
     onSuccess: async (savedSettings, submitted, context) => {
-      // Re-marked here so the echo window still covers the server's own event,
-      // which cannot arrive before the write that triggered it has settled. Only
-      // a successful write publishes one, so a failure leaves the window closed
-      // and the next invalidation is free to repair the rolled-back cache.
-      markAppSettingsLocalWrite();
       if (!context.write.isLatest()) return;
       // A read started before this confirmed response can still be in flight.
       // Cancel its cache publication before accepting the response, even when
@@ -328,10 +322,6 @@ export function useGlobalSettings() {
         conflictEpoch,
         confirmedWrite,
       };
-      // Opens the echo window at the first keystroke, not at the PUT, so the
-      // whole debounce is protected too.
-      markAppSettingsLocalWrite();
-
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
       }
@@ -355,7 +345,7 @@ export function useGlobalSettings() {
    * still in the debounce window and could still fail.
    *
    * Everything `saveSettings` establishes still applies: the same normalization,
-   * the same rollback baseline, the same echo window. Only the timer is skipped,
+   * the same rollback baseline, the same writer id. Only the timer is skipped,
    * so an edit already queued rides along rather than being dropped.
    */
   const saveSettingsNow = useCallback(

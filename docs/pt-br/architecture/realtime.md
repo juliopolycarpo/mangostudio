@@ -120,6 +120,32 @@ Tópicos Git de outro usuário permanecem sem assinatura e retornam a mesma
 resposta `NOT_FOUND`, sem enumeração, de um tópico indisponível. Gramáticas de
 tópico desconhecidas retornam `UNSUPPORTED`.
 
+### Identidade do escritor
+
+A entrega é por usuário, então uma aba recebe a invalidation causada pela
+própria escrita junto com as de todas as outras abas. Para dados otimistas esse
+eco não é inofensivo: um auto-save com debounce pode receber o eco do servidor
+enquanto o usuário ainda edita o mesmo controle, e refazer a leitura nesse
+momento substitui o que ele está digitando.
+
+Por isso uma invalidation de `settings` carrega um `writerId` opcional. Cada
+aba do navegador escolhe um id por carregamento de página
+(`apps/frontend/src/lib/realtime/writer-id.ts`) e o envia no header
+`x-mangostudio-writer-id` nas escritas de app-settings; a API o copia para o
+evento (`publishSettingsInvalidation`). A aba ignora a seção `app` de um evento
+que traz o próprio id e aplica qualquer outro evento na hora. O id é gerado pela
+aba, e não emitido no subscribe, para que uma escrita feita antes do ack do
+socket, ou durante uma reconexão, ainda seja reconhecida.
+
+O campo é um token de correlação, não uma identidade: o hub só o repassa aos
+sockets do mesmo usuário e não confia nele para mais nada. Um id que não passa
+em `RealtimeWriterIdSchema` é removido do evento em vez de fazer a escrita
+falhar. Um evento sem `writerId` — invalidation originada no hub, como a
+detecção da biblioteca concluindo, escrita por API key, ou um hub anterior ao
+campo — é tratado como de outra aba, então a aba refaz a leitura. Isso custa no
+máximo uma leitura redundante e nunca uma visão desatualizada. Só o tópico
+`settings` carrega o campo; `chats` e `activity` não têm supressão a substituir.
+
 ## Limites E Códigos De Fechamento
 
 O servidor Elysia raiz aplica limites de transporte a todas as rotas WebSocket:

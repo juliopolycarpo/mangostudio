@@ -36,9 +36,13 @@ function parseSubscribed(frame: Record<string, unknown>): RealtimeSubscribedMess
 }
 
 function parseInvalidate(frame: Record<string, unknown>): RealtimeInvalidateMessage | null {
-  const { topic, scopes } = frame;
+  const { topic, scopes, writerId } = frame;
   if (typeof topic !== 'string' || topic.length === 0) return null;
   if (scopes !== undefined && !isNonEmptyStringArray(scopes)) return null;
+  // The writer id only ever refines how a tab treats an event, so a malformed
+  // one is dropped from the frame instead of discarding a refresh that is
+  // otherwise valid: the tab then reads it as someone else's write.
+  const validWriterId = typeof writerId === 'string' && writerId.length > 0 ? writerId : undefined;
   // Scope strings are shape-checked but deliberately not matched against the
   // current scope unions: a newer server must be able to add a scope without
   // this client discarding the whole frame. Callers therefore must not switch
@@ -47,6 +51,7 @@ function parseInvalidate(frame: Record<string, unknown>): RealtimeInvalidateMess
     type: 'invalidate',
     topic,
     ...(scopes === undefined ? {} : { scopes }),
+    ...(validWriterId === undefined ? {} : { writerId: validWriterId }),
   } as RealtimeInvalidateMessage;
 }
 

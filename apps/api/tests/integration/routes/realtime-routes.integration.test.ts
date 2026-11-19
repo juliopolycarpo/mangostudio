@@ -617,6 +617,36 @@ describe('realtime WebSocket subscriptions', () => {
     });
   });
 
+  it('relays the writer id of a settings invalidation to every socket of the same user', async () => {
+    const { bus, httpUrl, wsUrl } = await startServer();
+    const user = await signUp(httpUrl);
+    // Two tabs of one account: the id is what lets each tell its own echo apart.
+    const writerTab = connect(wsUrl, { Cookie: user.cookie });
+    const otherTab = connect(wsUrl, { Cookie: user.cookie });
+
+    await Promise.all([writerTab.opened, otherTab.opened]);
+    await Promise.all([writerTab.nextMessage(), otherTab.nextMessage()]);
+    send(writerTab.socket, { type: 'subscribe', topics: [SETTINGS_TOPIC] });
+    send(otherTab.socket, { type: 'subscribe', topics: [SETTINGS_TOPIC] });
+    await Promise.all([writerTab.nextMessage(), otherTab.nextMessage()]);
+
+    bus.publish(user.id, {
+      type: 'invalidate',
+      topic: SETTINGS_TOPIC,
+      scopes: ['app'],
+      writerId: 'tab-writer-1',
+    });
+
+    const expected: RealtimeServerMessage = {
+      type: 'invalidate',
+      topic: SETTINGS_TOPIC,
+      scopes: ['app'],
+      writerId: 'tab-writer-1',
+    };
+    expect(await writerTab.nextMessage()).toEqual(expected);
+    expect(await otherTab.nextMessage()).toEqual(expected);
+  });
+
   it('authorizes owned git topics without revealing foreign chats', async () => {
     const { bus, httpUrl, wsUrl } = await startServer();
     const user = await signUp(httpUrl);
