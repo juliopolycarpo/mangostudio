@@ -537,6 +537,13 @@ process buffer grows with the file:
   blob that it renames to its content hash only once the digest matches, then calls
   `snapshot.release`. A copy the hub never releases is swept after 15 minutes; every call
   into the staging area, reads included, sweeps the expired ones.
+- **Bounded pull.** The hub does not trust the runtime to stay inside its own bounds. The pull
+  stops at the smaller of the reported size and the checkpoint limit, asks for no more than is
+  left of that, and fails on a chunk longer than requested or an empty one before the reported
+  size, so a faulty peer cannot make the hub write past the limit.
+- **Hub partials.** A stream interrupted before the rename leaves a `.part` file in
+  `<checkpoints dir>/.incoming`. No row references it, so retention never counts or deletes
+  it; each new stream deletes the ones untouched for an hour.
 - **Staging area.** It is private to the account running the runtime: a directory under the
   runtime home (`~/.mango/runtime/stage`, or the OS temp directory when that cannot be
   secured), created owner-only (`0700`, or an owner-only DACL on Windows) under a fresh random
