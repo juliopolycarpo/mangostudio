@@ -23,8 +23,16 @@
 //!   publishes it owner-only (`0600`; a DACL rewrite on Windows) with a temp
 //!   write and a rename, under a lock, so a concurrent first start in another
 //!   process or thread ends with one secret that every caller observed.
-//! - **Absent, short, long or group/world-accessible** files are replaced. An
-//!   accessible secret must be treated as exposed, so it is not kept.
+//! - **Absent, short, long or accessible-to-others** files are replaced, with
+//!   a warning on stderr (the path and the reason, never the value) when a
+//!   file was there. An accessible secret must be treated as exposed, so it
+//!   is not kept. "Accessible" is any group or other mode bit on Unix; on
+//!   Windows it is any DACL that is not the protected, owner-only one this
+//!   module writes (see `owner_only::is_owner_only`).
+//! - **A read that fails for another reason** (`EMFILE`, `EIO`, a Windows
+//!   sharing violation) does not replace anything: the error is returned, the
+//!   caller skips attestation for that call, and the next call reads the
+//!   still-good secret. Only a definite verdict on the file rotates it.
 //! - **Replacing the secret changes every fingerprint.** The registry then
 //!   sees new credential homes, and continuations stored under the old Codex
 //!   account fingerprint start a fresh vendor session instead of resuming.
@@ -39,6 +47,7 @@ use mangostudio_runtime_core::hex::hex;
 use mangostudio_runtime_core::runtime_home::atomic::write_new_file;
 use mangostudio_runtime_core::runtime_home::lock::{LockPolicy, with_slot_lock};
 use mangostudio_runtime_core::runtime_home::mango_home_dir;
+use mangostudio_runtime_core::runtime_home::owner_only::is_owner_only;
 use sha2::{Digest, Sha256};
 
 /// Secret length in bytes: the SHA-256 output size, so the HMAC key is never
@@ -116,15 +125,21 @@ pub(crate) fn host_secret_dir(home: &Path) -> PathBuf {
 ///
 /// # Errors
 /// When the directory cannot be created or locked, the secret cannot be
-/// generated, or the file cannot be published owner-only. The message names
-/// the step and never carries key material.
+/// generated, the file cannot be published owner-only, or an existing file
+/// cannot be read for a reason other than being absent (it is then left
+/// alone). The message names the step and never carries key material.
 ///
 /// ```ignore
 /// let secret = load_or_create(&host_secret_dir(&home))?;
 /// ```
 pub(crate) fn load_or_create(dir: &Path) -> io::Result<HostSecret> {
+    load_or_create_with(&StdSecretFiles, dir)
+}
+
+/// [`load_or_create`] over an injectable [`SecretFiles`].
+fn load_or_create_with(files: &impl SecretFiles, dir: &Path) -> io::Result<HostSecret> {
     let path = dir.join(HOST_SECRET_FILE_NAME);
-    if let Some(secret) = read_usable(&path) {
+    if let StoredSecret::Usable(secret) = inspect(files, &path)? {
         return Ok(secret);
     }
     let settled = with_slot_lock(
@@ -132,8 +147,17 @@ pub(crate) fn load_or_create(dir: &Path) -> io::Result<HostSecret> {
         &LockPolicy::default(),
         || -> io::Result<HostSecret> {
             // Another caller may have published while this one waited.
-            if let Some(secret) = read_usable(&path) {
-                return Ok(secret);
+            match inspect(files, &path)? {
+                StoredSecret::Usable(secret) => return Ok(secret),
+                StoredSecret::Unusable(reason) => {
+                    // Never the bytes: the reason is a fixed description.
+                    eprintln!(
+                        "mangostudio: replacing the host secret at {}: {reason}; every \
+                         external-agent fingerprint on this home changes",
+                        path.display()
+                    );
+                }
+                StoredSecret::Missing => {}
             }
             let secret = HostSecret::generate()?;
             write_new_file(&path, &secret.0, Some(OWNER_ONLY_MODE))?;
@@ -143,23 +167,79 @@ pub(crate) fn load_or_create(dir: &Path) -> io::Result<HostSecret> {
     settled.map_err(|error| io::Error::other(error.to_string()))?
 }
 
-/// The secret in `path` when it is exactly [`HOST_SECRET_LEN`] bytes and, on
-/// Unix, closed to everyone but its owner. `None` for anything else, including
-/// a path that cannot be read.
-fn read_usable(path: &Path) -> Option<HostSecret> {
-    let metadata = std::fs::metadata(path).ok()?;
-    if !metadata.is_file() || metadata.len() != HOST_SECRET_LEN as u64 {
-        return None;
+/// What is at the secret's path.
+enum StoredSecret {
+    /// Exactly [`HOST_SECRET_LEN`] bytes, closed to everyone but the owner.
+    Usable(HostSecret),
+    /// Nothing there.
+    Missing,
+    /// A readable file that cannot be kept; the text says why.
+    Unusable(&'static str),
+}
+
+/// Classifies the file at `path`.
+///
+/// Only a definite answer about the file counts as a verdict: absent, or
+/// present and wrong (not a regular file, wrong length, accessible to others).
+/// A read that fails for any other reason (`EMFILE`, `EIO`, a Windows sharing
+/// violation) says nothing about the content, and replacing the secret on
+/// that evidence would rotate a good one, so it is returned as an error and
+/// the caller degrades for this call instead.
+fn inspect(files: &impl SecretFiles, path: &Path) -> io::Result<StoredSecret> {
+    let metadata = match files.metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(StoredSecret::Missing),
+        Err(error) => return Err(error),
+    };
+    if !metadata.is_file() {
+        return Ok(StoredSecret::Unusable("not a regular file"));
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        if metadata.permissions().mode() & 0o077 != 0 {
-            return None;
-        }
+    if metadata.len() != HOST_SECRET_LEN as u64 {
+        return Ok(StoredSecret::Unusable("unexpected length"));
     }
-    let bytes = std::fs::read(path).ok()?;
-    Some(HostSecret(<[u8; HOST_SECRET_LEN]>::try_from(bytes).ok()?))
+    match files.is_owner_only(path) {
+        Ok(true) => {}
+        Ok(false) => return Ok(StoredSecret::Unusable("readable by other accounts")),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(StoredSecret::Missing),
+        Err(error) => return Err(error),
+    }
+    let bytes = match files.read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(StoredSecret::Missing),
+        Err(error) => return Err(error),
+    };
+    // The length was checked above; a file that changed size since is a
+    // verdict on the file, not a read failure.
+    Ok(<[u8; HOST_SECRET_LEN]>::try_from(bytes)
+        .map_or(StoredSecret::Unusable("unexpected length"), |bytes| {
+            StoredSecret::Usable(HostSecret(bytes))
+        }))
+}
+
+/// The reads [`load_or_create`] makes of an existing secret file, abstracted
+/// so a test can fail one the way a real host does (`EMFILE`, `EIO`, a Windows
+/// sharing violation) — none of which can be provoked on demand.
+trait SecretFiles {
+    fn metadata(&self, path: &Path) -> io::Result<std::fs::Metadata>;
+    fn read(&self, path: &Path) -> io::Result<Vec<u8>>;
+    fn is_owner_only(&self, path: &Path) -> io::Result<bool>;
+}
+
+/// The real filesystem.
+struct StdSecretFiles;
+
+impl SecretFiles for StdSecretFiles {
+    fn metadata(&self, path: &Path) -> io::Result<std::fs::Metadata> {
+        std::fs::metadata(path)
+    }
+
+    fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+        std::fs::read(path)
+    }
+
+    fn is_owner_only(&self, path: &Path) -> io::Result<bool> {
+        is_owner_only(path)
+    }
 }
 
 /// RFC 2104 HMAC over SHA-256, written out because the one `hmac` consumer in
@@ -327,6 +407,29 @@ mod tests {
         assert_eq!(mode & 0o777, 0o600, "expected the replacement owner-only");
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn a_correctly_sized_secret_with_an_inherited_dacl_is_replaced() {
+        // A file made with plain `fs::write` carries the directory's inherited,
+        // unprotected DACL (SYSTEM, Administrators, the user): not owner-only.
+        let dir = scratch_dir("host-secret-inherited-dacl");
+        std::fs::write(secret_path(&dir), [7u8; HOST_SECRET_LEN]).unwrap();
+
+        let secret = load_or_create(&dir).unwrap();
+
+        assert_ne!(
+            stored_bytes(&dir),
+            [7u8; HOST_SECRET_LEN],
+            "expected a secret with an inherited DACL not to be kept"
+        );
+        assert_eq!(stored_bytes(&dir), secret.0);
+        assert_eq!(
+            load_or_create(&dir).unwrap(),
+            secret,
+            "expected the replacement, written owner-only, to be kept on the next call"
+        );
+    }
+
     #[test]
     fn a_short_secret_file_is_replaced() {
         let dir = scratch_dir("host-secret-short");
@@ -362,6 +465,79 @@ mod tests {
             !error.to_string().is_empty(),
             "expected a described failure | received: {error:?}"
         );
+    }
+
+    /// The real filesystem, except one step fails the way a host under
+    /// pressure does (`EMFILE`, `EIO`, a Windows sharing violation): with an
+    /// error that says nothing about the file's content.
+    #[derive(Clone, Copy, Debug)]
+    enum FailingStep {
+        Metadata,
+        Read,
+        OwnerCheck,
+    }
+
+    struct TransientlyFailingSecretFiles(FailingStep);
+
+    impl TransientlyFailingSecretFiles {
+        fn fail(&self, step: FailingStep) -> io::Result<()> {
+            if matches!(
+                (self.0, step),
+                (FailingStep::Metadata, FailingStep::Metadata)
+                    | (FailingStep::Read, FailingStep::Read)
+                    | (FailingStep::OwnerCheck, FailingStep::OwnerCheck)
+            ) {
+                return Err(io::Error::other("injected transient failure"));
+            }
+            Ok(())
+        }
+    }
+
+    impl SecretFiles for TransientlyFailingSecretFiles {
+        fn metadata(&self, path: &Path) -> io::Result<std::fs::Metadata> {
+            self.fail(FailingStep::Metadata)?;
+            StdSecretFiles.metadata(path)
+        }
+
+        fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+            self.fail(FailingStep::Read)?;
+            StdSecretFiles.read(path)
+        }
+
+        fn is_owner_only(&self, path: &Path) -> io::Result<bool> {
+            self.fail(FailingStep::OwnerCheck)?;
+            StdSecretFiles.is_owner_only(path)
+        }
+    }
+
+    #[test]
+    fn a_transient_failure_reading_a_good_secret_keeps_it_and_reports_the_error() {
+        for step in [
+            FailingStep::Metadata,
+            FailingStep::Read,
+            FailingStep::OwnerCheck,
+        ] {
+            let dir = scratch_dir("host-secret-transient");
+            let original = load_or_create(&dir).unwrap();
+
+            let outcome = load_or_create_with(&TransientlyFailingSecretFiles(step), &dir);
+
+            assert!(
+                outcome.is_err(),
+                "expected the {step:?} failure to propagate so the caller skips attestation | \
+                 received: {outcome:?}"
+            );
+            assert_eq!(
+                stored_bytes(&dir),
+                original.0,
+                "expected a transient {step:?} failure to leave the stored secret untouched"
+            );
+            assert_eq!(
+                load_or_create(&dir).unwrap(),
+                original,
+                "expected the original secret to still be in use after a transient {step:?} failure"
+            );
+        }
     }
 
     #[test]
