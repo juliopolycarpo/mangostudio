@@ -16,11 +16,21 @@
  * `requestRailPanel('github')`, whose own state update hasn't committed yet
  * when this fires. That is what the latch covers — see
  * `workspace/rail/latched-request-channel` for the semantics.
+ *
+ * The latch is paired with the rail request and cannot outlive it. The rail
+ * holds its own request for a bounded window; when that request is dropped
+ * (no rail subscribed in time) the latch is cleared too, otherwise the create
+ * form would pop open whenever the user next opened the GitHub panel.
  */
 
 import { createLatchedRequestChannel } from '../../workspace/rail/latched-request-channel';
+import { onRailPanelRequestDropped } from '../../workspace/rail/rail-panel-request';
 
 const channel = createLatchedRequestChannel();
+
+onRailPanelRequestDropped((panelId) => {
+  if (panelId === 'github') channel.clear();
+});
 
 /**
  * Asks the mounted GitHub panel to switch to the pull requests tab and open

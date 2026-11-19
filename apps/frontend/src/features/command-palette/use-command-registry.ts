@@ -175,17 +175,19 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
         // Awaited, unlike the workdir picker's navigation beside it, and the
         // difference matters. That one sets a flag on the shell, which the chat
         // surface reads whenever it mounts. This is a fire-and-forget event the
-        // rail can only hear if it is already mounted — so running it against
-        // an unawaited `navigate` from settings or the gallery would broadcast
-        // into an empty listener set and silently leave the rail on `git`.
+        // rail can only hear once it is mounted. Awaiting `navigate` resolves
+        // just before the chat surface commits, and `rail-panel-request` holds
+        // the request for a short window to bridge that gap; an unawaited
+        // `navigate` could outlast the window and silently leave the rail on
+        // `git`.
         await navigate({ to: '/' });
         requestRailPanel('github');
       },
       onCreateGithubPr: async () => {
         onRun();
-        // Same ordering as onOpenGithubPanel, for the same reason — both
-        // requests are fire-and-forget events the panel can only hear once it
-        // is mounted, which navigating is what guarantees.
+        // Same ordering as onOpenGithubPanel, for the same reason. The create
+        // request is latched and the rail request windowed; a rail request
+        // that goes unheard clears the latch, so the two cannot disagree.
         await navigate({ to: '/' });
         requestRailPanel('github');
         requestGithubCreatePr();

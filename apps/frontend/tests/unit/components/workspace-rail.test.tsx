@@ -5,9 +5,17 @@ import { fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect } from 'react';
 
-import { requestRailPanel } from '../../../src/features/workspace/rail/rail-panel-request';
+import {
+  RAIL_PANEL_REQUEST_WINDOW_MS,
+  requestRailPanel,
+} from '../../../src/features/workspace/rail/rail-panel-request';
 import { railCollapsedStorageKey } from '../../../src/features/workspace/rail/rail-state';
 import { act, render, screen } from '../../support/harness/render';
+import {
+  advanceTimersByTimeAsync,
+  restoreRealTimers,
+  useFakeTimers,
+} from '../../support/harness/timers';
 
 const mocks = {
   todos: [
@@ -263,6 +271,33 @@ describe('WorkspaceRail', () => {
     expect(await screen.findByTestId('github-panel-content')).toBeVisible();
     expect(screen.queryByTestId('git-panel-content')).not.toBeInTheDocument();
     expect(gitPanelMounts.count, 'Git panel mounts while opening onto GitHub').toBe(0);
+  });
+
+  /**
+   * The palette awaits `navigate()` from /settings and then fires its request,
+   * but the chat surface has not committed the rail yet — nothing is subscribed
+   * when the request goes out. The rail still has to open onto the panel once
+   * it mounts.
+   */
+  it('opens the panel a request named before the rail mounted', async () => {
+    requestRailPanel('github');
+
+    renderRail();
+
+    expect(await screen.findByTestId('github-panel-content')).toBeVisible();
+    expect(screen.queryByTestId('git-panel-content')).not.toBeInTheDocument();
+  });
+
+  it('ignores a request that was made long before the rail mounted', async () => {
+    useFakeTimers();
+    requestRailPanel('github');
+    await advanceTimersByTimeAsync(RAIL_PANEL_REQUEST_WINDOW_MS);
+    await restoreRealTimers();
+
+    renderRail();
+
+    expect(await screen.findByTestId('git-panel-content')).toBeVisible();
+    expect(screen.queryByTestId('github-panel-content')).not.toBeInTheDocument();
   });
 
   it('opens a collapsed rail onto a panel requested from outside, without mounting the previous one', async () => {
