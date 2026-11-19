@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 
 import { ACTIVITY_TOPIC, CHATS_TOPIC } from '@mangostudio/shared/realtime';
 import { createMockChat } from '@mangostudio/shared/test-utils';
+import { useQueryClient } from '@tanstack/react-query';
 
 import type { RealtimeTopicListener } from '@/lib/realtime/realtime-client';
 
@@ -47,7 +48,7 @@ void mock.module('../../../src/lib/api-client', () => ({
 
 // Static imports are evaluated before any statement above runs, so the module
 // under test has to come in afterwards or it binds the real modules.
-const { useChatsQuery } = await import('../../../src/features/chat/queries');
+const { chatKeys, useChatsQuery } = await import('../../../src/features/chat/queries');
 const { resetRealtimeInvalidations } = await import('@/lib/realtime/use-realtime-invalidation');
 
 const chatNamed = (id: string) => createMockChat({ id, title: id, createdAt: 1, updatedAt: 1 });
@@ -103,6 +104,27 @@ describe('useChatsQuery realtime invalidation', () => {
     // Invalidation with a mounted observer refetches immediately — the row a
     // background turn just changed, not merely a stale flag for later.
     await waitFor(() => expect(mockGet.mock.calls.length).toBe(fetchesBefore + 1));
+  });
+
+  it('also marks a cached search and a chat read by id stale on a chats frame', async () => {
+    const { result } = renderHook(() => ({ list: useChatsQuery(), queryClient: useQueryClient() }));
+    await waitFor(() => expect(result.current.list.isSuccess).toBe(true));
+    act(() => {
+      result.current.queryClient.setQueryData(chatKeys.search('plan'), {
+        pages: [],
+        pageParams: [],
+      });
+      result.current.queryClient.setQueryData(chatKeys.detail('chat-9'), chatNamed('chat-9'));
+    });
+
+    await deliverFrame(CHATS_TOPIC);
+
+    const stale = (key: readonly unknown[]) =>
+      result.current.queryClient.getQueryState(key)?.isInvalidated;
+    expect(
+      { search: stale(chatKeys.search('plan')), detail: stale(chatKeys.detail('chat-9')) },
+      '(chats frame): expected search and detail invalidated: true | received'
+    ).toEqual({ search: true, detail: true });
   });
 
   it('does not refetch the chat list when an activity frame arrives', async () => {

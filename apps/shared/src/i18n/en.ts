@@ -653,6 +653,7 @@ export const messages: CoreMessages = {
     clearSearch: 'Clear search',
     loadingMore: 'Loading more chats…',
     loadMore: 'Load more chats',
+    currentChatGroup: 'Open chat',
     // Terminal-style harness labels — brand names, identical in both locales.
     runner: {
       mango: 'mango',

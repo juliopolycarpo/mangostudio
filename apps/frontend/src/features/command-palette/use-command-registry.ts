@@ -6,14 +6,15 @@
  * so the environments list and external-agent discovery are paid for by opening
  * it, not by every page load. The newest page of the chat list is already warm
  * from the authenticated route's loader, which is why sessions never show a
- * skeleton; the older pages are read once the palette is open.
+ * skeleton; the older ones are found by searching the hub for what is typed.
  */
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import { useNavigate } from '@tanstack/react-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
 import { useChatHasTurns } from '@/features/chat/hooks/use-chat-has-turns';
+import { useChatSearch } from '@/features/chat/queries';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import { actionCommands } from '@/features/command-palette/sources/action-commands';
 import { environmentCommands } from '@/features/command-palette/sources/environment-commands';
@@ -46,8 +47,10 @@ export interface CommandRegistry {
  * @param onRun Closes the palette. Every row runs through it, so no provider
  *   has to remember to dismiss and none can leave the overlay over the page it
  *   just navigated to.
+ * @param query What the palette's input holds; searched on the hub for sessions
+ *   beyond the loaded pages. Blank searches nothing.
  */
-export function useCommandRegistry(onRun: () => void): CommandRegistry {
+export function useCommandRegistry(onRun: () => void, query = ''): CommandRegistry {
   const app = useApp();
   const { t, locale } = useI18n('settings');
   const navigate = useNavigate();
@@ -67,16 +70,20 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
   // `isGenerating` flips at turn boundaries, not per streamed token, so keying
   // the memo on it does not reintroduce the per-token rebuild the ref below
   // exists to avoid.
-  const { agents, chats, currentChatId, isGenerating, chatPaging } = app;
+  const { agents, chats: loadedChats, currentChatId, isGenerating } = app;
   const chatHasTurns = useChatHasTurns(currentChatId);
 
-  // The shell loads the chat list a page at a time, but the palette finds a
-  // session by typing, so it reads the rest on opening. Each page that lands
-  // re-runs this until none remains; a failed page is not retried from here.
-  const { hasMore, isLoadingMore, loadFailed, loadMore } = chatPaging;
-  useEffect(() => {
-    if (hasMore && !isLoadingMore && !loadFailed) void loadMore();
-  }, [hasMore, isLoadingMore, loadFailed, loadMore]);
+  // The shell holds the newest pages of the chat list, but the palette finds a
+  // session by typing, so what is typed is also searched on the hub: a session
+  // outside the loaded pages is offered without reading every page on opening.
+  // A refused search leaves the loaded sessions, which the ranking still filters.
+  const chatSearch = useChatSearch(query);
+  const found = chatSearch.chats;
+  const chats = useMemo(() => {
+    if (found.length === 0) return loadedChats;
+    const loadedIds = new Set(loadedChats.map((chat) => chat.id));
+    return [...loadedChats, ...found.filter((chat) => !loadedIds.has(chat.id))];
+  }, [loadedChats, found]);
   // Settings, not availability: the panel's own gate is a chat, which the rows
   // already require. Read here rather than passed in, because the palette is
   // mounted beside the rail and not by it.
@@ -268,6 +275,6 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
     items,
     // Only the two lazily-mounted sources can be cold. Sessions never are, so
     // the skeleton never delays the rows the palette is opened for.
-    isLoading: external.isLoading || environmentsQuery.isLoading,
+    isLoading: external.isLoading || environmentsQuery.isLoading || chatSearch.isPending,
   };
 }

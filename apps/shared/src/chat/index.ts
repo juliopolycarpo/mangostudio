@@ -22,6 +22,7 @@ export {
   ChatRunnerModelSelectionSchema,
   type ChatRunnerPermissions,
   ChatRunnerPermissionsSchema,
+  CHAT_SEARCH_MAX_LENGTH,
   ChatSchema,
   type CompactChatBody,
   CompactChatBodySchema,

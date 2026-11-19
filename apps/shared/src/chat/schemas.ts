@@ -146,6 +146,9 @@ export const ChatSchema = Type.Object({
 
 export type Chat = Static<typeof ChatSchema>;
 
+/** The longest `q` `GET /api/chats` accepts; a longer one is refused with a 422. */
+export const CHAT_SEARCH_MAX_LENGTH = 100;
+
 /** Query of `GET /api/chats`. */
 export const ListChatsQuerySchema = Type.Object({
   /**
@@ -162,6 +165,13 @@ export const ListChatsQuerySchema = Type.Object({
    * A value that is not a cursor this server issued is rejected with a 400.
    */
   cursor: Type.Optional(Type.String()),
+  /**
+   * Keeps only the chats whose title, workdir folder name or runner label
+   * contains this text (compared without regard to ASCII case), newest first
+   * and paged like the whole list. Surrounding whitespace is ignored and a blank
+   * value lists everything. At most `CHAT_SEARCH_MAX_LENGTH` characters, else 422.
+   */
+  q: Type.Optional(Type.String({ maxLength: CHAT_SEARCH_MAX_LENGTH })),
 });
 
 export type ListChatsQuery = Static<typeof ListChatsQuerySchema>;

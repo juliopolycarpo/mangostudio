@@ -44,6 +44,7 @@ import {
   EmptyChatTitlePromptError,
   generateChatTitleUseCase,
 } from '../application/generate-chat-title';
+import { getChatUseCase } from '../application/get-chat';
 import { getChatMessagesUseCase } from '../application/get-chat-messages';
 import { type ListChatsInput, listChatsUseCase } from '../application/list-chats';
 import { EnvironmentSelectionError, updateChatUseCase } from '../application/update-chat';
@@ -124,7 +125,34 @@ export const chatRoutes = (app: Elysia) =>
             }
             throw err;
           }
-          return encodeChatListPage({ userId: user?.id ?? '', after, limit: query.limit });
+          return encodeChatListPage({
+            userId: user?.id ?? '',
+            after,
+            limit: query.limit,
+            search: query.q,
+          });
+        }
+      )
+
+      /**
+       * One chat of the authenticated user, for a client that holds only some
+       * pages of the list. Another account's chat answers like a missing one.
+       */
+      .get(
+        '/:id',
+        {
+          params: t.Object({ id: t.String() }),
+          response: { 200: ChatSchema, 404: ApiErrorResponseSchema },
+        },
+        async ({ params, user }) => {
+          try {
+            return await getChatUseCase({ chatId: params.id, userId: user?.id ?? '' }, getDb());
+          } catch (err) {
+            if (err instanceof ChatNotFoundError) {
+              return status(404, apiError('Chat not found', ERROR_CODES.NOT_FOUND));
+            }
+            throw err;
+          }
         }
       )
 

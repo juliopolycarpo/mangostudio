@@ -52,6 +52,8 @@ export interface ListChatsInput {
   /** The position `nextCursor` of the previous page encodes; the page starts behind it. */
   after?: ChatListCursor | undefined;
   limit?: number | undefined;
+  /** Keeps only the chats whose title, folder or runner label contains this; blank means all. */
+  search?: string | undefined;
 }
 
 /**
@@ -66,9 +68,14 @@ export async function listChatsUseCase(
   input: ListChatsInput,
   db: Kysely<Database>
 ): Promise<ChatListPage> {
+  const search = input.search?.trim();
   const { chats, hasMore } = await listPageByUserId(
     input.userId,
-    { limit: input.limit ?? PAGE_LIMIT_DEFAULT, ...(input.after ? { after: input.after } : {}) },
+    {
+      limit: input.limit ?? PAGE_LIMIT_DEFAULT,
+      ...(input.after ? { after: input.after } : {}),
+      ...(search ? { search } : {}),
+    },
     db
   );
   const last = chats.at(-1);

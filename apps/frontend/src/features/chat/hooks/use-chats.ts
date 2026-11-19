@@ -7,16 +7,22 @@ import { createTimestampChatTitle } from '@mangostudio/shared/chat';
 import { useCallback, useMemo, useState } from 'react';
 
 import {
+  useChatDetailQuery,
+  useChatSearch,
   useChatsQuery,
   useCreateChatMutation,
   useDeleteChatMutation,
   useUpdateChatMutation,
 } from '@/features/chat/queries';
 
-import type { ChatPaging } from '../chat-list-pages';
+import { chatPagingOf } from '../chat-list-pages';
 
 export function useChats() {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  // What the sidebar's search box holds, searched on the hub rather than over
+  // the pages that happen to be loaded; blank asks for nothing.
+  const [chatSearchText, setChatSearchText] = useState('');
+  const chatSearch = useChatSearch(chatSearchText);
 
   const {
     data: chatsData,
@@ -35,18 +41,12 @@ export function useChats() {
   const chats = useMemo(() => chatsData || [], [chatsData]);
   const error = queryError ? queryError.message : null;
 
-  // `fetchNextPage` cancels a read already in flight by default, so a second
-  // call while one runs would restart it instead of joining it.
-  const loadMoreChats = useCallback(async () => {
-    if (!hasNextPage || isFetchingNextPage) return;
-    await fetchNextPage();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
-  const chatPaging: ChatPaging = {
-    hasMore: hasNextPage === true,
-    isLoadingMore: isFetchingNextPage === true,
-    loadFailed: isFetchNextPageError === true,
-    loadMore: loadMoreChats,
-  };
+  const chatPaging = chatPagingOf({
+    hasNextPage: hasNextPage === true,
+    isFetchingNextPage: isFetchingNextPage === true,
+    isFetchNextPageError: isFetchNextPageError === true,
+    fetchNextPage: fetchNextPage ?? (() => Promise.resolve()),
+  });
 
   // Derive effective chat ID: explicit selection takes precedence, otherwise auto-select first.
   const effectiveChatId = currentChatId ?? (chats.length > 0 ? chats[0].id : null);
@@ -199,11 +199,24 @@ export function useChats() {
     setCurrentChatId(chatId);
   }, []);
 
-  const currentChat = chats.find((c) => c.id === effectiveChatId) || null;
+  // The list is a window onto the history, so the chat being worked in can be
+  // outside it: a search result, a link, a chat older than the pages read.
+  // Navigation must not depend on the window, so that chat is read by id —
+  // but only once the list has settled, because the list may be about to
+  // hold it. Once a later page does, the list's own row takes over.
+  const listedChat = chats.find((c) => c.id === effectiveChatId) ?? null;
+  const unlistedChat = useChatDetailQuery(effectiveChatId, !isLoading && listedChat === null).data;
+  const currentChat = listedChat ?? unlistedChat ?? null;
+  // The sidebar shows it pinned, so the open chat is never missing from the
+  // list it is highlighted in.
+  const pinnedChat = listedChat === null ? (unlistedChat ?? null) : null;
 
   return {
     chats,
     chatPaging,
+    chatSearch,
+    setChatSearchText,
+    pinnedChat,
     currentChatId: effectiveChatId,
     currentChat,
     isLoading,

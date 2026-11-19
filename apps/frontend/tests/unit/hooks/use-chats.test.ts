@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:tes
 import type { Chat } from '@mangostudio/shared/chat';
 import { createMockChat } from '@mangostudio/shared/test-utils';
 
+import { NO_MORE_CHATS } from '../../../src/features/chat/chat-list-pages';
+import type { ChatSearchResult } from '../../../src/features/chat/queries';
 import { act, renderHook } from '../../support/harness/render';
 import { useFakeTimers } from '../../support/harness/timers';
 
@@ -43,8 +45,21 @@ const { mockCreateChat, mockUpdateChat, mockDeleteChat, mockLoadChats, mockChats
   })),
 };
 
+const mockChatDetailQuery = jest.fn(
+  (_chatId: string | null, _enabled: boolean): { data: Chat | undefined } => ({ data: undefined })
+);
+const mockChatSearch = jest.fn((_text: string): ChatSearchResult => ({
+  chats: [],
+  paging: NO_MORE_CHATS,
+  isPending: false,
+  isError: false,
+}));
+
 void mock.module('../../../src/features/chat/queries', () => ({
   useChatsQuery: () => mockChatsQueryResult(),
+  useChatDetailQuery: (chatId: string | null, enabled: boolean) =>
+    mockChatDetailQuery(chatId, enabled),
+  useChatSearch: (text: string) => mockChatSearch(text),
   useCreateChatMutation: () => ({ mutateAsync: mockCreateChat }),
   useUpdateChatMutation: () => ({ mutateAsync: mockUpdateChat }),
   useDeleteChatMutation: () => ({ mutateAsync: mockDeleteChat }),
@@ -461,6 +476,103 @@ describe('useChats', () => {
 
       expect(result.current.chatPaging.hasMore).toBe(false);
       expect(fetchNextPage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a selected chat outside the loaded pages', () => {
+    const DEEP_CHAT: Chat = createMockChat({ id: 'chat-deep', title: 'Deep', updatedAt: 0 });
+
+    /** The `[chatId, enabled]` each render asked the by-id read with. */
+    function lastDetailRequest() {
+      const calls = mockChatDetailQuery.mock.calls;
+      return calls[calls.length - 1];
+    }
+
+    beforeEach(() => {
+      mockChatsQueryResult.mockReturnValue({
+        data: [CHAT_A, CHAT_B],
+        isLoading: false,
+        error: null,
+        refetch: mockLoadChats,
+      });
+      mockChatDetailQuery.mockClear();
+      mockChatDetailQuery.mockReturnValue({ data: undefined });
+    });
+
+    it('does not read by id a chat the loaded pages hold', () => {
+      const { result } = renderHook(() => useChats());
+      act(() => result.current.selectChat('chat-b'));
+
+      expect(lastDetailRequest()).toEqual(['chat-b', false]);
+      expect(result.current.currentChat).toMatchObject({ id: 'chat-b' });
+      expect(result.current.pinnedChat).toBeNull();
+    });
+
+    it('reads the selected chat by id when the pages do not hold it, and pins what returns', () => {
+      mockChatDetailQuery.mockReturnValue({ data: DEEP_CHAT });
+      const { result } = renderHook(() => useChats());
+      act(() => result.current.selectChat('chat-deep'));
+
+      expect(lastDetailRequest()).toEqual(['chat-deep', true]);
+      expect(result.current.currentChat).toEqual(DEEP_CHAT);
+      expect(result.current.pinnedChat).toEqual(DEEP_CHAT);
+    });
+
+    it('has no current chat yet while the by-id read is in flight', () => {
+      const { result } = renderHook(() => useChats());
+      act(() => result.current.selectChat('chat-deep'));
+
+      expect(result.current.currentChat).toBeNull();
+      expect(result.current.pinnedChat).toBeNull();
+    });
+
+    it('waits for the list before reading by id, since the list may be about to hold the chat', () => {
+      mockChatsQueryResult.mockReturnValue({
+        data: undefined,
+        isLoading: true,
+        error: null,
+        refetch: mockLoadChats,
+      });
+      const { result } = renderHook(() => useChats());
+      act(() => result.current.selectChat('chat-deep'));
+
+      expect(lastDetailRequest()).toEqual(['chat-deep', false]);
+    });
+
+    it('stops pinning once a later page brings the chat into the list', () => {
+      mockChatDetailQuery.mockReturnValue({ data: DEEP_CHAT });
+      const { result, rerender } = renderHook(() => useChats());
+      act(() => result.current.selectChat('chat-deep'));
+      mockChatsQueryResult.mockReturnValue({
+        data: [CHAT_A, CHAT_B, DEEP_CHAT],
+        isLoading: false,
+        error: null,
+        refetch: mockLoadChats,
+      });
+
+      rerender();
+
+      expect(result.current.pinnedChat).toBeNull();
+      expect(result.current.currentChat).toEqual(DEEP_CHAT);
+    });
+  });
+
+  describe('chat search', () => {
+    it('searches the text the sidebar reports, and reports the result back', () => {
+      const searchResult: ChatSearchResult = {
+        chats: [CHAT_B],
+        paging: NO_MORE_CHATS,
+        isPending: false,
+        isError: false,
+      };
+      mockChatSearch.mockReturnValue(searchResult);
+      const { result } = renderHook(() => useChats());
+      expect(mockChatSearch).toHaveBeenLastCalledWith('');
+
+      act(() => result.current.setChatSearchText('bet'));
+
+      expect(mockChatSearch).toHaveBeenLastCalledWith('bet');
+      expect(result.current.chatSearch).toBe(searchResult);
     });
   });
 });

@@ -61,6 +61,28 @@ export const NO_MORE_CHATS: ChatPaging = {
   loadMore: () => Promise.resolve(),
 };
 
+/**
+ * The paging of an infinite chat query, read off its result. `loadMore` is a
+ * no-op while a page is already loading: `fetchNextPage` cancels a read in
+ * flight by default, so a second call would restart it instead of joining it.
+ */
+export function chatPagingOf(result: {
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  isFetchNextPageError: boolean;
+  fetchNextPage: () => Promise<unknown>;
+}): ChatPaging {
+  return {
+    hasMore: result.hasNextPage,
+    isLoadingMore: result.isFetchingNextPage,
+    loadFailed: result.isFetchNextPageError,
+    loadMore: async () => {
+      if (!result.hasNextPage || result.isFetchingNextPage) return;
+      await result.fetchNextPage();
+    },
+  };
+}
+
 function mapPages(
   cache: ChatListCache,
   mapItems: (items: ChatListPage['items'], pageIndex: number) => ChatListPage['items']

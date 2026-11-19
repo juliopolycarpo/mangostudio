@@ -81,24 +81,41 @@ function appState(chatPaging: ChatPaging = NO_MORE_CHATS): AppState {
 }
 
 /** The registry hook's own context, since the shared harness owns the wrapper. */
+interface Seen {
+  items: readonly CommandItem[];
+  isLoading?: boolean;
+}
+
 function Probe({
   app,
   onRun,
   seen,
+  query,
 }: {
   app: AppState;
   onRun: () => void;
-  seen: { items: readonly CommandItem[] };
+  seen: Seen;
+  query?: string;
 }) {
   return (
     <AppContext value={app}>
-      <Registry onRun={onRun} seen={seen} />
+      <Registry onRun={onRun} seen={seen} query={query} />
     </AppContext>
   );
 }
 
-function Registry({ onRun, seen }: { onRun: () => void; seen: { items: readonly CommandItem[] } }) {
-  seen.items = useCommandRegistry(onRun).items;
+function Registry({
+  onRun,
+  seen,
+  query,
+}: {
+  onRun: () => void;
+  seen: Seen;
+  query: string | undefined;
+}) {
+  const registry = useCommandRegistry(onRun, query);
+  seen.items = registry.items;
+  seen.isLoading = registry.isLoading;
   return null;
 }
 
@@ -164,60 +181,105 @@ async function setup(
   return { scenario, seen, onRun, rerender: rerenderRegistry };
 }
 
-describe('useCommandRegistry chat paging', () => {
-  /** A paging handle that records asks and reports the state a test names. */
-  function pagingWith(overrides: Partial<ChatPaging>) {
-    const loadMore = jest.fn(() => Promise.resolve());
-    const paging: ChatPaging = {
-      hasMore: true,
-      isLoadingMore: false,
-      loadFailed: false,
-      loadMore,
-      ...overrides,
-    };
-    return { paging, loadMore };
-  }
+describe('useCommandRegistry sessions beyond the loaded pages', () => {
+  const DEEP = {
+    id: 'deep-1',
+    title: 'Plugin LSP archive',
+    updatedAt: 0,
+    runner: { kind: 'mangostudio' },
+  };
 
-  it('reads the pages the shell has not loaded, so a session can be found by typing', async () => {
-    const { paging, loadMore } = pagingWith({});
+  function installHub() {
     const scenario = createFetchScenario();
     scenario.install();
     scenario.respondWithJson('GET', '/api/environments', { body: [] });
     scenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
       body: { agents: [] },
     });
-    const seen: { items: readonly CommandItem[] } = { items: [] };
+    return scenario;
+  }
 
-    render(<Probe app={appState(paging)} onRun={jest.fn()} seen={seen} />);
+  /** The chat-list requests the hub saw, as `path?query`. */
+  function chatListRequests(scenario: ReturnType<typeof createFetchScenario>): string[] {
+    return (
+      scenario.fetchMock.mock.calls
+        .map(([input]) => String(input instanceof Request ? input.url : input))
+        .map((url) => url.replace(/^https?:\/\/[^/]+/, ''))
+        // The list itself, not `/api/chats/<id>/...` reads of one chat.
+        .filter((path) => /^\/api\/chats(\?|$)/.test(path))
+    );
+  }
+
+  const sessionIds = (seen: Seen) =>
+    seen.items.filter((item) => item.section === 'sessions').map((item) => item.id);
+
+  it('reads no further page of the chat list when it opens', async () => {
+    const loadMore = jest.fn(() => Promise.resolve());
+    const scenario = installHub();
+    const seen: Seen = { items: [] };
+
+    render(
+      <Probe
+        app={appState({ hasMore: true, isLoadingMore: false, loadFailed: false, loadMore })}
+        onRun={jest.fn()}
+        seen={seen}
+      />
+    );
     await flushAsyncRender();
 
-    expect(
-      loadMore.mock.calls.length,
-      'expected the palette to ask for the next chat page while one remains'
-    ).toBeGreaterThan(0);
+    expect(loadMore, 'expected opening the palette to read no chat page').not.toHaveBeenCalled();
+    expect(chatListRequests(scenario), 'expected no chat list request before typing').toEqual([]);
     scenario.restore();
   });
 
-  it('does not retry a page that failed, or ask while one is loading', async () => {
-    const failed = pagingWith({ loadFailed: true });
-    const loading = pagingWith({ isLoadingMore: true });
-    const scenario = createFetchScenario();
-    scenario.install();
-    scenario.respondWithJson('GET', '/api/environments', { body: [] });
-    scenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
-      body: { agents: [] },
+  it('searches the hub for what is typed and offers the sessions it finds beyond the loaded pages', async () => {
+    const scenario = installHub();
+    scenario.respondWithJson('GET', '/api/chats?limit=50&q=lsp', {
+      body: {
+        items: [DEEP, { ...chats[0], title: 'Plugin LSP' }],
+        nextCursor: null,
+      },
     });
-    const seen: { items: readonly CommandItem[] } = { items: [] };
+    const seen: Seen = { items: [] };
 
-    const { rerender } = render(
-      <Probe app={appState(failed.paging)} onRun={jest.fn()} seen={seen} />
-    );
-    await flushAsyncRender();
-    rerender(<Probe app={appState(loading.paging)} onRun={jest.fn()} seen={seen} />);
-    await flushAsyncRender();
+    render(<Probe app={appState()} onRun={jest.fn()} seen={seen} query="lsp" />);
 
-    expect(failed.loadMore).not.toHaveBeenCalled();
-    expect(loading.loadMore).not.toHaveBeenCalled();
+    await waitFor(() => expect(sessionIds(seen)).toContain('session:deep-1'));
+    expect(chatListRequests(scenario)).toEqual(['/api/chats?limit=50&q=lsp']);
+    expect(
+      sessionIds(seen).filter((id) => id === 'session:c1'),
+      'expected a chat both loaded and found to be listed once'
+    ).toHaveLength(1);
+    scenario.restore();
+  });
+
+  it('is loading until the hub has answered the typed text', async () => {
+    const scenario = installHub();
+    scenario.respondWithJson('GET', '/api/chats?limit=50&q=lsp', {
+      body: { items: [], nextCursor: null },
+    });
+    const seen: Seen = { items: [] };
+
+    render(<Probe app={appState()} onRun={jest.fn()} seen={seen} query="lsp" />);
+    await flushAsyncRender();
+    expect(seen.isLoading, 'before the reply').toBe(true);
+
+    await waitFor(() => expect(seen.isLoading).toBe(false));
+    scenario.restore();
+  });
+
+  it('keeps the loaded sessions when the search is refused', async () => {
+    const scenario = installHub();
+    scenario.respondWithJson('GET', '/api/chats?limit=50&q=lsp', {
+      status: 500,
+      body: { error: 'boom', code: 'INTERNAL' },
+    });
+    const seen: Seen = { items: [] };
+
+    render(<Probe app={appState()} onRun={jest.fn()} seen={seen} query="lsp" />);
+
+    await waitFor(() => expect(seen.isLoading).toBe(false));
+    expect(sessionIds(seen)).toEqual(['session:c1']);
     scenario.restore();
   });
 });

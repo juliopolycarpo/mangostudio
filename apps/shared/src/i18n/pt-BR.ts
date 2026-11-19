@@ -1553,6 +1553,7 @@ export const messages = {
     clearSearch: 'Limpar busca',
     loadingMore: 'Carregando mais chats…',
     loadMore: 'Carregar mais chats',
+    currentChatGroup: 'Chat aberto',
     // Rótulos de harness estilo terminal — nomes de marca, iguais nos dois idiomas.
     runner: {
       mango: 'mango',

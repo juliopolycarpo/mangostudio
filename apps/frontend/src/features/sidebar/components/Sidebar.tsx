@@ -35,6 +35,7 @@ import { StatusDot } from '@/components/ui/StatusDot';
 import { useToast } from '@/components/ui/Toast';
 import { type ChatPaging, NO_MORE_CHATS } from '@/features/chat/chat-list-pages';
 import { chatTitleLabel } from '@/features/chat/lib/chat-title';
+import type { ChatSearchResult } from '@/features/chat/queries';
 import type { ContextInfo } from '@/features/generation/types';
 import type { AppPage } from '@/hooks/use-chat-route-actions';
 import { useI18n } from '@/hooks/use-i18n';
@@ -69,12 +70,23 @@ interface Props {
   /** The chats loaded so far, newest first; the list may continue past them (`chatPaging`). */
   chats: Chat[];
   /**
-   * How to read the chats beyond `chats`. The list asks for the next page when
-   * its end scrolls into view, and for every remaining page while a search is
-   * typed, so a search covers the whole history rather than what happens to be
-   * loaded. Omitted when the list is complete.
+   * How to read the chats beyond `chats`: the list asks for the next page when
+   * its end scrolls into view. Omitted when the list is complete.
    */
   chatPaging?: ChatPaging | undefined;
+  /**
+   * The hub's matches for the text reported through `onSearchTextChange`, so a
+   * search covers the whole history rather than the pages loaded. Without it,
+   * or while it has failed, the search filters `chats`.
+   */
+  chatSearch?: ChatSearchResult | undefined;
+  onSearchTextChange?: ((text: string) => void) | undefined;
+  /**
+   * The open chat when `chats` does not hold it (it is older than the pages
+   * read, or was opened from a search). Shown above the list so the open chat
+   * is always visible and highlighted.
+   */
+  pinnedChat?: Chat | null | undefined;
   currentChatId: string | null;
   onSelectChat: (chatId: string) => void;
   onUpdateChatTitle: (chatId: string, title: string) => void;
@@ -117,6 +129,9 @@ export function Sidebar({
   onNavigate,
   chats,
   chatPaging = NO_MORE_CHATS,
+  chatSearch,
+  onSearchTextChange,
+  pinnedChat,
   currentChatId,
   onSelectChat,
   onUpdateChatTitle,
@@ -134,7 +149,11 @@ export function Sidebar({
 }: Props) {
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
-  const [query, setQuery] = useState('');
+  const [query, setQueryState] = useState('');
+  const setQuery = (next: string) => {
+    setQueryState(next);
+    onSearchTextChange?.(next);
+  };
   const deferredQuery = useDeferredValue(query);
   const [pendingDelete, setPendingDelete] = useState<Chat | null>(null);
   const [isDeleting, setDeleting] = useState(false);
@@ -173,7 +192,13 @@ export function Sidebar({
   };
 
   const handleSaveEdit = (chatId: string) => {
-    const current = chats.find((c) => c.id === chatId)?.title;
+    // A row may come from the pinned chat or the hub's matches rather than `chats`.
+    const isEdited = (c: Chat) => c.id === chatId;
+    const current = (
+      chats.find(isEdited) ??
+      (pinnedChat && isEdited(pinnedChat) ? pinnedChat : undefined) ??
+      chatSearch?.chats.find(isEdited)
+    )?.title;
     const shown = current === undefined ? undefined : chatTitleLabel(current, t.chat.untitled);
     if (editTitle.trim() && editTitle !== shown) {
       onUpdateChatTitle(chatId, editTitle.trim());
@@ -255,22 +280,51 @@ export function Sidebar({
   // once urgently with the old query and once more with the new one, and both
   // passes redo the whole filter, the bucketing and one `Intl.DateTimeFormat`
   // per month group — so the deferral would cost a second pass and buy nothing.
+  const searching = deferredQuery.trim().length > 0;
+  // A search is the hub's to answer, so it covers chats no loaded page holds. A
+  // failed search falls back to filtering what is loaded, which can miss chats
+  // but never claims more than it read.
+  const hubSearch = searching && chatSearch && !chatSearch.isError ? chatSearch : null;
+  // Until the first reply there are no matches yet, and the loaded pages are the
+  // best answer there is; every later text keeps the previous matches on screen.
+  const source =
+    hubSearch && !(hubSearch.isPending && hubSearch.chats.length === 0) ? hubSearch.chats : chats;
+  const listPaging = hubSearch ? hubSearch.paging : chatPaging;
   const { visibleCount, groups } = useMemo(() => {
     const now = new Date(dayStartMs);
+    // The hub's matches are filtered again by the text typed since: they stay
+    // on screen while the reply for the next keystroke is on its way, and the
+    // rows that no longer match leave at once.
     const visible = filterChats(
-      chats,
+      source,
       deferredQuery,
       (chat) => runnerBadge(chat.runner, badgeLabels).label
     );
+    const pinned =
+      !searching && pinnedChat
+        ? [{ key: 'pinned', label: t.sidebar.currentChatGroup, chats: [pinnedChat] }]
+        : [];
     return {
       visibleCount: visible.length,
-      groups: groupChatsByDate(visible, now).map((group) => ({
-        ...group,
-        label: chatGroupLabel(group, groupLabels, locale, now),
-      })),
+      groups: [
+        ...pinned,
+        ...groupChatsByDate(visible, now).map((group) => ({
+          ...group,
+          label: chatGroupLabel(group, groupLabels, locale, now),
+        })),
+      ],
     };
-  }, [chats, deferredQuery, badgeLabels, groupLabels, locale, dayStartMs]);
-  const searching = deferredQuery.trim().length > 0;
+  }, [
+    source,
+    deferredQuery,
+    searching,
+    pinnedChat,
+    badgeLabels,
+    groupLabels,
+    t.sidebar.currentChatGroup,
+    locale,
+    dayStartMs,
+  ]);
 
   const listRef = useRef<HTMLElement>(null);
   useRowsInView({
@@ -281,21 +335,15 @@ export function Sidebar({
 
   // A failed page is not retried on its own, or a hub that refuses it would be
   // asked again by every effect run: the reader retries with the button below.
-  const canLoadMore = chatPaging.hasMore && !chatPaging.isLoadingMore && !chatPaging.loadFailed;
+  const canLoadMore = listPaging.hasMore && !listPaging.isLoadingMore && !listPaging.loadFailed;
   const listEndRef = useRef<HTMLDivElement>(null);
   useLoadMoreOnVisible({
     rootRef: listRef,
     sentinelRef: listEndRef,
     enabled: canLoadMore,
-    loadedKey: chats.length,
-    onVisible: () => void chatPaging.loadMore(),
+    loadedKey: source.length,
+    onVisible: () => void listPaging.loadMore(),
   });
-  // A search filters what is loaded, so it reads the rest first: otherwise
-  // "no results" would be said about the newest pages only.
-  const { loadMore } = chatPaging;
-  useEffect(() => {
-    if (searching && canLoadMore) void loadMore();
-  }, [searching, canLoadMore, loadMore]);
 
   return (
     <>
@@ -419,7 +467,7 @@ export function Sidebar({
           className="hide-scrollbar flex-1 overflow-y-auto px-3 pb-2"
           aria-label={t.chat.sectionLabel}
         >
-          {searching && visibleCount === 0 && !chatPaging.hasMore ? (
+          {searching && visibleCount === 0 && !listPaging.hasMore && !hubSearch?.isPending ? (
             <EmptyState
               icon={<SearchX size={ICON_LG} />}
               title={formatMessage(t.common.noResultsFor, { query: deferredQuery.trim() })}
@@ -600,7 +648,7 @@ export function Sidebar({
               </ul>
             </div>
           ))}
-          {chatPaging.hasMore ? (
+          {listPaging.hasMore ? (
             // The observed end of the list. It stays mounted while a page loads,
             // so the observer is not rebuilt around a node that keeps changing.
             <div
@@ -608,17 +656,17 @@ export function Sidebar({
               {...{ [LIST_END_ATTRIBUTE]: '' }}
               className="flex min-h-8 items-center justify-center py-2"
             >
-              {chatPaging.loadFailed ? (
+              {listPaging.loadFailed ? (
                 <Button
                   variant="subtle"
-                  onClick={() => void chatPaging.loadMore()}
+                  onClick={() => void listPaging.loadMore()}
                   data-testid="sidebar-load-more"
                 >
                   {t.sidebar.loadMore}
                 </Button>
               ) : (
                 <output className="text-xs text-fg-subtle">
-                  {chatPaging.isLoadingMore ? t.sidebar.loadingMore : null}
+                  {listPaging.isLoadingMore ? t.sidebar.loadingMore : null}
                 </output>
               )}
             </div>
