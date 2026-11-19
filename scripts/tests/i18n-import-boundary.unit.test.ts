@@ -12,8 +12,19 @@ const DICTIONARY_SPECIFIERS = [
   '@mangostudio/shared/i18n/en',
   '@mangostudio/shared/i18n/en-settings',
   '@mangostudio/shared/i18n/en-onboarding',
+  '@mangostudio/shared/i18n/en-environments',
+  '@mangostudio/shared/i18n/en-library',
+  '@mangostudio/shared/i18n/en-git',
+  '@mangostudio/shared/i18n/en-github',
   '@mangostudio/shared/i18n/pt-BR',
 ];
+// The one module per feature that hands its English namespace to the feature's lazy chunk.
+const FEATURE_NAMESPACE_MODULES = [
+  ['en-environments', 'apps/frontend/src/features/environments/environments-i18n.ts'],
+  ['en-library', 'apps/frontend/src/features/library/library-i18n.ts'],
+  ['en-git', 'apps/frontend/src/features/workspace/git-i18n.ts'],
+  ['en-github', 'apps/frontend/src/features/github/github-i18n.ts'],
+] as const;
 const PLUMBING_PATHS = [
   'apps/frontend/src/hooks/use-i18n.tsx',
   'apps/frontend/src/lib/locale-dictionaries.ts',
@@ -61,6 +72,22 @@ describe('locale dictionary Bun restriction', () => {
 
       const refused = lintSource(
         'apps/frontend/src/features/settings/forbidden.ts',
+        `import '${specifier}';`
+      );
+      expect(refused.exitCode, refused.output).toBe(1);
+      expect(refused.output).toContain(LOCALE_MESSAGE);
+    }
+  );
+
+  it.each(FEATURE_NAMESPACE_MODULES)(
+    'lets only the feature module import the %s namespace',
+    (name, allowedPath) => {
+      const specifier = `@mangostudio/shared/i18n/${name}`;
+      const allowed = lintSource(allowedPath, `import '${specifier}';`);
+      expect(allowed.exitCode, allowed.output).toBe(0);
+
+      const refused = lintSource(
+        'apps/frontend/src/features/chat/forbidden.ts',
         `import '${specifier}';`
       );
       expect(refused.exitCode, refused.output).toBe(1);

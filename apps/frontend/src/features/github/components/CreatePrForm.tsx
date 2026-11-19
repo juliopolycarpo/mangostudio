@@ -9,6 +9,7 @@ import { Checkbox } from '@/components/ui/Checkbox';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
 import { useToast } from '@/components/ui/Toast';
+import { githubMessages } from '@/features/github/github-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -53,7 +54,7 @@ interface CreatePrFormProps {
  * <CreatePrForm chatId={chatId} needsPush defaultTitle="Fix the rail" onDone={close} />
  */
 export function CreatePrForm({ chatId, needsPush, defaultTitle, onDone }: CreatePrFormProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState(defaultTitle);

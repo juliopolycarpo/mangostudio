@@ -3,6 +3,7 @@ import { GitBranch } from 'lucide-react';
 
 import { MenuItem } from '@/components/ui/Menu';
 import { StatusDot } from '@/components/ui/StatusDot';
+import { githubMessages } from '@/features/github/github-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
@@ -40,7 +41,7 @@ export function GithubPrRow({
   onCheckout,
   canMutate,
 }: GithubPrRowProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
   const checks = checkChipStatus(pr.checks);
 
   return (

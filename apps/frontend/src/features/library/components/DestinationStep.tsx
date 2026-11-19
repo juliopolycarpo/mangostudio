@@ -26,6 +26,7 @@ import { Server } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { MicroLabel } from '@/components/ui/MicroLabel';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
@@ -66,7 +67,7 @@ export function DestinationStep({
   environmentName,
   onToggle,
 }: DestinationStepProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   const machines = useMemo(() => destinationsByEnvironment(preview), [preview]);
   // The reminder is for someone who emptied the list. On a screen nobody has
@@ -145,7 +146,7 @@ function DestinationRow({
   readonly checked: boolean;
   readonly onToggle: (environmentId: string, locationId: LibraryLocationId) => void;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   const blocked = destination.blockedReason !== undefined;
   const otherTargets = destination.targetIds.slice(1);

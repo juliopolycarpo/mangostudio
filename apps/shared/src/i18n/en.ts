@@ -2,7 +2,10 @@ import type { CoreMessages } from './types';
 
 /**
  * The eager English dictionary: every namespace except the deferred ones
- * (`en-settings.ts`, `en-onboarding.ts`; see `DeferredNamespace` in `types.ts`).
+ * (`en-settings.ts`, `en-onboarding.ts`; see `DeferredNamespace` in `types.ts`),
+ * and for `environments`, `git`, `github` and `library` only the keys listed in
+ * `EagerFeatureKeys`; the rest are in `en-<namespace>.ts`, which the feature's lazy
+ * chunk imports. A key that something outside that chunk reads belongs here.
  */
 export const messages: CoreMessages = {
   auth: {
@@ -698,69 +701,6 @@ export const messages: CoreMessages = {
   git: {
     title: 'Repository',
     refresh: 'Refresh repository state',
-    loading: 'Reading repository…',
-    loadError: 'The repository state could not be read.',
-    unavailableTitle: 'Git is unavailable',
-    unavailableHint: 'Install Git on the server to inspect this working directory.',
-    noWorkdir: 'Choose a working directory to inspect its repository.',
-    noRepositoryTitle: 'No Git repository',
-    noRepositoryHint: 'Initialize Git in this working directory to keep track of agent changes.',
-    initialize: 'Initialize repository',
-    initializing: 'Initializing…',
-    initializeFailed: 'The repository could not be initialized.',
-    cleanTitle: 'Working tree clean',
-    cleanHint: 'No local changes to review.',
-    detachedAt: 'Detached at {commit}',
-    navigation: {
-      changes: 'Changes',
-      history: 'History',
-    },
-    menu: {
-      open: 'More repository actions',
-      stash: 'Stashes…',
-      amend: 'Amend latest commit…',
-      prune: 'Prune deleted branches on fetch',
-    },
-    branch: {
-      menu: 'Change branch',
-      itemMenu: 'More actions for {branch}',
-      tracking: 'Tracking {upstream}',
-      current: 'Current',
-      switchTo: 'Switch to {branch}',
-      checkoutRemote: 'Check out {branch}',
-      create: 'Create branch',
-      createPlaceholder: 'feat/branch-name',
-      creating: 'Creating…',
-      created: 'Created and switched to {branch}.',
-      switched: 'Switched to {branch}.',
-      actionError: 'The branch could not be changed.',
-      empty: 'No local branches found.',
-      localSection: 'Local',
-      remoteSection: 'Remote',
-      checkoutBlockedTitle: 'Local changes block this switch',
-      checkoutBlockedHint:
-        'Stash the current work, including untracked files, then switch branches safely.',
-      conflictingPaths: 'Files that would be overwritten',
-      cancel: 'Keep current branch',
-      stashAndSwitch: 'Stash and switch',
-      stashMessage: 'Before switching to {branch}',
-      rename: 'Rename',
-      renameTitle: 'Rename {branch}',
-      renameLabel: 'New branch name',
-      renameConfirm: 'Rename branch',
-      renameCancel: 'Cancel',
-      renamed: 'Renamed the branch to {branch}.',
-      delete: 'Delete',
-      deleteTitle: 'Delete {branch}?',
-      deleteHint: 'Removes the local branch. Commits reachable from another branch stay.',
-      deleteConfirm: 'Delete branch',
-      deleteCancel: 'Keep branch',
-      deleted: 'Deleted branch {branch}.',
-      deleteNotMergedTitle: 'The branch has unmerged work',
-      deleteNotMergedHint:
-        'Commits on this branch exist nowhere else. Deleting it anyway discards that work.',
-      deleteNotMergedConfirm: 'Delete anyway',
-    },
     remote: {
       fetch: 'Fetch',
       fetching: 'Fetching…',
@@ -788,23 +728,6 @@ export const messages: CoreMessages = {
       forcePushCancel: 'Cancel',
       forcePushed: 'Branch pushed with force-with-lease.',
     },
-    history: {
-      loading: 'Reading history…',
-      loadError: 'Commit history could not be loaded.',
-      empty: 'No commits yet.',
-      loadMore: 'Load older commits',
-      loadingMore: 'Loading…',
-      back: 'Back to history',
-      // English splits one from many; `count` arrives already grouped for the
-      // locale. The two labels name the signed numbers for assistive tech, which
-      // would otherwise hear only "+10,826 −10,006".
-      filesChangedOne: '{count} file changed',
-      filesChangedOther: '{count} files changed',
-      additionsLabel: 'Additions: {count}',
-      deletionsLabel: 'Deletions: {count}',
-      binary: 'Binary',
-      commitDetails: 'Commit details',
-    },
     diff: {
       back: 'Close diff',
       loading: 'Loading diff…',
@@ -815,192 +738,10 @@ export const messages: CoreMessages = {
       staged: 'Staged changes',
       worktree: 'Working tree changes',
     },
-    groups: {
-      staged: 'Staged',
-      changes: 'Changes',
-      conflicted: 'Conflicts',
-    },
-    status: {
-      modified: 'Modified',
-      added: 'Added',
-      deleted: 'Deleted',
-      renamed: 'Renamed',
-      copied: 'Copied',
-      untracked: 'Untracked',
-      conflicted: 'Conflicted',
-      typeChanged: 'Type changed',
-    },
-    actions: {
-      stage: 'Stage {path}',
-      unstage: 'Unstage {path}',
-      stageAll: 'Stage all {group}',
-      unstageAll: 'Unstage all {group}',
-      groupMenu: 'More actions in {group}',
-      failed: 'The Git action failed.',
-      viewDiff: 'View diff for {path}',
-    },
-    discard: {
-      restorePath: 'Discard worktree changes in {path}',
-      deletePath: 'Delete untracked file {path}',
-      discardAll: 'Discard everything in {group}',
-      restoreAllButton: 'Discard tracked changes',
-      deleteAllButton: 'Delete untracked files',
-      restoreTitle: 'Discard worktree changes?',
-      deleteTitle: 'Delete untracked files?',
-      mixedTitle: 'Discard changes and delete files?',
-      mixedHint:
-        'Restores unstaged content in tracked files and deletes untracked files from disk. The deletion cannot be undone.',
-      confirmMixed: 'Discard and delete',
-      mixedDone: 'Changes discarded and untracked files deleted.',
-      restoreHint: 'Restores only unstaged worktree content. Staged changes stay in the index.',
-      deleteHint: 'Permanently deletes the selected untracked files from disk.',
-      cancel: 'Cancel',
-      confirmRestore: 'Discard changes',
-      confirmDelete: 'Delete files',
-      restored: 'Worktree changes discarded.',
-      deleted: 'Untracked files deleted.',
-    },
-    conflicts: {
-      hint: 'Resolve conflict markers in the working tree, then stage the fixed files. Merge and rebase stay in the terminal for now.',
-    },
-    commit: {
-      title: 'Commit',
-      titleLabel: 'Summary',
-      titlePlaceholder: 'e.g. Fix redirect after sign-in',
-      titleCount: '{count}/72',
-      bodyLabel: 'Description (optional)',
-      bodyPlaceholder: 'e.g. The redirect used an expired session',
-      generate: 'Generate message',
-      generating: 'Generating message…',
-      generateError: 'The commit message could not be generated.',
-      truncatedNotice: 'The diff was large and was truncated before generation.',
-      amendLabel: 'Amend latest commit',
-      amendHint: 'Replaces the latest local commit.',
-      amendExit: 'Leave amend mode',
-      submit: 'Commit changes',
-      submitting: 'Committing…',
-      success: 'Committed {hash}',
-      error: 'The commit could not be created.',
-    },
-    commitActions: {
-      menu: 'More commit actions',
-      commit: 'Commit changes',
-      stageAllAndCommit: 'Stage all and commit',
-      nothingStagedHint: 'Nothing is staged. Stage files, or choose "{action}" in the menu.',
-      commitAndPush: 'Commit and push',
-      commitAndSync: 'Commit and sync',
-      stageFailed: 'The changes could not be staged. No commit was created.',
-      pullFailed: 'Committed, but the changes could not be pulled.',
-      pushFailed: 'Committed, but the push failed.',
-      pushed: 'Committed and pushed {hash}',
-      synced: 'Committed and synced {hash}',
-    },
-    headMessage: {
-      loading: 'Reading the latest commit…',
-      loadError: 'The latest commit message could not be read.',
-    },
-    amendConfirm: {
-      title: 'Amend rewrites history',
-      description:
-        'Amending replaces the latest commit. Only continue when rewriting local history is safe.',
-      cancel: 'Cancel',
-      confirm: 'Confirm amend',
-    },
-    commitMessageOverwrite: {
-      title: 'Replace the current message?',
-      description:
-        'A suggestion was generated, but the form already contains text. Confirm to replace the current title and body.',
-      cancel: 'Keep current message',
-      confirm: 'Use suggestion',
-    },
-    stash: {
-      title: 'Stashes',
-      messageLabel: 'Stash message',
-      messagePlaceholder: 'e.g. Half-done login refactor (optional)',
-      includeUntracked: 'Include untracked files',
-      save: 'Save stash',
-      saving: 'Saving…',
-      empty: 'No saved stashes.',
-      loading: 'Loading stashes…',
-      loadError: 'Stashes could not be loaded.',
-      pop: 'Pop',
-      popLabel: 'Pop the stash {message}',
-      apply: 'Apply',
-      applyLabel: 'Apply the stash {message} and keep it on the stack',
-      drop: 'Drop',
-      dropLabel: 'Drop the stash {message}',
-      dropTitle: 'Drop this stash?',
-      dropHint: 'Removes the entry from the stash stack. The work it holds cannot be recovered.',
-      dropConfirm: 'Drop stash',
-      dropCancel: 'Keep stash',
-      saveSuccess: 'Work saved to a stash.',
-      popSuccess: 'Stash restored and removed.',
-      applySuccess: 'Stash applied. The entry is still saved.',
-      dropSuccess: 'Stash dropped.',
-      actionError: 'The stash action failed.',
-      close: 'Close stashes',
-    },
-    worktrees: {
-      title: 'Worktrees',
-      loading: 'Reading worktrees…',
-      loadError: 'Could not read the worktrees of this repository.',
-      empty: 'This repository has only its main worktree.',
-      add: 'Add worktree',
-      addTitle: 'New worktree',
-      pathLabel: 'Worktree path',
-      pathHint: 'Absolute, or relative to the repository root.',
-      pathPlaceholder: '../feature-panel',
-      branchLabel: 'Branch',
-      branchPlaceholder: 'feat/panel',
-      modeLabel: 'Branch to check out',
-      modeNew: 'Create a new branch',
-      modeExisting: 'Use an existing branch',
-      submit: 'Create worktree',
-      submitting: 'Creating…',
-      cancel: 'Cancel',
-      added: 'Worktree created at {path}.',
-      open: 'Worktree at {path}',
-      remove: 'Remove',
-      removeLabel: 'Remove the worktree at {path}',
-      removeTitle: 'Remove this worktree?',
-      removeHint:
-        'Deletes the working directory from disk. The branch and its commits stay in the repository.',
-      removeConfirm: 'Remove worktree',
-      removeCancel: 'Keep worktree',
-      removed: 'Worktree removed.',
-      force: 'Discard uncommitted work in that worktree',
-      actionError: 'The worktree action failed.',
-      badges: {
-        main: 'Main',
-        current: 'This chat',
-        otherChat: 'Other chat',
-        detached: 'Detached',
-        locked: 'Locked',
-        prunable: 'Prunable',
-      },
-      otherChatReason:
-        'Another chat is working in this worktree. Point it elsewhere before removing it.',
-      lockedReason: 'Locked: {reason}',
-      prunableReason: 'Prunable: {reason}',
-      detached: 'Detached at {commit}',
-    },
   },
 
   github: {
     title: 'GitHub',
-    loading: 'Reading GitHub context…',
-    /**
-     * The pull request badge vocabulary, keyed lowercase because its one caller
-     * indexes it with `state.toLowerCase()` and it carries `draft`, which is not
-     * a pull request state at all.
-     */
-    states: {
-      open: 'Open',
-      closed: 'Closed',
-      merged: 'Merged',
-      draft: 'Draft',
-    },
-
     panel: {
       inbox: 'Waiting on you',
       repo: 'This repo',
@@ -1021,100 +762,6 @@ export const messages: CoreMessages = {
       noChecks: 'no checks',
     },
 
-    /**
-     * Per-branch annotation in the branch list. Only `MERGED` earns a sentence
-     * of its own. Says the pull request merged, not that deleting the branch
-     * is safe — Git's own refusal on an unmerged tip is what decides that.
-     */
-    branchPr: {
-      merged: 'merged',
-    },
-
-    /**
-     * Keyed by the wire value of the four not-connected states so the panel can
-     * index straight off the response instead of switching on it. One sentence
-     * per state, and one hint that says what to do about it.
-     */
-    connection: {
-      'gh-not-installed': 'GitHub CLI is not installed where this chat runs.',
-      'not-authenticated': 'GitHub CLI is not signed in where this chat runs.',
-      'no-remote': 'This repository has no remote.',
-      'not-a-github-remote': 'This repository does not have a GitHub remote.',
-    },
-    // A hint that names a command to type does not spell it out: signing in puts
-    // the command in a copyable box under the sentence, and `{command}` marks the
-    // slot an inline command fills (see `GithubNotConnected`).
-    connectionHint: {
-      'gh-not-installed': 'Install the GitHub CLI on that machine, then refresh.',
-      'not-authenticated': 'Run this on that machine, then refresh.',
-      'no-remote': 'Add a remote with {command} on that machine, then refresh.',
-      'not-a-github-remote': 'The GitHub panel only reads repositories hosted on GitHub.',
-    },
-
-    empty: {
-      prs: 'No pull requests match this filter.',
-      issues: 'No issues match this filter.',
-      inbox: 'Nothing is waiting on your review.',
-      checks: 'This pull request runs no checks.',
-      threads: 'No review comments on this pull request.',
-    },
-
-    issueState: {
-      OPEN: 'Open',
-      CLOSED: 'Closed',
-    },
-    reviewDecision: {
-      APPROVED: 'Approved',
-      CHANGES_REQUESTED: 'Changes requested',
-      REVIEW_REQUIRED: 'Review required',
-    },
-    /** Lives outside `reviewDecision`: "none" is a null, not a member of the union. */
-    reviewDecisionNone: 'No review yet',
-    checkBucket: {
-      pass: 'Passed',
-      fail: 'Failed',
-      pending: 'Running',
-      skipping: 'Skipped',
-      cancel: 'Cancelled',
-    },
-    mergeState: {
-      BEHIND: 'Behind the base branch',
-      BLOCKED: 'Merge blocked',
-      CLEAN: 'Ready to merge',
-      DIRTY: 'Conflicts with the base branch',
-      DRAFT: 'Still a draft',
-      HAS_HOOKS: 'Ready to merge, with repository hooks',
-      UNKNOWN: 'Merge state unknown',
-      UNSTABLE: 'Mergeable, but checks are failing',
-    },
-    mergeable: {
-      MERGEABLE: 'No conflicts',
-      CONFLICTING: 'Has conflicts',
-      UNKNOWN: 'Checking for conflicts',
-    },
-    prFilter: {
-      open: 'Open',
-      mine: 'Mine',
-      'review-requested': 'Review requested',
-      all: 'All',
-    },
-    issueFilter: {
-      open: 'Open',
-      assigned: 'Assigned to me',
-      mine: 'Created by me',
-    },
-
-    row: {
-      number: '#{number}',
-      draft: 'Draft',
-      author: 'by {author}',
-      bot: 'bot',
-      diffStat: '+{additions} / -{deletions} across {files} files',
-      assignees: 'Assigned to {assignees}',
-      unassigned: 'Unassigned',
-      labels: 'Labels',
-    },
-
     actions: {
       openInBrowser: 'Open in browser',
       copyUrl: 'Copy URL',
@@ -1128,58 +775,6 @@ export const messages: CoreMessages = {
       checkout: 'Check out this branch',
       refresh: 'Refresh',
       pushAndCreatePr: 'Push the branch and create the pull request',
-    },
-
-    createPr: {
-      title: 'Create pull request',
-      titleLabel: 'Title',
-      titlePlaceholder: 'e.g. Fix redirect after sign-in',
-      bodyLabel: 'Description',
-      bodyPlaceholder: 'e.g. The redirect used an expired session',
-      draftLabel: 'Create as a draft',
-      submit: 'Create pull request',
-      cancel: 'Cancel',
-      success: 'Pull request #{number} created.',
-      error: 'The pull request could not be created.',
-      createdUnreadable:
-        'The pull request was created, but its details could not be read back. Do not create it again.',
-      openOnGithub: 'Open on GitHub',
-      done: 'Done',
-      pushHint:
-        'This branch does not exist on the remote yet. It will be pushed before the pull request is opened.',
-      pushError: 'The branch could not be pushed, so no pull request was created.',
-      noBranch: 'Check out a branch to create a pull request.',
-      readOnly:
-        'GitHub writes are turned off on this machine, so pull requests can only be read here.',
-    },
-
-    /**
-     * The text the "review comments" action writes into the composer. It lives
-     * in i18n like any other visible sentence: it is a message somebody reads
-     * and edits before sending, not a wire format.
-     */
-    reviewTask: {
-      heading: 'Address these unresolved review comments on {reference}:',
-      withLine: '{path}:{line}',
-      noLine: '{path}',
-      comment: '{author}: {body}',
-      unknownAuthor: 'someone',
-      truncated:
-        'This pull request has more review threads or comments than fit here — check {reference} on GitHub for the rest.',
-    },
-
-    staleness: {
-      updated: 'Updated {relative}',
-      refreshing: 'Refreshing…',
-    },
-
-    errors: {
-      prs: 'Pull requests could not be loaded.',
-      issues: 'Issues could not be loaded.',
-      inbox: 'Your review queue could not be loaded.',
-      checks: 'Checks could not be loaded.',
-      threads: 'Review comments could not be loaded.',
-      action: 'The GitHub action failed.',
     },
   },
 
@@ -1263,16 +858,6 @@ export const messages: CoreMessages = {
       codex: 'Codex',
       cursor: 'Cursor',
     },
-    title: 'Library',
-    subtitle: 'What each agent sees, where it lives, and where the copies disagree.',
-    tabs: {
-      skills: 'Skills',
-      subagents: 'Subagents',
-      commands: 'Commands',
-      instructions: 'Instructions',
-      settings: 'Settings',
-      locations: 'Locations',
-    },
     kinds: {
       skill: 'Skill',
       subagent: 'Subagent',
@@ -1291,30 +876,6 @@ export const messages: CoreMessages = {
       setting: 'setting',
       hook: 'hook',
     },
-    // The raw contract state, used by the detail view's coverage list.
-    coverage: {
-      present: 'Present',
-      absent: 'Absent',
-      shadowed: 'Shadowed',
-    },
-    divergence: {
-      single: 'One copy',
-      uniform: 'Copies identical',
-      divergent: 'Copies differ',
-      'not-comparable': 'Not comparable',
-      incomparable: 'Hash versions differ',
-    },
-    // One label per matrix glyph. Nothing here calls an absence "missing": a
-    // resource Cursor does not have is usually absent on purpose.
-    cellState: {
-      'scan-incomplete': 'Coverage could not be verified',
-      present: 'Present',
-      absent: 'Absent',
-      shadowed: 'Shadowed, identical',
-      divergent: 'Differs from the other copies',
-      'only-here': 'Only here',
-      incomparable: 'Cannot compare',
-    },
     // What a matrix cell prints beside its glyph, and what the legend prints for
     // the glyphs where a cell is a glyph alone. The column is a fraction of the
     // table, so the sentence-length `cellState` would not fit; that one stays on
@@ -1327,55 +888,6 @@ export const messages: CoreMessages = {
       divergent: 'Differs',
       'only-here': 'Only here',
       incomparable: 'Cannot compare',
-    },
-    cellHint: {
-      'scan-incomplete': 'Some locations this agent reads could not be scanned.',
-      present: 'This agent reads one copy of this resource.',
-      absent: 'This agent reads no copy — which is often correct.',
-      shadowed: 'Two copies in different locations, holding the same content.',
-      divergent: 'The content here is not the same as the other copies.',
-      'only-here': 'This is the only agent that reads the resource.',
-      incomparable:
-        'These copies were hashed by different runtime versions, so the hashes cannot be compared.',
-    },
-    invalidReason: {
-      'path-escape': 'The path points outside the location.',
-      'invalid-slug': 'The name is not usable as a file or directory.',
-      'missing-entrypoint': 'The entrypoint file does not exist.',
-      'unexpected-entry-type': 'The entry is not the expected type.',
-      unreadable: 'The content could not be read.',
-      'too-large': 'The content exceeds the read limit.',
-      'invalid-metadata': 'The metadata could not be parsed.',
-      'unsafe-name': 'One of its internal file names cannot be safely represented.',
-    },
-    // Entries that could not even be named as a resource (#705) — a name has to
-    // pass this pattern before it can be anything more specific.
-    scanDiagnostics: {
-      heading: 'Some library locations could not be scanned',
-      legacy:
-        'This runtime does not report location scan failures. Update it to distinguish empty locations from failed scans.',
-      reason: {
-        'permission-denied': 'Permission denied. Check access to this location.',
-        'not-directory': 'This path does not resolve to a directory.',
-        unreadable: 'This location could not be read. Check the path and try again.',
-      },
-    },
-    unreadable: {
-      heading: 'Unrecognised entries',
-      rule: 'Names may only use letters, numbers, "_", "-", and ".", with no spaces or other characters.',
-      reason: {
-        'invalid-name': 'This name does not match the allowed pattern.',
-      },
-    },
-    format: {
-      'markdown-plain': 'Markdown',
-      'markdown-frontmatter': 'Markdown with frontmatter',
-      mdc: 'MDC',
-      'toml-agent': 'TOML agent',
-      'agent-profile-db': 'Database profile',
-      'json-settings': 'JSON settings',
-      'toml-settings': 'TOML settings',
-      'rules-dsl': 'Rules',
     },
     locationSettings: {
       description:
@@ -1415,78 +927,6 @@ export const messages: CoreMessages = {
       locationGroup: 'In {location}',
       locationGroupOther: 'In other locations',
     },
-    filters: {
-      search: 'Filter by name',
-      target: 'Agent',
-      // The select's own label ("Agent:") already says what is being chosen.
-      anyTarget: 'Any',
-      location: 'Location',
-      anyLocation: 'Any',
-      show: 'Show',
-      showAll: 'Everything',
-      showDivergent: 'Only divergent',
-      showSingleLocation: 'Only present in one place',
-      showShadowed: 'Only shadowed',
-      sort: 'Sort',
-      sortName: 'Name',
-      sortDivergence: 'Divergence',
-      sortCoverage: 'Coverage',
-      sortModified: 'Modified',
-      groupByLocation: 'Group by location',
-      // The phone's one button for every control but the search.
-      toggle: 'Filters',
-    },
-    tooltip: {
-      path: 'Path',
-      hash: 'Content',
-      modified: 'Modified',
-      alsoIn: 'Also in',
-      absent: 'No copy in any location this agent reads.',
-    },
-    detail: {
-      back: 'Back to the matrix',
-      contentHeading: 'Content',
-      coverageHeading: 'Coverage',
-      // `*One` / `*Other` pair: the component picks by count (`usePlural`).
-      copiesOne: '{count} copy',
-      copiesOther: '{count} copies',
-      modified: 'modified {when}',
-      compare: 'Compare {left} ↔ {right}',
-      compareHide: 'Close comparison',
-      compareSelect: 'Pick two versions to compare.',
-      // Introduces a path set on its own line below it, so no placeholder.
-      via: 'Read from',
-      alsoIn: 'Also in',
-      // The badge beside each shadowed copy: whether it holds the same bytes as
-      // the copy the agent actually reads.
-      shadowCopy: {
-        identical: 'Identical',
-        differs: 'Differs',
-        unknown: 'Cannot compare',
-      },
-      propagate: 'Propagate',
-      remove: 'Remove',
-      notFound: 'This resource is no longer in the library.',
-      loadError: 'Could not check this library resource.',
-      invalidInstance: 'Unreadable copy in {location}',
-      // 001 deliberately does not normalize line endings, so a CRLF/LF split is
-      // a genuine divergence that looks like nothing in a diff.
-      whitespaceOnlyTitle: 'The only difference is whitespace',
-      whitespaceOnlyDescription:
-        'The text matches once spaces, tabs, and line breaks are removed. One file saved with CRLF and another with LF genuinely diverge, even though they look identical.',
-      entrypointOnly: 'The comparison covers SKILL.md; other files in the directory are not in it.',
-      identicalEntrypoint:
-        'The SKILL.md files are identical, so the difference is in another file in the directory.',
-      notComparable:
-        'This kind is read-only everywhere and each agent stores its own format, so comparing the copies says nothing actionable.',
-      incomparable:
-        'These copies were hashed by different runtime versions, so the hashes cannot be compared. The files may still match. Update every connected runtime to the same release, then scan again.',
-    },
-    diff: {
-      error: 'The content of this copy could not be read.',
-      identical: 'Both versions hold the same text.',
-      truncated: 'The content was truncated on read, so the comparison may be incomplete.',
-    },
     wizard: {
       title: 'Propagate {count} resources',
       titleOne: 'Propagate {kind} {resource}',
@@ -1507,304 +947,10 @@ export const messages: CoreMessages = {
       stale: 'The library changed since this read. Preview again before applying.',
       restale: 'Preview again',
     },
-    conflict: {
-      description:
-        'These resources have more than one readable version. There is no canonical copy, so the choice is yours.',
-      resolved: 'Resolved',
-      unresolved: '{count} resources still need a decision.',
-      adopt: 'Use this version',
-      keepPerLocation: {
-        scanIncomplete: 'Preview again once all source copies can be read.',
-        title: 'Keep them different',
-        description:
-          'Sometimes copies should differ. The divergence stops being flagged until one of the contents changes again.',
-      },
-      edit: {
-        title: 'Edit before adopting',
-        description:
-          'Write the final text; it becomes the adopted version, a copy that exists nowhere yet.',
-        placeholder: 'Final content',
-        unavailable: 'A skill is a directory and cannot be adopted from edited text.',
-        empty: 'Write the content before continuing.',
-      },
-    },
-    destination: {
-      description: 'Every checked location takes one write, backed up first.',
-      // The most useful thing this step can say: one write can cover two agents,
-      // and checking both locations creates a second copy for no reason.
-      servesMultipleTargets: 'Also serves {targets}',
-      readOnly: 'Read-only',
-      unwritableAction: 'See in Environments',
-      none: 'No location accepts writes for this kind of resource.',
-      noneSelected: 'Check at least one destination.',
-      currentContent: 'Holds {hash}',
-      empty: 'Empty',
-    },
-    review: {
-      summary: 'Will write {files} files and back up {backups}.',
-      groupCreate: 'Create',
-      groupOverwrite: 'Overwrite',
-      groupAdapt: 'Convert',
-      groupNoop: 'Already in sync',
-      groupBlocked: 'Blocked',
-      // Overwrite is the destructive operation; it never lands unseen.
-      overwriteDiff: 'What is being replaced',
-      apply: 'Apply',
-      applying: 'Applying…',
-      applyError: 'The apply failed.',
-      nothingToDo: 'Nothing to write with these choices.',
-    },
-    adaptation: {
-      heading: 'Format conversion',
-      fromTo: '{from} → {to}',
-      strategy: {
-        verbatim: 'Verbatim copy',
-        mechanical: 'Mechanical conversion',
-        agent: 'Model-drafted conversion',
-      },
-      strategyHint: {
-        verbatim: 'The bytes are copied unchanged.',
-        mechanical: 'A deterministic framing transform, with no model involved.',
-        agent: 'A model writes the draft. It always needs review before it is applied.',
-      },
-      recommended: 'Recommended',
-      note: {
-        'metadata-added': 'Metadata added',
-        'field-dropped': 'Field dropped',
-        'semantic-rewrite': 'Rewritten with a change in meaning',
-      },
-      // `requiresReview` is always true for the `agent` strategy.
-      acknowledge: 'I have read the generated draft and accept writing it.',
-      acknowledgeRequired: 'Confirm you reviewed the generated draft to continue.',
-      provenance: 'Drafted by {model} (prompt {version})',
-    },
-    blockedReason: {
-      'read-only-location': 'This location is read-only.',
-      'unsupported-location': 'This location does not exist on this platform.',
-      'location-unwritable': 'MangoStudio cannot write to this location.',
-      'location-disabled':
-        'This location is switched off in the library location settings, so it is not scanned.',
-      'location-scan-failed': 'This location could not be scanned. Check access and preview again.',
-      'slug-mismatch': 'This location stores a single resource, and this is not it.',
-      'invalid-destination':
-        'The copy already here could not be read, so overwriting it is not safe.',
-      'no-source-content': 'No readable copy exists to copy from.',
-      'no-adapter-strategy': "No converter knows how to reach the destination's format.",
-      // The machine, rather than the location. Ordered before the location's own
-      // problems because nothing can be said about a directory on a box nobody
-      // could reach — and telling the user to fix the location would send them
-      // after the wrong thing.
-      'environment-offline': 'This machine is not connected right now.',
-      'environment-unsupported': 'This machine does not offer library access.',
-      'environment-readonly': "This machine's owner has not allowed writing to files here.",
-      'hash-domain-mismatch':
-        'This machine hashes directories with a different version than the source, so a write here cannot be verified.',
-      // Removal shares this catalog; only the reason below is unique to it.
-      'invalid-instance':
-        'This copy could not be read end to end, so it cannot be backed up faithfully. Remove it yourself.',
-    },
-    skipReason: {
-      'user-skipped': 'Not selected',
-      'already-in-sync': 'Already in sync',
-      'divergence-acknowledged': 'Divergence kept on purpose',
-    },
-    failureReason: {
-      'guard-rejected': 'A safety check refused the write.',
-      'adaptation-failed': 'The format conversion failed.',
-      'write-failed': 'The write to disk failed.',
-      'verification-failed': 'The bytes on disk after the write do not match what was intended.',
-    },
-    removalFailureReason: {
-      'guard-rejected': 'A safety check refused the removal.',
-      'backup-failed': 'The copy could not be backed up, so it was left alone.',
-      'remove-failed': 'The removal failed.',
-      'verification-failed': 'The copy was still there after being removed.',
-    },
-    removalKeptReason: {
-      'user-kept': 'You chose to keep this copy.',
-      absent: 'There was nothing at this location.',
-      blocked: 'This location cannot be written to.',
-      'not-attempted': 'An earlier failure stopped the removal before it reached this copy.',
-      'rolled-back': 'It was put back after a later removal failed.',
-    },
-    removal: {
-      title: 'Remove {count} resources',
-      titleOne: 'Remove {kind} {resource}',
-      remove: 'Remove',
-      removing: 'Removing…',
-      stepLocations: 'Choose copies',
-      stepConfirm: 'Confirm',
-      locationsDescription:
-        'Pick the copies to remove. Nothing is selected for you: keeping a copy is always the safe answer.',
-      absent: 'No copy here',
-      version: 'version {hash}',
-      noLocations: 'No location for this kind holds a copy that can be removed.',
-      noLocationsHint:
-        'Every location for this kind is either disabled in settings or unavailable on this platform.',
-      previewError: 'The removal preview could not be built.',
-      nothingSelected: 'Nothing is selected, so there is nothing to remove.',
-      // Deleting the version you do not want is a legitimate way to resolve a
-      // divergence — the user only needs to know that is what they are doing.
-      eliminatesGroup: 'This is the only copy of version {hash}.',
-      eliminatesGroupHeading: 'These removals take the last copy of a version with them',
-      eliminatesGroupRow: '{resource} — {location} holds the only copy of version {hash}',
-      confirmDescription: '{count} copies will be removed.',
-      lastCopyWarning:
-        'This would leave no copy of the resource anywhere. The backup below is the only way back, and only while it is retained.',
-      lastCopyAcknowledge: 'I understand this removes the last copy of {resource}.',
-      acknowledgeRequired: 'Acknowledge the last-copy removal to continue.',
-      lastCopyRefused:
-        'The library holds fewer copies than this preview showed, so removing these would leave none. Preview again to see what is really there.',
-      backupNote: 'Every removed copy is backed up first and can be restored from the result.',
-      // The apply is bound to a state hash; between preview and confirm the user
-      // may have edited the very copy they are about to delete.
-      stale: 'The library changed since this read. Preview again before removing.',
-      staleStaged:
-        'An interrupted removal left a temporary copy behind. Nothing was deleted; inspect these paths and remove them yourself.',
-      applyError: 'The removal failed.',
-      resultRemovedHeading: 'Removed',
-      resultLastCopy: 'This was the last copy.',
-      resultPartial:
-        'A removal failed and could not be fully undone, so some copies are already gone. Use the backup below.',
-      resultRolledBack: 'A removal failed, so every copy was put back.',
-      resultNone: 'Nothing was removed.',
-      resultKeptHeading: 'Still there',
-      // One machine's copies at a time: a removal's backup is the only remaining
-      // copy of what it deleted, so the verb has to name what is being restored
-      // rather than promise a single undo across every machine touched.
-      restore: 'Put these copies back',
-    },
-    result: {
-      appliedHeading: 'Written',
-      skippedHeading: 'Skipped',
-      failedHeading: 'Failed',
-      none: 'Nothing was written.',
-      rolledBack: 'Nothing was written: the failure was rolled back completely.',
-      // The alarming case: compensation also failed and writes are still on disk.
-      partial:
-        'A failure could not be fully rolled back. Some writes are still on disk — use Undo.',
-      backupId: 'Backup {id}',
-      undo: 'Undo',
-      undoing: 'Undoing…',
-      undoError: 'The undo failed.',
-      undone: 'Undone: {restored} restored, {removed} removed.',
-      undoSkipped: '{count} were left alone.',
-      undoSkipReason: {
-        'changed-since-apply': 'Changed after the apply; undo left it alone.',
-        'backup-missing': 'The backup is no longer available.',
-      },
-      done: 'Done',
-    },
-    backups: {
-      pinned: '{count} pinned, holding {size}.',
-      pinnedHint:
-        'Pinned sets hold the last remaining copy of a resource, so retention never deletes them.',
-      restoring: 'Restoring…',
-      restoreError: 'This backup could not be restored.',
-      purge: 'Purge',
-      // Two clicks on every row, pinned or not. Ordinary sets are purgeable for
-      // the first time here, and a set holding a recoverable copy must not go
-      // on one click just because nothing pinned it.
-      purgeConfirm: 'Delete it permanently',
-      purgeCancel: 'Keep it',
-      purgeError: 'This backup could not be deleted.',
-      usage: '{count} backups using {size}.',
-      // Singular form: there is no plural machinery, so the one-set case is a key.
-      usageOne: '1 backup using {size}.',
-      retention: 'We keep the last {count} or {size}, whichever comes first.',
-      manage: 'Manage backups',
-      back: 'Back to the matrix',
-      title: 'Backups',
-      description:
-        'Every copy the app is holding from a propagation or a removal, with the way back from each.',
-      empty: 'No backups are being held right now.',
-      // Undo means opposite things by origin, so the verb is never generic. A
-      // removal set only ever puts content back; a propagation set can also
-      // delete the paths that propagation created.
-      undoRemoval: 'Put the copies back',
-      undoPropagation: 'Undo this propagation',
-      undoUnknown: 'Undo',
-      undoUnknownHint:
-        'This backup predates the record of what wrote it, so undoing it may put content back or remove what was written.',
-      origin: {
-        propagation: 'Propagation',
-        removal: 'Removal',
-        unknown: 'Unrecorded',
-      },
-      columnCreated: 'Created',
-      columnContents: 'Contents',
-      columnSize: 'Size',
-      columnOrigin: 'Origin',
-      contentsUnknown: '{count} entries',
-      pinnedBadge: 'Pinned',
-      // Retention evicts on the next propagation, so saying it after the fact is
-      // saying it too late.
-      evictsNext: 'Goes next',
-      evictsNextHint:
-        'The next propagation will delete this backup to stay inside the retention budget.',
-      bulkHint: 'Backups are restored and deleted one set at a time, on purpose.',
-      // Backups stay on the machine that owned the file, so the list is grouped
-      // by machine rather than merged: two sets from two machines are two
-      // different disks, and the retention budget applies to each on its own.
-      retentionPerMachine: 'These bounds apply to each machine separately.',
-      machineUnknown: 'Machine {id}',
-      unreachable:
-        'These machines could not be reached, so their backups are listed from what the hub last recorded: {machines}.',
-      unavailableOffline: 'Restoring needs this machine connected.',
-      unavailableManifest:
-        'This set has lost the record of what it holds, so nothing can be restored from it. Deleting it still works.',
-    },
-    settings: {
-      description:
-        'Read-only. Settings from different agents have similar intent, not identical meaning.',
-      comparability: 'Rough comparison',
-      concept: {
-        'default-permission-mode': 'Default permission mode',
-        'allow-list': 'Allow list',
-        'deny-list': 'Deny list',
-        'selected-model': 'Selected model',
-        'reasoning-effort': 'Reasoning effort',
-      },
-      conceptState: {
-        detected: 'Detected',
-        'not-detected': 'Not configured',
-        'not-applicable': 'Not applicable',
-      },
-      // One line for the agents that have nothing to compare, instead of a card
-      // each that only repeats the state.
-      undetectedLine: {
-        'not-detected': 'Not configured for {agents}',
-        'not-applicable': 'Not applicable to {agents}',
-      },
-      presentation: {
-        redacted: 'Value withheld for safety',
-        // Says "present" on purpose. A setting nobody configured is not listed
-        // at all, so the only thing this row adds over silence is that there
-        // *is* something here and it is deliberately not shown.
-        omitted: 'Present, but never shown',
-      },
-      sourceHeading: 'Files read',
-      sourceAbsent: 'Does not exist',
-      parseFailure: {
-        'invalid-json': 'Invalid JSON',
-        'invalid-toml': 'Invalid TOML',
-        'invalid-rules': 'Rules could not be parsed',
-        unreadable: 'Could not be read',
-        'not-regular-file': 'Not a regular file',
-        'too-large': 'Too large to read',
-      },
-      empty: 'No settings were found to compare.',
-    },
   },
 
   environments: {
-    title: 'Environments',
     nav: 'Environments',
-    subtitle: 'What is installed, what is wrong, and what actually runs when you type.',
-    // A binary that answered but whose version output did not parse. Applies to
-    // runtimes and agent CLIs alike, which is why it lives here rather than
-    // inside either section.
-    versionUnknown: 'unknown version',
     tabs: {
       overview: 'Overview',
       // Label only: the tab still lives at /environments/runtimes and every
@@ -1815,6 +961,10 @@ export const messages: CoreMessages = {
       library: 'Library',
       machine: 'This machine',
     },
+    // A binary that answered but whose version output did not parse. Applies to
+    // runtimes and agent CLIs alike, which is why it lives here rather than
+    // inside either section.
+    versionUnknown: 'unknown version',
     machine: {
       description:
         'The MangoStudio process serving this page, what keeps it running, and what doctor says about the install.',
@@ -2074,55 +1224,11 @@ export const messages: CoreMessages = {
       codex: 'Codex',
       cursor: 'Cursor',
     },
-    /** Which machine a diagnostic tab is describing. */
-    /** Per-environment permission to run install recipes on that machine. */
-    trust: {
-      label: 'Allow installs on this machine',
-      hint: 'Runs allowlisted install recipes there, writing to that machine\u2019s disk. Remote installs need both the global install switch and this per-environment permission \u2014 the local-surface check that protects this machine says nothing about that one.',
-      updateFailed: 'The install permission could not be changed.',
-    },
-    scope: {
-      label: 'Environment',
-      disconnected: '{environment} is not connected',
-      disconnectedHint:
-        'Nothing is shown rather than the last answer this machine gave, because a stale toolchain list is exactly what someone would act on.',
-      connect: 'Connect',
-      notPermitted: '{environment} does not report what is installed on it',
-      notPermittedHint:
-        'Its runtime does not offer toolchain detection. That is a setting on that machine, not a fault here.',
-      libraryNotPermitted: '{environment} does not report library resources',
-      libraryNotPermittedHint:
-        'Its runtime does not offer library discovery. That is a setting on that machine, not a fault here.',
-      libraryDisconnectedHint:
-        'Nothing is shown rather than the last library matrix this machine gave, because a stale coverage answer is exactly what someone would act on.',
-      compare: 'Compare',
-      compareTitle: 'Compare environments',
-      compareHint: 'Two machines, one table. Rows are what MangoStudio knows how to look for.',
-      compareLeft: 'Left environment',
-      compareRight: 'Right environment',
-      compareClose: 'Close comparison',
-      cellPresent: 'Present',
-      cellAbsent: 'Not installed',
-      cellNotPermitted: 'Not reported',
-      cellUnknown: 'Not checked yet',
-      rowGroupRuntime: 'Toolchains',
-      rowGroupAgent: 'Agents',
-      rowGroupShell: 'Shells',
-      presenceOn: 'on {environment}',
-      presencePresent: '{environment}: installed',
-      presenceAbsent: '{environment}: not installed',
-    },
     status: {
       ok: 'Available',
       warn: 'Needs attention',
       missing: 'Not found',
       error: 'Probe failed',
-    },
-    origins: {
-      path: 'on PATH',
-      'well-known': 'well-known location',
-      'version-manager': 'version manager',
-      configured: 'configured',
     },
     actions: {
       refresh: 'Re-check',
@@ -2131,108 +1237,6 @@ export const messages: CoreMessages = {
       copy: 'Copy command',
       copied: 'Command copied',
       copyFailed: 'The command could not be copied.',
-    },
-    // Renaming is display-only: the id on the wire, the tool names providers
-    // see, and every API path stay exactly as they were.
-    identity: {
-      menu: 'Identity options for {name}',
-      rename: 'Rename…',
-      // For a subject whose name is not the registry's to change (an MCP server's
-      // is its configured name): the same dialog without the name field.
-      customize: 'Set avatar…',
-      reset: 'Reset to default',
-      dialogTitle: 'Rename {name}',
-      customizeDialogTitle: 'Set avatar for {name}',
-      nameLabel: 'Display name',
-      namePlaceholder: '{name}',
-      nameHint: 'Leave empty to keep the default name. Only what you read changes.',
-      monogramLabel: 'Monogram',
-      monogramHint: 'One or two characters for the avatar. Leave empty to derive it from the name.',
-      monogramInvalid: 'Use one or two characters, without spaces.',
-      preview: 'Preview',
-      imageLabel: 'Image',
-      imageModeNone: 'No image',
-      imageModeUpload: 'Upload',
-      imageModeUrl: 'Address',
-      imageChoose: 'Choose a file…',
-      imageReplaceFile: 'Choose another…',
-      imageNoFile: 'No file chosen',
-      imageStoredFile: 'Using the image you uploaded',
-      imageFileHint: 'PNG, JPEG, or WebP, up to 512 KB. SVG files are not accepted.',
-      imageFileTooLarge: 'That file is larger than 512 KB. Choose a smaller one.',
-      imageRightsNotice: 'Only upload an image you hold the rights to use.',
-      imageUrlLabel: 'Image address',
-      imageUrlPlaceholder: 'https://example.com/logo.png',
-      imageUrlInvalid: 'Enter an address starting with https://.',
-      imageCacheLabel: 'Cache this image here',
-      imageCacheOnNotice:
-        'The image is downloaded once and served from this machine. The remote site is never contacted again.',
-      imageCacheOffNotice:
-        'Your browser loads the image from the remote site every time it is shown. That site can count those requests, learn your approximate location from your IP address, and change the image after you save it — including to something you would not want shown.',
-      save: 'Save',
-      cancel: 'Cancel',
-      saveFailed: 'The changes could not be saved.',
-      resetFailed: 'The identity could not be reset.',
-    },
-    loadError: 'The environment state could not be loaded.',
-    checkedAt: 'Checked at {time}',
-    overview: {
-      description: 'What this machine can run agents with, and what needs attention.',
-      // Each section is a summary of a tab, so its link says which one it opens.
-      // A sentence per tab rather than a template around the tab's label: the
-      // label is capitalised for a tab strip, and a sentence is not.
-      open: {
-        runtimes: 'Open toolchains',
-        agents: 'Open agents',
-        health: 'Open health',
-        library: 'Open library',
-        machine: 'Open this machine',
-      },
-      agentDetails: 'Details',
-      agentsEmpty: 'No agent CLI was found on this machine.',
-      agentsEmptyHint: 'MangoStudio can install one for you from the Agents tab.',
-      toolchainsEmpty: 'No toolchain was found on this machine.',
-      healthClear: 'Nothing needs attention.',
-      libraryEmpty: 'No library resources were found yet.',
-      libraryPresent: '{count} present',
-      libraryDivergent: '{count} divergent',
-      libraryNone: 'Reads nothing yet',
-      // The overview's "before you start" checklist. Every row reads state the
-      // Toolchains, Agents, and This machine tabs already fetch — there is no
-      // dedicated endpoint behind this section.
-      setup: {
-        title: 'Setup',
-        description: 'What a new machine needs before agents can run on it.',
-        status: {
-          done: 'Done',
-          todo: 'To do',
-          optional: 'Optional',
-        },
-        git: {
-          label: 'Git',
-          explanation: 'Agents use Git to inspect history and commit their own changes.',
-        },
-        node: {
-          label: 'A current Node.js',
-          explanation: 'Some agent CLIs and MCP servers need a supported Node.js LTS to run.',
-        },
-        bun: {
-          label: 'Bun',
-          explanation:
-            'MangoStudio itself runs on Bun. Optional here unless one of your agents needs it too.',
-        },
-        agent: {
-          label: 'An agent CLI, signed in',
-          explanation:
-            'At least one agent CLI must be installed and signed in before you can chat.',
-        },
-        hubService: {
-          label: 'MangoStudio running as a service',
-          explanation: 'A per-user service keeps MangoStudio running after you close its window.',
-        },
-        gitDarwinRemedy: 'Run this in a terminal:',
-        gitLinuxRemedy: "Install it with your Linux distribution's package manager.",
-      },
     },
     entities: {
       title: 'Execution environments',
@@ -2593,77 +1597,6 @@ export const messages: CoreMessages = {
           'Walks a machine you can reach over SSH from nothing to a working environment: the runtime, its permissions, what is installed on it, and your library.',
       },
     },
-    onboarding: {
-      title: 'Set up a new machine',
-      progress: 'Step {step} of {total} · {name}',
-      steps: {
-        reach: 'Reach it',
-        'end-state': 'End state',
-        install: 'Runtime',
-        permissions: 'Permissions',
-        provision: 'Provision',
-        tools: 'Tools',
-        library: 'Library',
-        done: 'Done',
-      },
-      continue: 'Continue',
-      back: 'Back',
-      finish: 'Finish',
-      close: 'Close',
-      missingEnvironment: 'This step needs the environment that the previous one creates.',
-      reachIntro:
-        'MangoStudio uses your own ssh client, so keys, your agent, ~/.ssh/config and known_hosts all apply. Nothing has to be installed on the machine first.',
-      reachWindows:
-        'Linux and macOS targets only. Windows is not supported over SSH — pair it from its own card instead.',
-      endStateLabel: 'How should MangoStudio reach it afterwards?',
-      endStateSsh: 'Over SSH, every time',
-      endStateSshHint:
-        'MangoStudio starts the runtime there with your ssh client whenever it needs it. Nothing runs on that machine in between, and there is no service to keep alive.',
-      endStatePaired: 'The machine dials MangoStudio',
-      endStatePairedHint:
-        'Set up once over SSH, then the runtime connects on its own and stays connected — through a router, a firewall, or MangoStudio moving to another network. It needs a service on that machine to survive reboots.',
-      endStatePairingUnavailable:
-        'MangoStudio could not check whether it has a public address to hand the machine. Nothing has been done on that machine yet — try again.',
-      endStatePairingRetry: 'Check again',
-      permissionsSshIntro:
-        'The runtime is on the machine. Say what MangoStudio may do with it — this is recorded on that machine, not here.',
-      permissionsPairedIntro:
-        'Say what MangoStudio may do on that machine. The answer is recorded there during setup, in the next step, and can be narrowed later from the card.',
-      permissionsNone: 'No permissions chosen yet.',
-      permissionsChosen: 'Profile: {profile}',
-      permissionsChoose: 'Choose permissions',
-      permissionsChange: 'Change permissions',
-      provisionSshIntro:
-        'MangoStudio pushes the runtime it matches, verifies its checksum, and publishes it. Running this again when the machine already has these bytes does nothing.',
-      provisionPairedIntro:
-        'One run over SSH: push the runtime, record your permissions, hand the machine a credential, and install the service that keeps it connected. Every step is safe to repeat.',
-      provisionStartSsh: 'Install the runtime',
-      provisionStartPaired: 'Set up the machine',
-      toolsIntro: 'What MangoStudio found on that machine.',
-      toolsProbing: 'Looking at what is installed…',
-      toolsNone: 'No toolchains or agent CLIs were found there yet.',
-      toolsError: 'Could not check what is installed on that machine.',
-      toolsDisconnected:
-        'Nothing has been probed yet — MangoStudio reads this from the machine once it is connected.',
-      toolsInstallsNote:
-        'Off by default. Installing on {name} needs this switch and that machine’s own permissions to agree; whichever one refuses says so.',
-      libraryIntro:
-        'Skills, subagents and instructions live per machine. Copying yours across is its own review — conflicts, per-destination consent, and undo — so it happens in the library.',
-      libraryOpen: 'Open the library for {name}',
-      libraryNotPermitted:
-        'This machine’s permissions exclude the library, so there is nothing to copy across until that changes.',
-      summaryReady: '{name} is set up and connected.',
-      summaryPending:
-        '{name} is set up. It is not connected right now — its card has the actions to finish or retry.',
-      summaryTransport: 'Transport',
-      summaryStatus: 'Status',
-      summaryVersion: 'Runtime version',
-      summaryDigest: 'Digest',
-      summaryProfile: 'Profile',
-      summaryUnknown: 'Not reported',
-      summaryAudit: 'Run these on that machine to see what was recorded there.',
-      summaryServiceCommand: 'Check the service',
-    },
     runtimes: {
       description: 'Once two binaries share a name, only one runs. Here is which one.',
       effectiveLabel: 'Effective',
@@ -2710,16 +1643,6 @@ export const messages: CoreMessages = {
       winget: 'from winget',
       bun: "from Bun's installer",
       'mangostudio-managed': 'managed by MangoStudio',
-    },
-    versions: {
-      title: 'Managed by {manager}',
-      empty: 'No Node.js versions are managed by {manager} yet.',
-      managerMissing: '{manager} is not installed.',
-      installManager: 'Install {manager}',
-      default: 'Default',
-      current: 'Current',
-      installLts: 'Install LTS',
-      setDefault: 'Make default',
     },
     lts: {
       'current-lts': 'current LTS',
@@ -2775,24 +1698,6 @@ export const messages: CoreMessages = {
       notInstalled: 'Not installed',
       empty: 'No agent CLIs were detected.',
       emptyHint: 'MangoStudio can install an agent CLI for you on this machine.',
-    },
-    health: {
-      description: 'Everything that is wrong or worth knowing, with what needs action first.',
-      empty: 'Nothing needs attention.',
-      emptyHint: 'Every runtime, version manager, and agent CLI is healthy.',
-      scope: {
-        runtime: 'Runtime',
-        'version-manager': 'Version manager',
-        agent: 'Agent',
-      },
-      // The list is split by whether anything has to be done: a failing
-      // finding blocks something, a warning does not.
-      needsAction: 'Needs action',
-      canWait: 'Can wait',
-      // Optional tools that are simply not there: nothing to do, worth knowing.
-      forInformation: 'For information',
-      // One muted line above the informational group when nothing fails or warns.
-      nothingNeedsAction: 'Nothing needs action.',
     },
     install: {
       confirmTitle: 'Run this install?',

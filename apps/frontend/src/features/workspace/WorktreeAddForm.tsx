@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Radio } from '@/components/ui/Radio';
+import { gitMessages } from '@/features/workspace/git-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 
 import type { AddWorktreeInput } from './hooks/use-git-state';
@@ -32,7 +33,7 @@ export function WorktreeAddForm({
   readonly onSubmit: (input: AddWorktreeInput) => void;
   readonly onCancel: () => void;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(gitMessages);
   const labels = t.git.worktrees;
   const [path, setPath] = useState('');
   const [branch, setBranch] = useState('');

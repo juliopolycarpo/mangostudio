@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Input } from '@/components/ui/Input';
 import { Select, type SelectOption } from '@/components/ui/Select';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
@@ -57,7 +58,7 @@ export function MatrixFilters({
   enabledLocationIds,
   onChange,
 }: MatrixFiltersProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   const searchId = useId();
   const showId = useId();

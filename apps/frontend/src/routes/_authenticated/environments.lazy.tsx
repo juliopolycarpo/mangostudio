@@ -1,6 +1,7 @@
 import { createLazyFileRoute, Outlet } from '@tanstack/react-router';
 
 import { EnvironmentTabs } from '@/features/environments/components/EnvironmentTabs';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 
 export const Route = createLazyFileRoute('/_authenticated/environments')({
@@ -8,7 +9,7 @@ export const Route = createLazyFileRoute('/_authenticated/environments')({
 });
 
 function EnvironmentsLayout() {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
 
   return (
     <div className="app-scrollbar h-full overflow-y-auto">

@@ -16,6 +16,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ArrowRight } from 'lucide-react';
 
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
 
@@ -23,7 +24,7 @@ import { backupUsageQueryOptions } from '../queries';
 import { BackupSummary } from './BackupSummary';
 
 export function BackupUsage() {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   const query = useQuery(backupUsageQueryOptions());
   const usage = query.data;

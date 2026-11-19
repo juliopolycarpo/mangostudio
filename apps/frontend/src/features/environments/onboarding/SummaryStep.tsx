@@ -16,6 +16,7 @@ import { DEFAULT_SSH_RUNTIME_PATH } from '@mangostudio/shared/environments/value
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 
 import { Callout } from '@/components/ui/Callout';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
@@ -43,7 +44,7 @@ interface SummaryStepProps {
 }
 
 export function SummaryStep({ environment, endState, onDone }: SummaryStepProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.onboarding;
   const entities = t.environments.entities;
   const lifecycle = useRuntimeLifecycleQuery(environment.id);

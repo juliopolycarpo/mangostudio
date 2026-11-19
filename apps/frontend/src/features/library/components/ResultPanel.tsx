@@ -16,6 +16,7 @@ import { Undo2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
@@ -41,7 +42,7 @@ export function ResultPanel({
   environmentName,
   onUndo,
 }: ResultPanelProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
 
   if (!result) return null;

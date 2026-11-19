@@ -9,13 +9,14 @@
  */
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
-import type { CoreMessages } from '@mangostudio/shared/i18n';
+import type { Messages } from '@mangostudio/shared/i18n';
 import type { LibraryLocationId, RemovalPreviewRequest } from '@mangostudio/shared/library';
 import { useMemo } from 'react';
 
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
@@ -47,7 +48,7 @@ export function RemovalWizard({
   environmentId,
   onClose,
 }: RemovalWizardProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
 
   const environmentsQuery = useEnvironmentEntitiesQuery();
@@ -254,7 +255,7 @@ export function RemovalWizard({
   );
 }
 
-function stepLabel(l: CoreMessages['library'], step: RemovalStep): string {
+function stepLabel(l: Messages['library'], step: RemovalStep): string {
   switch (step) {
     case 'locations':
       return l.removal.stepLocations;

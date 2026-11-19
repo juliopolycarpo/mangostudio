@@ -9,6 +9,7 @@
 
 import { Card } from '@/components/ui/Card';
 import { MicroLabel } from '@/components/ui/MicroLabel';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 
 import { HEALTH_ORDER, healthCountClass, healthLabel, healthRollup } from '../format';
@@ -17,7 +18,7 @@ import { EnvironmentPageState } from './EnvironmentPageState';
 import { OverviewSection } from './OverviewSection';
 
 export function OverviewHealthRollup() {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const e = t.environments;
   const runtimes = useRuntimeStatuses();
   const agents = useAgentCliStatuses();

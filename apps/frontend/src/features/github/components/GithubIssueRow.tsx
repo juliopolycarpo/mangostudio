@@ -3,6 +3,7 @@ import { MessageSquarePlus } from 'lucide-react';
 
 import { Badge } from '@/components/ui/Badge';
 import { MenuItem } from '@/components/ui/Menu';
+import { githubMessages } from '@/features/github/github-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
@@ -28,7 +29,7 @@ interface GithubIssueRowProps {
  * <GithubIssueRow chatId={chatId} nameWithOwner="mango/studio" issue={issue} onStartChat={start} />
  */
 export function GithubIssueRow({ chatId, nameWithOwner, issue, onStartChat }: GithubIssueRowProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
 
   return (
     <GithubRowShell>

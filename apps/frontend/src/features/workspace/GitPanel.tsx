@@ -33,6 +33,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { Tabs } from '@/components/ui/Tabs';
 import { useToast } from '@/components/ui/Toast';
 import { ExternalReviewAction } from '@/features/external-agents/ExternalReviewAction';
+import { gitMessages } from '@/features/workspace/git-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn, resolveApiErrorMessage } from '@/lib/utils';
@@ -89,7 +90,7 @@ const STATUS_PRESENTATION: Readonly<Record<GitFileStatus, StatusPresentation>> =
 };
 
 export function GitPanel({ chatId }: GitPanelProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(gitMessages);
   const labels = t.git;
   useGitRealtimeInvalidation(chatId);
   const stateQuery = useGitState(chatId);
@@ -233,7 +234,7 @@ function GitPanelContent({
   onInitialize,
   onRetry,
 }: GitPanelContentProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(gitMessages);
   const labels = t.git;
 
   if (error) {
@@ -313,7 +314,7 @@ function RepositoryStatus({
   readonly githubContext: GithubContext | undefined;
   readonly amend: AmendMode;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(gitMessages);
   const { toast } = useToast();
   const labels = t.git;
   const stageMutation = useStagePaths(chatId);
@@ -629,7 +630,7 @@ function ChangeGroup({
   readonly onDiscard?: (selections: GitDiscardSelection[]) => void;
   readonly onDiff: (path: string) => void;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(gitMessages);
   const [menuOpen, setMenuOpen] = useState(false);
   if (changes.length === 0) return null;
 
@@ -750,7 +751,7 @@ function FileChangeRow({
   readonly onDiscard?: () => void;
   readonly onDiff: () => void;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(gitMessages);
   const presentation = STATUS_PRESENTATION[change.status];
   const statusLabel = t.git.status[presentation.labelKey];
   const actionLabel = (action === 'stage' ? t.git.actions.stage : t.git.actions.unstage).replace(

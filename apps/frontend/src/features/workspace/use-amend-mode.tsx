@@ -2,6 +2,7 @@ import { type ReactNode, useCallback, useState } from 'react';
 
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
+import { gitMessages } from '@/features/workspace/git-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 
 const AMEND_CONFIRMED_KEY = 'mangostudio.git.amend-confirmed';
@@ -36,7 +37,7 @@ export interface AmendMode {
  * {amend.dialog}
  */
 export function useAmendMode(chatId: string): AmendMode {
-  const { t } = useI18n();
+  const { t } = useI18n(gitMessages);
   const labels = t.git.amendConfirm;
   const [active, setActive] = useState(false);
   const [confirming, setConfirming] = useState(false);

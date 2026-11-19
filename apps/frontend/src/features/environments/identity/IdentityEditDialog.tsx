@@ -15,6 +15,7 @@ import { Callout } from '@/components/ui/Callout';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { ToolAvatar, type ToolImageDisplay } from '@/components/ui/ToolAvatar';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
@@ -61,7 +62,7 @@ function useFilePreviewUrl(file: File | null): string | null {
 }
 
 export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityEditDialogProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.identity;
   const save = useSaveToolIdentity();
   // Without a name field the draft name stays empty, which matches the absent

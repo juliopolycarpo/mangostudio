@@ -1,6 +1,8 @@
 import type {
   CoreMessages,
   DeferredNamespace,
+  FeatureMessages,
+  FeatureNamespace,
   LoadedMessages,
   Locale,
   Messages,
@@ -128,6 +130,76 @@ export function carriesNamespaces<Namespaces extends DeferredNamespace>(
   namespaces: readonly Namespaces[]
 ): messages is LoadedMessages<Namespaces> {
   return namespaces.every((namespace) => namespace in messages);
+}
+
+/**
+ * One feature's English messages: what an `en-<namespace>` module exports and a
+ * `<feature>-i18n.ts` re-exports, so a union with one member per feature namespace.
+ */
+export type AnyFeatureMessages = { [N in FeatureNamespace]: FeatureMessages<N> }[FeatureNamespace];
+
+/** The feature namespace a `FeatureMessages` value carries. */
+type FeatureNamespaceOf<Feature extends AnyFeatureMessages> = Extract<
+  keyof Feature,
+  FeatureNamespace
+>;
+
+/**
+ * Whether `messages` already holds every key `feature` would add. A dictionary
+ * loaded for another locale is complete (its chunk carries every namespace), and
+ * so is the English one in tests; only the eager English dictionary is not.
+ * The type predicate is where a plain `CoreMessages` becomes a `LoadedMessages`.
+ */
+export function carriesFeatureKeys<Feature extends AnyFeatureMessages>(
+  messages: CoreMessages,
+  feature: Feature
+): messages is LoadedMessages<FeatureNamespaceOf<Feature>> {
+  const held: Record<string, object | undefined> = messages;
+  return Object.entries<object>(feature).every(([namespace, added]) => {
+    const present = held[namespace];
+    return present !== undefined && Object.keys(added).every((key) => key in present);
+  });
+}
+
+/** Merged dictionaries by the base object they extend and the feature messages added, so one pair keeps one identity. */
+const featureMerges = new WeakMap<CoreMessages, WeakMap<object, CoreMessages>>();
+
+/**
+ * `messages` with the English keys a feature's lazy chunk carries. The chunk
+ * imports its `en-<namespace>` module and passes it here (through `useI18n`), so
+ * the strings arrive with the code that renders them and no request is made for
+ * them. Another locale's dictionary already has the keys and comes back as is.
+ * The same arguments return the same object, so the result is safe in a dependency list.
+ *
+ * Usage: `const t = withFeatureMessages(dictionary.messages, libraryMessages);`
+ */
+export function withFeatureMessages<Base extends CoreMessages, Feature extends AnyFeatureMessages>(
+  messages: Base,
+  feature: Feature
+): Base & LoadedMessages<FeatureNamespaceOf<Feature>> {
+  if (carriesFeatureKeys(messages, feature)) return messages;
+  const known = featureMerges.get(messages)?.get(feature);
+  // Every merge is a copy of the `messages` it came from, so it keeps all of `Base`.
+  if (known && carriesFeatureKeys(known, feature)) {
+    return known as Base & LoadedMessages<FeatureNamespaceOf<Feature>>;
+  }
+
+  const held: Record<string, object | undefined> = messages;
+  const combined: Record<string, unknown> = { ...messages };
+  for (const [namespace, added] of Object.entries<object>(feature)) {
+    combined[namespace] = { ...held[namespace], ...added };
+  }
+  // `combined` is `messages` plus the feature keys, which the check below proves.
+  const merged = combined as unknown as CoreMessages;
+  if (!carriesFeatureKeys(merged, feature)) {
+    throw new Error(
+      `expected the English keys of ${Object.keys(feature).join(', ')} merged into the dictionary | received: keys missing after the merge`
+    );
+  }
+  const byFeature = featureMerges.get(messages) ?? new WeakMap<object, CoreMessages>();
+  byFeature.set(feature, merged);
+  featureMerges.set(messages, byFeature);
+  return merged as Base & LoadedMessages<FeatureNamespaceOf<Feature>>;
 }
 
 /**
