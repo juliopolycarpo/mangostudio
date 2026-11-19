@@ -873,7 +873,9 @@ describe('external turn: live stream vs reloaded transcript', () => {
    * — so it needs its own parity check rather than a place in `TURN`.
    */
   describe('a mid-turn steer', () => {
-    function storedWithSteer(outcome: 'accepted' | 'rejected'): MessagePart[] {
+    type SteerOutcome = 'accepted' | 'rejected' | 'delivery-unknown';
+
+    function storedWithSteer(outcome: SteerOutcome): MessagePart[] {
       const transcript = new ExternalTurnTranscript({
         targetId: 'codex',
         sessionId: 'hub-session-1',
@@ -885,10 +887,11 @@ describe('external turn: live stream vs reloaded transcript', () => {
       });
       transcript.recordSteerAttempt({ clientMessageId: 'steer-1', text: 'use the helper' }, 0);
       if (outcome === 'rejected') transcript.resolveSteerRejected('steer-1', 'turn-not-steerable');
+      if (outcome === 'delivery-unknown') transcript.resolveSteerDeliveryUnknown('steer-1');
       return transcript.parts;
     }
 
-    function streamedWithSteer(outcome: 'accepted' | 'rejected'): MessagePart[] {
+    function streamedWithSteer(outcome: SteerOutcome): MessagePart[] {
       const prefix = TURN.slice(0, 4);
       const chunks: StreamChunk[] = [
         externalSessionStartedChunk({
@@ -912,7 +915,7 @@ describe('external turn: live stream vs reloaded transcript', () => {
               externalSteerChunk({
                 clientMessageId: 'steer-1',
                 text: 'use the helper',
-                status: 'accepted',
+                status: outcome,
               }),
             ]),
       ];
@@ -941,6 +944,17 @@ describe('external turn: live stream vs reloaded transcript', () => {
         status: 'rejected',
         reasonCode: 'turn-not-steerable',
       });
+    });
+
+    it('renders a delivery-unknown steer the same on both paths, with no reason', () => {
+      expect(comparable(streamedWithSteer('delivery-unknown'))).toEqual(
+        comparable(storedWithSteer('delivery-unknown'))
+      );
+      const part = streamedWithSteer('delivery-unknown').find(
+        (entry) => entry.type === 'external_steer'
+      );
+      expect(part).toMatchObject({ text: 'use the helper', status: 'delivery-unknown' });
+      expect(part).not.toHaveProperty('reasonCode');
     });
 
     it('does not duplicate a redelivered steer chunk', () => {

@@ -292,15 +292,23 @@ export interface ExternalTurnPart {
  * the vendor call that might steer the turn — so a reload always shows what the
  * user said, even when the acknowledgement that followed was lost. `status`
  * starts `'accepted'` optimistically and is corrected to `'rejected'` in place
- * if the vendor call comes back refused; the text itself never changes; the
- * user really did type it either way.
+ * if the vendor call comes back refused, or to `'delivery-unknown'` if the call
+ * failed in a way that does not say whether the agent got it (the hub's
+ * deadline, a connection closed under the call, an error the runtime answered).
+ * The text itself never changes; the user really did type it either way.
+ *
+ * `'delivery-unknown'` is final: the vendor stream carries no signal the hub
+ * can match back to a steer, so nothing upgrades it to `'accepted'` later. It
+ * is also not a rejection, because the agent may have taken the steer and a
+ * resend would then deliver it twice. Parts stored before it existed only hold
+ * `'accepted'` or `'rejected'` and read unchanged.
  */
 export interface ExternalSteerPart {
   type: 'external_steer';
   targetId: ExternalAgentTargetId;
   clientMessageId: string;
   text: string;
-  status: 'accepted' | 'rejected';
+  status: 'accepted' | 'rejected' | 'delivery-unknown';
   /** Present only once `status` is `'rejected'`. */
   reasonCode?: ExternalSteerRejectionReason;
   createdAt: number;

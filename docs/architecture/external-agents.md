@@ -670,10 +670,27 @@ without a runtime round trip; only Codex's own turn state needs one.
 A request the hub's own session or the runtime proves never reached the vendor
 (`classifySubmissionFailure` says `not-submitted`) is answered as an ordinary `turn-not-steerable`
 rejection, so the caller may resend under a new id. Any other failure — the hub's deadline passing,
-the connection closing under the call, or an error the runtime answered — leaves delivery unknown:
-the original failure is rethrown, the id stays cached so it is never dispatched twice, and the
-record is left as it was written. How an unknown delivery is recorded is an open owner decision, as
-is how a late acknowledgement is corrected once the turn's final write has passed.
+the connection closing under the call, or an error the runtime answered — leaves delivery unknown,
+and that is its own outcome rather than a rejection or a rethrown error:
+
+- The part is corrected in place to `status: 'delivery-unknown'` (no `reasonCode`), the live stream
+  sends the same `external_steer` chunk with that status, and the route answers `200` with
+  `{ accepted: false, deliveryUnknown: true }` (`ExternalSteerResponseSchema`). The runtime contract
+  is untouched: the runtime never says "unknown", so `ExternalAgentSteerResultSchema` and the
+  rejection reasons stay refusals only. Parts stored before the status existed read unchanged.
+- It is not `rejected` because the agent may have taken the steer. A durable rejection cannot later
+  be corrected to accepted, and it invites a resend under a fresh id after a reload, which can
+  deliver the steer twice.
+- The id keeps that answer for the life of the turn and is never dispatched again. The runtime
+  drops its steer receipt when the vendor call fails (`turns.rs`), so a same-id redispatch would
+  reach the vendor a second time; the hub's cached attempt is what makes a retry safe.
+- The composer never resends it. The part shows a warning (not the danger tone of a refusal) telling
+  the user to check the agent's reply before sending again, and the composer's next steer is the
+  user's own action under a fresh id.
+- The state is final. The hub's `clientMessageId` never reaches the vendor, and the user-message
+  items Codex emits are dropped by the adapter (the SDK renders nothing for `userMessage`), so no
+  later signal can be matched to the steer to upgrade it to `accepted`. A steer whose runtime call has not answered when the turn's
+  final write passes keeps the status it had then.
 
 That same durable write is charged against the turn's byte and event budget, exactly like a vendor
 event — a steer is up to 1 MiB and the caller may attempt as many as it likes, so without a charge

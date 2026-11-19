@@ -4097,6 +4097,9 @@ export const messages = {
       buttonHint: 'Envie isto para o turno em andamento em vez de esperar ele terminar.',
       sentLabel: 'Você, no meio do turno',
       rejectedLabel: 'Isto não foi entregue',
+      deliveryUnknownLabel: 'Entrega não confirmada',
+      deliveryUnknownHint:
+        'O agente pode ou não ter recebido isto. Confira a resposta dele antes de enviar de novo.',
       submitError: 'Isto não pôde ser enviado.',
       reason: {
         'turn-already-completed': 'O turno já havia terminado.',

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
 import type { Chat } from '@mangostudio/shared/chat';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
-import type { ExternalAgentSteerResult } from '@mangostudio/shared/external-agents';
+import type { ExternalSteerResponse } from '@mangostudio/shared/external-agents';
 import { EXTERNAL_WORKSPACE_TRUST_VERSION } from '@mangostudio/shared/external-agents';
 
 import { getDb } from '../../../src/db/database';
@@ -53,7 +53,7 @@ function stubController(result: AnswerExternalApprovalResult): {
 }
 
 /** Records what the steer route delegated, and answers with whatever the test needs. */
-function stubSteerController(result: ExternalAgentSteerResult): {
+function stubSteerController(result: ExternalSteerResponse): {
   readonly controller: ExternalTurnController;
   readonly calls: Parameters<ExternalTurnController['steer']>[0][];
 } {
@@ -265,6 +265,19 @@ describe('external agent steer route', () => {
       expect(await response.json()).toEqual({ accepted: false, reasonCode });
       restoreAuth?.();
     }
+  });
+
+  it('answers an unknown delivery with 200 and its own body, not a conflict', async () => {
+    const app = mount(stubSteerController({ accepted: false, deliveryUnknown: true }).controller);
+    const response = await app.handle(
+      post(`/chats/${chatId}/external-agent/steer`, {
+        clientMessageId: 'steer-unknown',
+        text: 'hello',
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ accepted: false, deliveryUnknown: true });
   });
 
   it('rejects an empty steer body', async () => {

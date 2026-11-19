@@ -2299,22 +2299,30 @@ describe('external turn controller', () => {
       await running;
     });
 
-    it('reuses a failed attempt instead of recording and dispatching a second one', async () => {
+    it('answers a failed attempt as delivery unknown and never dispatches its id twice', async () => {
       const { runtime, controller } = harness({
         steerFailure: () => new Error('runtime unreachable'),
       });
       const running = startTurn(controller);
       await waitForTurnStart(runtime);
 
-      const input = { userId, chatId, clientMessageId: 'steer-1', text: 'once' };
-      await expect(controller.steer(input)).rejects.toThrow('runtime unreachable');
-      await expect(controller.steer(input)).rejects.toThrow('runtime unreachable');
+      // A throw is reported as the value received, so a red run shows the
+      // failure leaking out of `steer` instead of an incidental rejection.
+      const attempt = () =>
+        controller
+          .steer({ userId, chatId, clientMessageId: 'steer-1', text: 'once' })
+          .catch((error: unknown) => ({ threw: String(error) }));
+      expect(await attempt()).toEqual({ accepted: false, deliveryUnknown: true });
+      expect(await attempt()).toEqual({ accepted: false, deliveryUnknown: true });
 
       expect(runtime.calls.steer).toHaveLength(1);
       const parts = (await readAssistantRow()).parts.filter(
-        (part) => part.type === 'external_steer' && part.clientMessageId === 'steer-1'
+        (part): part is ExternalSteerPart =>
+          part.type === 'external_steer' && part.clientMessageId === 'steer-1'
       );
       expect(parts).toHaveLength(1);
+      expect(parts[0]).toMatchObject({ text: 'once', status: 'delivery-unknown' });
+      expect(parts[0]?.reasonCode).toBeUndefined();
 
       runtime.emit({ type: 'completed' });
       await running;
@@ -2386,21 +2394,76 @@ describe('external turn controller', () => {
       await running;
     });
 
-    it('rethrows a steer failure that leaves delivery unknown and never dispatches its id twice', async () => {
+    it('records a steer whose runtime answer leaves delivery unknown, tells the observer, and replays it for the same id', async () => {
       const unknown = new RemoteError('INTERNAL', 'vendor may have taken it', {
         dispatch: 'acceptance-unknown',
       });
+      const notifications: unknown[] = [];
       const { runtime, controller } = harness({ steerResult: () => Promise.reject(unknown) });
-      const running = startTurn(controller);
+      const running = startTurn(controller, {
+        observer: { onSteer: (steer) => void notifications.push(steer) },
+      });
       await waitForTurnStart(runtime);
 
       const input = { userId, chatId, clientMessageId: 'steer-1', text: 'switch approach' };
-      await expect(controller.steer(input)).rejects.toBe(unknown);
-      await expect(controller.steer(input)).rejects.toBe(unknown);
+      const answer = () =>
+        controller.steer(input).catch((error: unknown) => ({ threw: String(error) }));
+      expect(await answer()).toEqual({ accepted: false, deliveryUnknown: true });
+      expect(await answer()).toEqual({ accepted: false, deliveryUnknown: true });
       expect(runtime.calls.steer).toHaveLength(1);
+
+      // Once, and with the resolved status the live listener renders: the same
+      // update the not-submitted rejection sends.
+      expect(notifications).toEqual([
+        { clientMessageId: 'steer-1', text: 'switch approach', status: 'delivery-unknown' },
+      ]);
+      expect(steerPartOf((await readAssistantRow()).parts, 'steer-1').status).toBe(
+        'delivery-unknown'
+      );
 
       runtime.emit({ type: 'completed' });
       await running;
+      // The turn's final write must not turn the uncertainty back into a delivery.
+      expect(steerPartOf((await readAssistantRow()).parts, 'steer-1').status).toBe(
+        'delivery-unknown'
+      );
+    });
+
+    it('keeps a steer id that was never dispatched distinct from one whose delivery is unknown', async () => {
+      const unknown = new Error('connection closed under the call');
+      const attempts = [() => Promise.reject(unknown)];
+      const { runtime, controller } = harness({
+        steerResult: () => attempts.shift()?.() ?? Promise.resolve({ accepted: true as const }),
+      });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      const first = await controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'switch approach',
+      });
+      // The user's explicit "send again": a fresh id, never a silent redispatch.
+      const second = await controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-2',
+        text: 'switch approach',
+      });
+
+      expect(first).toEqual({ accepted: false, deliveryUnknown: true });
+      expect(second).toEqual({ accepted: true });
+      expect(runtime.calls.steer.map((call) => call.clientMessageId)).toEqual([
+        'steer-1',
+        'steer-2',
+      ]);
+
+      runtime.emit({ type: 'completed' });
+      await running;
+      const parts = (await readAssistantRow()).parts;
+      expect(steerPartOf(parts, 'steer-1').status).toBe('delivery-unknown');
+      expect(steerPartOf(parts, 'steer-2').status).toBe('accepted');
     });
 
     it('persists a rejected steer before terminal finalization', async () => {

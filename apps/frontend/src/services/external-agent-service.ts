@@ -11,9 +11,9 @@ import type { Chat, ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type {
   ExternalAgentCommandCatalogResponse,
   ExternalAgentDescriptorListResponse,
-  ExternalAgentSteerResult,
   ExternalNativeSession,
   ExternalNativeSessionListResponse,
+  ExternalSteerResponse,
 } from '@mangostudio/shared/external-agents';
 
 import { client } from '@/lib/api-client';
@@ -65,20 +65,22 @@ export async function answerExternalApproval(
  *
  * A rejection is returned rather than thrown, exactly like
  * {@link answerExternalApproval}: "that turn already finished" is something
- * the composer has to render, not an exception. The failure arm is for a
- * request that never reached the server at all.
+ * the composer has to render, not an exception. So is
+ * `{ accepted: false, deliveryUnknown: true }`, which the hub answers with a
+ * 200 when it cannot tell whether the agent got the steer. The failure arm is
+ * for a request that never reached the server at all.
  */
 export async function steerExternalTurn(
   chatId: string,
   body: { readonly clientMessageId: string; readonly text: string }
-): Promise<ExternalAgentSteerResult> {
+): Promise<ExternalSteerResponse> {
   const { data, error } = await client.api.chats({ id: chatId })['external-agent'].steer.post(body);
   if (error) {
-    const value = error.value as ExternalAgentSteerResult | { error?: string } | null;
+    const value = error.value as ExternalSteerResponse | { error?: string } | null;
     if (value && 'accepted' in value && value.accepted === false) return value;
     throw new ApiError(error.value);
   }
-  return data as ExternalAgentSteerResult;
+  return data as ExternalSteerResponse;
 }
 
 /**

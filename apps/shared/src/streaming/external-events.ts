@@ -91,7 +91,11 @@ export function externalSessionStartedChunk(session: ExternalStreamSession): Str
  */
 export function externalSteerChunk(
   input:
-    | { readonly clientMessageId: string; readonly text: string; readonly status: 'accepted' }
+    | {
+        readonly clientMessageId: string;
+        readonly text: string;
+        readonly status: 'accepted' | 'delivery-unknown';
+      }
     | {
         readonly clientMessageId: string;
         readonly text: string;
@@ -113,7 +117,7 @@ export function externalSteerChunk(
     type: 'external_steer',
     clientMessageId: input.clientMessageId,
     text: input.text,
-    status: 'accepted',
+    status: input.status,
     done: false,
   };
 }

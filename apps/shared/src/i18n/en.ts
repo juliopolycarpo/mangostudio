@@ -3235,6 +3235,12 @@ export const messages: CoreMessages = {
       buttonHint: 'Send this into the running turn instead of waiting for it to finish.',
       sentLabel: 'You, mid-turn',
       rejectedLabel: 'This wasn’t delivered',
+      // The hub could not tell whether the agent got it (timeout, a dropped
+      // connection). Resending blindly could deliver it twice, so the copy sends
+      // the person to the agent's reply first.
+      deliveryUnknownLabel: 'Delivery not confirmed',
+      deliveryUnknownHint:
+        'The agent may or may not have received this. Check its reply before sending it again.',
       submitError: 'This could not be sent.',
       reason: {
         'turn-already-completed': 'The turn had already finished.',
