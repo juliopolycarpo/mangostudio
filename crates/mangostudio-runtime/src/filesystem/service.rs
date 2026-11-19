@@ -46,6 +46,20 @@ pub(super) struct State {
     pub(super) stage: StageStore,
 }
 
+impl State {
+    /// State whose staging area lives under the runtime home's `stage`
+    /// directory: per-user, so staged file contents never sit in a directory
+    /// shared with other accounts.
+    fn in_runtime_home(mango_home: &Path) -> Self {
+        Self {
+            stage: StageStore::under(
+                crate::runtime_home::runtime_home_dir(mango_home).join("stage"),
+            ),
+            ..Self::default()
+        }
+    }
+}
+
 pub(super) struct Service {
     pub(super) state: Arc<State>,
     pub(super) consent: ConsentSource,
@@ -1207,7 +1221,9 @@ pub(super) fn before_json(before: Option<&[u8]>) -> Value {
 pub(crate) fn register(registry: Registry, consent: ConsentSource) -> Registry {
     static STATE: OnceLock<Arc<State>> = OnceLock::new();
     let service = Arc::new(Service {
-        state: Arc::clone(STATE.get_or_init(|| Arc::new(State::default()))),
+        state: Arc::clone(
+            STATE.get_or_init(|| Arc::new(State::in_runtime_home(consent.mango_home()))),
+        ),
         consent,
         move_io: Arc::new(NativeMoveIo),
         write_io: Arc::new(NativeWriteIo),

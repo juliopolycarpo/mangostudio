@@ -531,11 +531,19 @@ A file whose bytes fit one frame travels inline: `snapshot.capture` and a mutati
 (`SNAPSHOT_INLINE_MAX_BYTES`) the bytes move as bounded slices instead, so no frame and no
 process buffer grows with the file:
 
-- **Capture.** The runtime copies the file into a per-process staging directory while
-  hashing it, and the `before` record carries `sizeBytes`, `hash` and a `stagedId` instead of
-  content. The hub reads the capture with `snapshot.read-chunk` (at most 1 MiB per call)
-  into a temporary blob that it renames to its content hash only once the digest matches,
-  then calls `snapshot.release`. A copy the hub never releases is swept after 15 minutes.
+- **Capture.** The runtime copies the file into its staging directory while hashing it, and
+  the `before` record carries `sizeBytes`, `hash` and a `stagedId` instead of content. The
+  hub reads the capture with `snapshot.read-chunk` (at most 1 MiB per call) into a temporary
+  blob that it renames to its content hash only once the digest matches, then calls
+  `snapshot.release`. A copy the hub never releases is swept after 15 minutes; every call
+  into the staging area, reads included, sweeps the expired ones.
+- **Staging area.** It is private to the account running the runtime: a directory under the
+  runtime home (`~/.mango/runtime/stage`, or the OS temp directory when that cannot be
+  secured), created owner-only (`0700`, or an owner-only DACL on Windows) under a fresh random
+  name that is never adopted if it already exists, and removed whenever nothing is staged.
+  Staged files are created exclusively (`0600`) and reopened without following symlinks. The
+  area holds at most 2 GiB and 256 files. A capture reserves its size before it copies a
+  byte, so one that cannot fit is refused up front and a failed copy gives the bytes back.
 - **Revert.** The hub uploads a stored blob over 1 MiB with `snapshot.stage-chunk` (sequential
   offsets) and names it in the operation as `stagedId` plus `hash`. The runtime verifies every
   staged upload against its hash before the first file changes, then streams each one through

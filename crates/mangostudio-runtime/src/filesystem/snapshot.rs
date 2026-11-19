@@ -125,7 +125,7 @@ impl Service {
         let staged = self
             .state
             .stage
-            .stage_stream(&mut source, max_bytes, cancel)
+            .stage_stream(&mut source, size, max_bytes, cancel)
             .map_err(|error| oversized_while_streaming(path, max_bytes, error))?;
         Ok(CapturedFile::Staged(StagedGuard::new(
             &self.state.stage,
