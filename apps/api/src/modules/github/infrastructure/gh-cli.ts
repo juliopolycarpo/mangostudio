@@ -15,6 +15,7 @@ import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   RUNTIME_CONTRACT,
   type RuntimeCapabilityManifest,
+  RuntimeConsentDeniedError,
   type RuntimeGhExecResult,
 } from '@mangostudio/shared/runtime-contract';
 
@@ -26,6 +27,7 @@ import {
   detailString,
   isAbortError,
 } from '../../../services/runtime-client/remote-error-details';
+import { getRuntimeConnectionManager } from '../../../services/runtime-client/runtime-connection-manager';
 import { exceedsWindowsCommandLine } from '../domain/gh-command-line';
 import {
   buildGhCommandArgv,
@@ -88,8 +90,9 @@ export interface GhCommandResult {
  * every other failure gets.
  */
 export class GhMutationDeniedError extends Error {
-  constructor() {
-    super('GitHub writes are turned off on the machine this chat runs on.');
+  /** `cause` is the runtime's consent refusal, kept for the log. */
+  constructor(options?: ErrorOptions) {
+    super('GitHub writes are turned off on the machine this chat runs on.', options);
     this.name = 'GhMutationDeniedError';
   }
 }
@@ -190,9 +193,10 @@ export async function runGh(
         'This command is too long for the Windows machine it runs on. A pull request description of about 30,000 characters is the most `gh` can be given there; shorten it, or open the pull request with a shorter description and paste the rest as a comment.'
       );
     }
-    // Refused here with its own error rather than sent and bounced: the runtime
-    // would answer with a consent denial that surfaces as an opaque 500.
-    if (options.mutation && !grantsGhMutate(runtime.manifest)) throw new GhMutationDeniedError();
+    // No consent pre-check against `runtime.manifest`: that is the handshake
+    // copy, refreshed only on a timer, so a grant or a revocation made since
+    // would be judged against the old answer. The runtime re-reads consent on
+    // every call and is the authority; its refusal is mapped below.
     const call = options.mutation ? runtime.gh.mutate : runtime.gh.exec;
     result = await call(
       {
@@ -208,6 +212,13 @@ export async function runGh(
     if (isEnvironmentUnavailable(error)) throw error;
     // And a consent refusal keeps its own so the route can answer 403.
     if (error instanceof GhMutationDeniedError) throw error;
+    // The runtime's own refusal arrives from the client as the consent-denied
+    // error (wire `DENIED` + `details.kind: "consent_denied"`). Only a mutation
+    // is told apart: a denied read means `git` consent is gone, which the
+    // panel already reports as the failure it is.
+    if (options.mutation && error instanceof RuntimeConsentDeniedError) {
+      throw new GhMutationDeniedError({ cause: error });
+    }
     throw mapGhFailure(args, error);
   }
   // Every caller parses this output as JSON and believes the answer. A capture
@@ -225,6 +236,26 @@ export async function runGh(
     );
   }
   return result;
+}
+
+/**
+ * The connected runtime's manifest, after asking the connection manager to
+ * re-read it if it has aged past its freshness window.
+ *
+ * The refresh runs in the background, as on an environment read, so this
+ * answers from the cached copy and the answer catches up on a later call.
+ * Without it nothing on the GitHub path ever re-reads consent: a grant or
+ * revocation made after the connect would never reach the panel's flags.
+ *
+ * @example
+ * const { gh } = await readFreshManifest({ userId, environmentId });
+ */
+async function readFreshManifest(
+  selection: GhRuntimeSelection
+): Promise<RuntimeCapabilityManifest> {
+  const runtime = await getRuntimeClient(selection.userId, selection.environmentId);
+  getRuntimeConnectionManager().refreshManifestIfStale(selection.userId, selection.environmentId);
+  return runtime.manifest;
 }
 
 /**
@@ -250,8 +281,7 @@ export async function isGhAvailable(
   selection: GhRuntimeSelection = LOCAL_GH_SELECTION
 ): Promise<boolean> {
   try {
-    const runtime = await getRuntimeClient(selection.userId, selection.environmentId);
-    return runtime.manifest.gh?.available ?? false;
+    return (await readFreshManifest(selection)).gh?.available ?? false;
   } catch {
     return false;
   }
@@ -280,8 +310,10 @@ export function grantsGhMutate(manifest: RuntimeCapabilityManifest): boolean {
 
 /**
  * {@link grantsGhMutate} for a selected environment, read from the connected
- * runtime's manifest like {@link isGhAvailable}: no round trip, never memoized,
- * and an unreachable runtime reads as unable.
+ * runtime's manifest like {@link isGhAvailable}: no round trip to answer, never
+ * memoized, and an unreachable runtime reads as unable. The flag only drives
+ * what the panel offers; the runtime decides every write, so a flag that lags a
+ * consent change by one freshness window costs a refused click, not a wrong write.
  *
  * @example
  * if (!(await canMutateGh({ userId, environmentId }))) hideWriteActions();
@@ -290,8 +322,7 @@ export async function canMutateGh(
   selection: GhRuntimeSelection = LOCAL_GH_SELECTION
 ): Promise<boolean> {
   try {
-    const runtime = await getRuntimeClient(selection.userId, selection.environmentId);
-    return grantsGhMutate(runtime.manifest);
+    return grantsGhMutate(await readFreshManifest(selection));
   } catch {
     return false;
   }
