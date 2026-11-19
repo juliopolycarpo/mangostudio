@@ -30,7 +30,7 @@ import { ApiError, cn, resolveApiErrorMessage } from '@/lib/utils';
 import { IconButton } from './components/IconButton';
 import { useDirectoryListing, validateWorkspacePath } from './use-directory-listing';
 
-interface WorkdirPickerDialogProps {
+export interface WorkdirPickerDialogProps {
   open: boolean;
   chatId?: string;
   /**
