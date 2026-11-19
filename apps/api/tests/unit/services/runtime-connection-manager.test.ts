@@ -1330,6 +1330,55 @@ describe('RuntimeConnectionManager', () => {
     }
   });
 
+  // A newer runtime may add a member to the externalAgents subtree of its health report. The
+  // hub reads that report through a validating session, so a rejected field used to be caught
+  // by the refresh and leave the manifest frozen at its handshake value with no signal.
+  it('refreshes the manifest from a health report whose externalAgents subtree has a newer field', async () => {
+    const hello: RuntimeCapabilityManifest = {
+      ...TEST_MANIFEST,
+      features: { ...TEST_MANIFEST.features, externalAgents: true },
+    };
+    let targets: ('codex' | 'cursor')[] = ['codex'];
+    const runtime = await connectTestRuntime({
+      manifest: hello,
+      handlers: {
+        'runtime.health': () => ({
+          ...HEALTH_REPORT,
+          allow: { ...HEALTH_REPORT.allow, externalAgents: true },
+          externalAgents: {
+            targets,
+            identityIsolation: { ...ATTESTED, attestedBy: 'a-newer-runtime' },
+            liveSessionCount: 1,
+            liveSessions: [
+              { sessionId: 's-1', targetId: 'codex', ageMs: 5, state: 'running', pid: 4242 },
+            ],
+            queuedTurns: 0,
+          },
+        }),
+      },
+    });
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: { stdio: () => Promise.resolve(runtime) },
+    });
+    try {
+      const client = await manager.getClient('user-1', 'devbox');
+      expect(
+        client.manifest.externalAgents,
+        'expected the targets from health (the handshake named none): a rejected report keeps the handshake manifest'
+      ).toEqual(['codex']);
+      // The unknown member is ignored, not forwarded into the closed manifest shape.
+      expect(client.manifest.identityIsolation).toEqual(ATTESTED);
+
+      targets = ['codex', 'cursor'];
+      const refreshed = await manager.refreshManifest('user-1', 'devbox');
+      expect(refreshed.manifest?.externalAgents).toEqual(['codex', 'cursor']);
+    } finally {
+      manager.disconnect('user-1', 'devbox');
+      await runtime.close();
+    }
+  });
+
   describe('the read of which agents a runtime hosts at connect', () => {
     const HELLO: RuntimeCapabilityManifest = {
       ...TEST_MANIFEST,

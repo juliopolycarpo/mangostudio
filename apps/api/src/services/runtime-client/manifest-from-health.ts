@@ -85,8 +85,17 @@ export function capabilityManifestFromHealth(
     ...(report.externalAgents?.targets.length
       ? { externalAgents: [...report.externalAgents.targets] }
       : {}),
+    // Two named members, not the object: health tolerates fields this build has
+    // never heard of, and the manifest (and the `isolation` sent back on every
+    // external-agent call) is a closed shape that would refuse them.
     ...(report.externalAgents?.identityIsolation
-      ? { identityIsolation: report.externalAgents.identityIsolation }
+      ? {
+          identityIsolation: {
+            method: report.externalAgents.identityIsolation.method,
+            credentialHomeFingerprint:
+              report.externalAgents.identityIsolation.credentialHomeFingerprint,
+          },
+        }
       : {}),
     ...(handshake?.enforcesPathPolicy === undefined
       ? {}
