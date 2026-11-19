@@ -120,6 +120,7 @@ async function bringUpUnit(d: Required<RestartDeps>, options: { start: boolean }
   const moved = await restartHubService(d.manager, d.launcherPath(), {
     ...options,
     probe: { platform: d.platform, pathExists: d.pathExists },
+    warn: d.log,
   });
   if (moved) d.log(`Updated the service unit to run ${moved.to} (it named ${moved.from}).`);
 }

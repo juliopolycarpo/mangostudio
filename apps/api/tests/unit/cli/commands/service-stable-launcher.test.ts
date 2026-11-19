@@ -18,6 +18,10 @@ import {
 import { HUB_SERVICE_IDENTITY } from '../../../../src/modules/machine/domain/hub-service-identity';
 import { restartLauncher } from '../../../../src/modules/updates/domain/install-origin';
 import { FakeProcessController } from '../../../../tests/support/mocks/fake-process-controller';
+import {
+  FakeServiceManager,
+  installedAndRunning,
+} from '../../../support/mocks/fake-service-manager';
 import { FakeUnitHost } from '../../../support/mocks/fake-unit-host';
 
 /**
@@ -259,6 +263,47 @@ describe('a unit written before the launcher was recorded', () => {
     expect(moved).toEqual({ from: layout.versioned, to: layout.launcher });
   });
 
+  it('restarts the unit as installed, and warns, when the retarget fails', async () => {
+    const [layout] = LAYOUTS;
+    if (!layout) throw new Error('no layouts');
+    const manager = new FakeServiceManager({
+      ...installedAndRunning(),
+      execPath: layout.versioned,
+    });
+    manager.restartRetargetedFailWith = new Error('launchctl bootstrap failed (exit 5)');
+    const warnings: string[] = [];
+
+    const moved = await restartHubService(manager, layout.launcher, {
+      probe: { platform: 'linux', pathExists: () => true },
+      warn: (message) => warnings.push(message),
+    });
+
+    expect(moved).toBeNull();
+    expect(manager.calls).toEqual(['status', 'restartRetargeted', 'restart']);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(layout.versioned);
+    expect(warnings[0]).toContain('mangostudio service install');
+    expect(warnings[0]).toContain('launchctl bootstrap failed (exit 5)');
+  });
+
+  it('does not run a plain restart after a retarget that worked', async () => {
+    const [layout] = LAYOUTS;
+    if (!layout) throw new Error('no layouts');
+    const manager = new FakeServiceManager({
+      ...installedAndRunning(),
+      execPath: layout.versioned,
+    });
+    const warnings: string[] = [];
+
+    await restartHubService(manager, layout.launcher, {
+      probe: { platform: 'linux', pathExists: () => true },
+      warn: (message) => warnings.push(message),
+    });
+
+    expect(manager.calls).toEqual(['status', 'restartRetargeted']);
+    expect(warnings).toEqual([]);
+  });
+
   describe('on launchd, where the job only rereads its plist across a bootout and a bootstrap', () => {
     const DARWIN = LAYOUTS.find((entry) => entry.platform === 'darwin');
     const EIO = { exitCode: 5, stdout: '', stderr: 'Bootstrap failed: 5: Input/output error' };
@@ -301,15 +346,25 @@ describe('a unit written before the launcher was recorded', () => {
       const { host, manager, layout } = await staleDarwinUnit();
       host.failLaunchctl('bootstrap', EIO, 50);
 
+      const warnings: string[] = [];
+
+      // The fallback restart cannot kick a job that never loaded either, so the
+      // call fails rather than reporting a bounce of an unloaded job.
       await expect(
         restartHubService(manager, layout.launcher, {
           probe: { platform: 'darwin', pathExists: () => true },
+          warn: (message) => warnings.push(message),
         })
       ).rejects.toMatchObject({
-        message: 'launchctl bootstrap failed (exit 5): Bootstrap failed: 5: Input/output error',
+        message: expect.stringContaining('launchctl kickstart failed (exit 113)'),
       });
 
-      expect(host.commands.some((command) => command.includes('kickstart'))).toBe(false);
+      // The retarget itself never kicked: its bootstrap was required and failed.
+      expect(host.commands.filter((command) => command.includes('kickstart'))).toHaveLength(1);
+      expect(host.jobLoaded).toBe(false);
+      expect(warnings.join('\n')).toContain(
+        'launchctl bootstrap failed (exit 5): Bootstrap failed: 5: Input/output error'
+      );
     });
   });
 });

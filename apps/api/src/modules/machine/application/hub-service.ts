@@ -281,22 +281,40 @@ export async function staleHubServiceMove(
   return { from: execPath, to: launcherPath };
 }
 
+export interface RestartHubServiceOptions {
+  /** Bring up a stopped unit instead of bouncing a running one. */
+  readonly start?: boolean;
+  readonly probe?: StaleUnitProbe;
+  /** Where the warning for a failed move goes; defaults to stderr. */
+  readonly warn?: (message: string) => void;
+}
+
 /**
  * Bring the hub's unit up, first moving a stale one onto the launcher as part
  * of the same supervisor operation (see `UserServiceManager.restartRetargeted`).
- * `start` brings up a stopped unit; the default bounces a running one. Returns
- * the move it made, if any.
+ * The move is a repair, not the point of the call: when it fails the unit is
+ * brought up as installed after a warning that names the stale path and the
+ * command that rewrites the unit, so an upgrade or a restart never ends with
+ * the hub down because a unit file could not be rewritten. Returns the move it
+ * made, if any.
  * // Usage: const moved = await restartHubService(manager, currentLauncherPath())
  */
 export async function restartHubService(
   manager: UserServiceManager,
   launcherPath: string | undefined,
-  options: { readonly start?: boolean; readonly probe?: StaleUnitProbe } = {}
+  options: RestartHubServiceOptions = {}
 ): Promise<RetargetedUnit | null> {
   const stale = await staleHubServiceMove(manager, launcherPath, options.probe);
   if (stale) {
-    await manager.restartRetargeted(stale.to);
-    return stale;
+    try {
+      await manager.restartRetargeted(stale.to);
+      return stale;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      (options.warn ?? ((message) => process.stderr.write(`mangostudio: ${message}\n`)))(
+        `Could not move the service unit off ${stale.from} onto ${stale.to} (${reason}); starting it as installed. Run "mangostudio service install" to repair the unit.`
+      );
+    }
   }
   await (options.start ? manager.start() : manager.restart());
   return null;
