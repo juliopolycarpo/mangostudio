@@ -20,12 +20,20 @@ import { githubPrsQueryOptions } from '../queries';
  * every one the repository has ever had. Older branches go unannotated, which
  * reads the same as having no pull request.
  *
+ * `enabled` is the caller's "somebody is looking": the list is a live `gh`
+ * subprocess on the runtime and a call against a rate-limited API, so it must
+ * not run for a menu that is closed. Data already read stays available while it
+ * is false.
+ *
  * @example
- * const annotations = useBranchPrAnnotations(chatId);
+ * const annotations = useBranchPrAnnotations(chatId, menuOpen);
  * annotations.get('feat/github-panel')?.isMerged; // true
  */
-export function useBranchPrAnnotations(chatId: string): ReadonlyMap<string, BranchPrAnnotation> {
-  const query = useQuery(githubPrsQueryOptions(chatId, 'all'));
+export function useBranchPrAnnotations(
+  chatId: string,
+  enabled: boolean
+): ReadonlyMap<string, BranchPrAnnotation> {
+  const query = useQuery({ ...githubPrsQueryOptions(chatId, 'all'), enabled });
   const prs = query.data?.state === 'ok' ? query.data.prs : null;
 
   return useMemo(() => annotateBranchesWithPrs(prs ?? []), [prs]);
