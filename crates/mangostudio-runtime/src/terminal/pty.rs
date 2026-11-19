@@ -759,9 +759,11 @@ mod tests {
         let _serial = REAL_PTY_TEST.lock().await;
         let dir = crate::test_support::scratch_dir("pty-setsid-daemon");
         let pid_file = dir.join("daemon.pid");
+        // The daemon writes its own pid: `setsid` forks when its caller already leads a process
+        // group and the parent exits at once, so `$!` could name that parent, not the daemon.
         let script = format!(
-            "setsid sleep 60 </dev/null >/dev/null 2>&1 & echo $! > '{0}.tmp'; mv '{0}.tmp' '{0}'; \
-             sleep 60",
+            "setsid sh -c 'echo $$ > \"$0.tmp\"; mv \"$0.tmp\" \"$0\"; exec sleep 60' '{0}' \
+             </dev/null >/dev/null 2>&1 & sleep 60",
             pid_file.display()
         );
         let request = PtyRequest::new("/bin/sh", ["-c", script.as_str()], 80, 24);
