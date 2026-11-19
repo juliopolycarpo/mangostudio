@@ -1,5 +1,5 @@
 /**
- * Migration 067 adds `file_checkpoints.source`. Rows written before it exist
+ * Migration 068 adds `file_checkpoints.source`. Rows written before it exist
  * only because a builtin mutator snapshotted a path, so they must read back as
  * `builtin`; reading them as anything else would make the revert dialog warn
  * about concurrent writers on turns that never had a shell capture.
@@ -15,9 +15,9 @@ import { createBunSqliteDialect } from '../../../src/db/bun-sqlite-dialect';
 import { allMigrations } from '../../../src/db/migrations';
 
 const BEFORE = '066_chat_search_text';
-const TARGET = '067_file_checkpoint_source';
+const TARGET = '068_file_checkpoint_source';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- the pre-067 schema is not the shape `Database` describes.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- the pre-068 schema is not the shape `Database` describes.
 type AnyDb = Kysely<any>;
 
 let sqlite: SQLiteDatabase;
@@ -63,7 +63,7 @@ afterEach(async () => {
   await db.destroy();
 });
 
-describe('067_file_checkpoint_source', () => {
+describe('068_file_checkpoint_source', () => {
   it('reads rows that predate the column back as builtin', async () => {
     await seedCheckpointRow();
 
