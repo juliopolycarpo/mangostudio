@@ -56,6 +56,35 @@ describe('waitUntil', () => {
     expect(condition.checks).toBe(3);
   });
 
+  it('awaits an async condition on every poll', async () => {
+    const condition = new FakeCondition(3);
+
+    await waitUntil(() => Promise.resolve(condition.matches()), 'an async readiness check', 200);
+
+    expect(condition.checks).toBe(3);
+  });
+
+  it('keeps polling past a first slow check instead of spending a poll budget', async () => {
+    // A check that takes longer than the whole poll interval must not shorten the
+    // wait: the deadline is the wall clock, so the second poll still happens.
+    let checks = 0;
+    const slowThenReady = async (): Promise<boolean> => {
+      checks += 1;
+      await Bun.sleep(60);
+      return checks >= 2;
+    };
+
+    await waitUntil(slowThenReady, 'a check that outlasts the poll interval', 5_000);
+
+    expect(checks).toBe(2);
+  });
+
+  it('fails an unsatisfied async condition with the expectation and timeout', async () => {
+    await expect(
+      waitUntil(() => Promise.resolve(false), 'the completed receipt', 10)
+    ).rejects.toThrow('expected the completed receipt | received: nothing within 10ms');
+  });
+
   it('fails an unsatisfied condition with the expectation and timeout', async () => {
     const condition = new FakeCondition(Infinity);
 
