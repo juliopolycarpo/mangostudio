@@ -2791,6 +2791,85 @@ export const messages = {
         title: 'Doctor',
         summary: '{warnings} avisos, {failures} falhas',
         clear: 'Todas as verificações passaram.',
+        checks: {
+          'core.label.homeDirectory': 'Diretório base',
+          'core.label.logsDirectory': 'Diretório de logs',
+          'core.label.runDirectory': 'Diretório de execução',
+          'core.label.config': 'Configuração',
+          'core.label.database': 'Banco de dados',
+          'core.label.frontend': 'Frontend',
+          'core.label.authSecret': 'Segredo de autenticação',
+          'core.label.instance': 'Instância',
+          'core.label.runtime': 'Runtime',
+          'core.label.runtimeBinary': 'Binário do runtime',
+          'core.label.runtimeSlot': 'Slot do runtime ({slot})',
+          'core.label.runtimeCache': 'Cache do runtime',
+          'core.label.sshClient': 'Cliente SSH',
+          'core.label.serverBuild': 'Build do servidor',
+          'core.label.checkoutBuild': 'Build do checkout',
+          'core.label.frontendBuild': 'Build do frontend',
+          'core.detail.directoryWritable': '{path} (gravável)',
+          'core.detail.directoryNotWritable': '{path} (sem permissão de escrita)',
+          'core.detail.directoryWillBeCreated': '{path} (será criado)',
+          'core.detail.directoryParentNotWritable':
+            '{path} (diretório pai sem permissão de escrita)',
+          'core.detail.configFile': '{host}:{port} ({path})',
+          'core.detail.configDefaults': '{host}:{port} (padrões)',
+          'core.detail.databaseInMemory': 'em memória',
+          'core.detail.databasePath': '{path}',
+          'core.detail.frontendPresent': '{path} (presente)',
+          'core.detail.frontendMissing': '{path} (ausente — somente API)',
+          'core.detail.frontendEmbeddedFiles': 'embutido no binário ({count} arquivos)',
+          'core.detail.frontendEmbeddedInServer': 'embutido no binário do servidor em execução',
+          'core.detail.authSecretInvalid': '{message}',
+          'core.detail.authSecretSet': 'definido ({minLength}+ caracteres)',
+          'core.detail.instanceNotRunning': 'parada',
+          'core.detail.instanceStale': 'arquivo de estado obsoleto (PID {pid})',
+          'core.detail.instanceRunning':
+            'em execução (PID {pid}, porta {port}, saúde não verificada)',
+          'core.detail.runtimeStandalone': 'v{version} {platform}-{arch} standalone',
+          'core.detail.runtimeDevelopment': 'v{version} {platform}-{arch} dev',
+          'core.detail.runtimeBinaryNotBuilt':
+            'não compilado neste checkout do código-fonte; o Local não pode iniciar. Execute "{command}" na raiz do repositório',
+          'core.detail.runtimeBinaryMissing':
+            'não encontrado em {path}; o Local não pode iniciar. Reinstale o MangoStudio para que ele fique ao lado do hub, ou defina MANGOSTUDIO_RUNTIME_BINARY',
+          'core.detail.runtimeBinaryNoVersion': '{path} não informou uma versão ({reason})',
+          'core.detail.runtimeBinaryNoVersionUnknown':
+            '{path} não informou uma versão (motivo desconhecido)',
+          'core.detail.runtimeBinaryMismatch':
+            'v{version} não corresponde ao hub v{hubVersion}; reinstale para que ambos venham da mesma versão',
+          'core.detail.runtimeBinaryOk': 'v{version} em {path}',
+          'core.detail.runtimeSlotUnreadable':
+            '{file} em {directory} {error}; execute "{command}" para reescrevê-lo',
+          'core.detail.runtimeSlotPending':
+            'aguardando consentimento; execute "{command}" nessa máquina',
+          'core.detail.runtimeSlotConfigured': '{profile}  {directory}',
+          'core.detail.runtimeSlotConfiguredVersion': 'v{version}  {profile}  {directory}',
+          'core.detail.runtimeSlotDenied': '{profile} (negado: {denied})  {directory}',
+          'core.detail.runtimeSlotDeniedVersion':
+            'v{version}  {profile} (negado: {denied})  {directory}',
+          'core.detail.runtimeCacheEmpty': 'vazio  {directory}',
+          'core.detail.runtimeCacheVersions': '{versions}  {directory}',
+          'core.detail.sshClientMissing':
+            'nenhum ssh no PATH; os ambientes SSH não conseguem iniciar',
+          'core.detail.sshClientNoVersion': '{path} não informou uma versão ({reason})',
+          'core.detail.sshClientNoVersionUnknown':
+            '{path} não informou uma versão (motivo desconhecido)',
+          'core.detail.sshClientOk': '{version}  {path}',
+          'core.detail.buildStampClean':
+            '{sha} (compilado em {builtAt}, sem alterações, {buildType})',
+          'core.detail.buildStampDirty':
+            '{sha} (compilado em {builtAt}, com alterações, {buildType})',
+          'core.detail.buildStampDirtyUnknown':
+            '{sha} (compilado em {builtAt}, alterações desconhecidas, {buildType})',
+          'core.detail.serverBuildMissing':
+            'o servidor em execução não informou metadados de build',
+          'core.detail.checkoutBuildDiffers':
+            'o checkout {checkout} difere do servidor {server}; reinicie ou recompile se isso não for esperado',
+          'core.detail.frontendBuildMissing':
+            '{path} ausente; recompile os assets do frontend para comparar',
+          'core.detail.frontendBuildDiffers': 'o frontend {frontend} difere do servidor {server}',
+        },
       },
       logs: {
         title: 'Log',

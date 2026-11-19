@@ -24,6 +24,7 @@ import {
   checkDatabase,
   checkDir,
   checkEmbeddedFrontend,
+  checkEmbeddedFrontendInServer,
   checkFrontend,
   checkInstance,
   type CheckResult,
@@ -212,9 +213,9 @@ async function collectResults(
   ]);
 
   const results: CheckResult[] = [
-    checkDir('Home directory', getHomeMangoDir(), d.fs),
-    checkDir('Logs directory', getLogsDir(), d.fs),
-    checkDir('Run directory', getRunDir(), d.fs),
+    checkDir('core.label.homeDirectory', getHomeMangoDir(), d.fs),
+    checkDir('core.label.logsDirectory', getLogsDir(), d.fs),
+    checkDir('core.label.runDirectory', getRunDir(), d.fs),
     checkConfig(config),
     checkDatabase(config, d.fs),
     resolveFrontendCheck(frontendDir, embedded, d),
@@ -297,7 +298,7 @@ function resolveFrontendCheck(
     return checkEmbeddedFrontend(Object.keys(embedded).length);
   }
   if (frontendDir === EMBEDDED_FRONTEND_DIR) {
-    return ok('Frontend', 'embedded in running server binary');
+    return checkEmbeddedFrontendInServer();
   }
   return checkFrontend(frontendDir, d.fs);
 }

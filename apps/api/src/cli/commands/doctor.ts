@@ -4,6 +4,8 @@
  * themselves live in the machine module, which the API serves from too.
  */
 
+import { renderMachineCheckEnglish } from '@mangostudio/shared/machine/check-text-en';
+
 import {
   collectDoctorChecks,
   type DoctorCollectDeps,
@@ -77,7 +79,10 @@ function render(results: CheckResult[], options: DoctorArgs, log: DoctorDeps['lo
 
   log('MangoStudio doctor\n');
   for (const result of results) {
-    log(`${badge(result.status)} ${result.label.padEnd(18)} ${result.detail}`);
+    // From the row's keys where it has them (the machine page does the same in
+    // its own language), so a keyed check has one English wording.
+    const { label, detail } = renderMachineCheckEnglish(result);
+    log(`${badge(result.status)} ${label.padEnd(18)} ${detail}`);
   }
 
   log(`\n${warnings} warning(s), ${failures} failure(s).`);

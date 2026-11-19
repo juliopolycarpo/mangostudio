@@ -106,7 +106,13 @@ function recordingDeps() {
         return Promise.resolve([]);
       },
       getBuildInfo: () => null as never,
-      getCheckoutBuildInfo: () => null as never,
+      // The checkout stamp is never absent (`getCurrentCheckoutBuildInfo` falls back to `unknown`).
+      getCheckoutBuildInfo: () => ({
+        gitSha: 'unknown',
+        gitDirty: 'unknown' as const,
+        builtAt: 'dev',
+        buildType: 'dev',
+      }),
       readFrontendBuildInfo: () => null,
       collectSkillsChecks: () => [],
       collectMcpChecks: (rows: readonly McpServerSelect[]) => {

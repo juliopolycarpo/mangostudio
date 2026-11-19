@@ -10,7 +10,7 @@ import Type from 'typebox';
 
 import { InstallGuardSchema } from '../environments/schemas';
 import { RuntimeConsentProfileSchema, UserServiceStatusSchema } from '../runtime-home/schemas';
-import { ReadonlyArraySchema } from '../schema-helpers';
+import { ReadonlyArraySchema, ReadonlyRecordSchema } from '../schema-helpers';
 import { MACHINE_LOG_TAIL_MAX } from './limits';
 
 export { MACHINE_LOG_TAIL_DEFAULT, MACHINE_LOG_TAIL_MAX } from './limits';
@@ -80,11 +80,32 @@ export const MACHINE_CHECK_DETAIL_MAX = 4_096;
 /** Cap on every `error` string in the status document. */
 export const MACHINE_ERROR_MAX = 1_024;
 
-/** One doctor row, exactly as the CLI prints it. */
+/** Cap on the length of a doctor row's `labelKey` / `detailKey`. */
+export const MACHINE_CHECK_KEY_MAX = 128;
+/** Cap on the number of entries in a doctor row's `params`. */
+export const MACHINE_CHECK_PARAMS_MAX = 16;
+
+/**
+ * One doctor row. `label` and `detail` are the English the CLI prints, always
+ * present. A row whose check has been keyed also carries `labelKey` and
+ * `detailKey`, stable identifiers of the message, and `params`, the values the
+ * message is built from (a path, a PID, a version, an error from the OS). A
+ * consumer that renders another language looks the key up in its own
+ * dictionary and fills in `params`; a key it does not know, from a newer hub,
+ * falls back to the English fields. Rows that have no keys yet are English
+ * only. See `resolveMachineCheckText`.
+ */
 export const MachineCheckSchema = Type.Object({
   label: Type.String({ minLength: 1, maxLength: MACHINE_CHECK_LABEL_MAX }),
   status: MachineCheckStatusSchema,
   detail: Type.String({ maxLength: MACHINE_CHECK_DETAIL_MAX }),
+  labelKey: Type.Optional(Type.String({ minLength: 1, maxLength: MACHINE_CHECK_KEY_MAX })),
+  detailKey: Type.Optional(Type.String({ minLength: 1, maxLength: MACHINE_CHECK_KEY_MAX })),
+  params: Type.Optional(
+    ReadonlyRecordSchema(Type.String({ maxLength: MACHINE_CHECK_DETAIL_MAX }), {
+      maxProperties: MACHINE_CHECK_PARAMS_MAX,
+    })
+  ),
 });
 export type MachineCheck = Static<typeof MachineCheckSchema>;
 
