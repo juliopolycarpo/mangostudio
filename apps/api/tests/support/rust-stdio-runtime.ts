@@ -19,6 +19,8 @@ export interface RustStdioRuntime {
   readonly client: RuntimeClient;
   /** The scratch `MANGO_HOME` the child runs under; removed by {@link close}. */
   readonly mangoHome: string;
+  /** The last 16 KiB the child wrote to stderr, for a failure message. */
+  stderrTail(): string;
   /** Ends the session, waits for the child to exit, and removes the scratch home. */
   close(): Promise<void>;
 }
@@ -60,6 +62,7 @@ export async function spawnRustStdioRuntime(
     return {
       client: new RuntimeClient(hub, () => undefined, options.label),
       mangoHome,
+      stderrTail: () => peer.stderrTail(),
       async close() {
         hub.close();
         await peer.terminate();
