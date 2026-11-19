@@ -118,6 +118,7 @@ describe('workflow hygiene', () => {
       '.github/workflows/distribution-build.yml',
       '.github/workflows/release-dry-run.yml',
       '.github/workflows/runtime-build.yml',
+      '.github/workflows/runtime-probe.yml',
       '.github/workflows/smoke-binary.yml',
       '.github/workflows/smoke-container.yml',
     ]);
