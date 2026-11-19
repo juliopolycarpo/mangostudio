@@ -325,15 +325,48 @@ struct InstallRecord {
     entries: Vec<(String, u64)>,
 }
 
+/// How a tree's recorded platform relates to the platform of this build.
+#[derive(Debug, PartialEq, Eq)]
+enum PlatformFit {
+    /// The same platform, or no evidence either way: a record from before
+    /// platforms were recorded, or a build with no release platform.
+    Native,
+    /// Another platform that this one runs through a translation layer. The
+    /// tree starts, but a native tree is better, so a repair is attempted.
+    Emulated,
+    /// Another platform whose binaries cannot run here.
+    Foreign,
+}
+
+/// Recorded platforms that a launcher of the second platform still runs, the
+/// only mismatches that are not `PlatformFit::Foreign`. A pair belongs here
+/// only when both binaries of the archive (the Bun-compiled hub and the
+/// runtime) execute on the second platform as shipped.
+///
+/// - `darwin-x64` on `darwin-arm64`: Apple silicon runs x86-64 Mach-O binaries
+///   through Rosetta 2. Without Rosetta the exec fails and the OS error names
+///   the binary, the same as before platforms were recorded. The reverse does
+///   not hold: an Intel Mac cannot run arm64 code.
+///
+/// The two Linux libc variants are deliberately absent. The musl archive's
+/// runtime is static, but its hub is a Bun-compiled musl executable that needs
+/// the musl loader and `libstdc++`, which a glibc host lacks; the glibc
+/// archive's hub needs the glibc loader, which Alpine lacks.
+const RUNS_THROUGH_TRANSLATION: &[(&str, &str)] = &[("darwin-x64", "darwin-arm64")];
+
 impl InstallRecord {
-    /// True when the record names a platform other than `platform`: the tree
-    /// holds another platform's binaries (a home directory shared between
-    /// platforms), which cannot run here. No record platform, or no platform
-    /// for this build, is no evidence of a mismatch.
-    fn is_for_another_platform(&self, platform: Option<&str>) -> bool {
+    /// Whether the tree's recorded platform can run on `platform`, the
+    /// platform of this build.
+    fn platform_fit(&self, platform: Option<&str>) -> PlatformFit {
         match (self.platform.as_deref(), platform) {
-            (Some(recorded), Some(this_build)) => recorded != this_build,
-            _ => false,
+            (Some(recorded), Some(this_build)) if recorded != this_build => {
+                if RUNS_THROUGH_TRANSLATION.contains(&(recorded, this_build)) {
+                    PlatformFit::Emulated
+                } else {
+                    PlatformFit::Foreign
+                }
+            }
+            _ => PlatformFit::Native,
         }
     }
 }
@@ -401,8 +434,11 @@ fn compare_record(directory: &Path, entries: &[(String, u64)]) -> (bool, bool) {
 /// so a non-empty binary counts and a good install is never downloaded again.
 ///
 /// `platform` is this build's release platform. A record that names another
-/// one means the binaries are for a platform that shares this install root, so
-/// the tree is unusable here however intact it is.
+/// one means the binaries are for a platform that shares this install root:
+/// the tree is unusable here however intact it is, unless the pair is one that
+/// runs through translation (`RUNS_THROUGH_TRANSLATION`). Such a tree is
+/// startable at best, never complete, so the launcher still tries to replace it
+/// with a native one and starts it only if that fails.
 fn inspect_install(install_dir: &Path, platform: Option<&str>) -> InstallState {
     if file_size(&install_dir.join(BINARY_NAME)).is_none_or(|bytes| bytes == 0) {
         return InstallState::Unusable;
@@ -410,24 +446,30 @@ fn inspect_install(install_dir: &Path, platform: Option<&str>) -> InstallState {
     match read_record(install_dir) {
         RecordReading::Missing => InstallState::Complete,
         RecordReading::Unreadable => InstallState::Startable,
-        RecordReading::Entries(record) if record.is_for_another_platform(platform) => {
-            InstallState::Unusable
+        RecordReading::Entries(record) => {
+            match (
+                record.platform_fit(platform),
+                compare_record(install_dir, &record.entries),
+            ) {
+                (_, (_, false)) | (PlatformFit::Foreign, _) => InstallState::Unusable,
+                (PlatformFit::Emulated, _) | (PlatformFit::Native, (false, true)) => {
+                    InstallState::Startable
+                }
+                (PlatformFit::Native, (true, true)) => InstallState::Complete,
+            }
         }
-        RecordReading::Entries(record) => match compare_record(install_dir, &record.entries) {
-            (_, false) => InstallState::Unusable,
-            (true, true) => InstallState::Complete,
-            (false, true) => InstallState::Startable,
-        },
     }
 }
 
 /// True for a tree that has a record for `platform` and matches it entirely:
 /// what a launcher leaves in staging once the unpack, the record and the flush
-/// are done.
+/// are done. A staged tree of a translated platform is not adopted: finishing
+/// an install means a native tree, and the download makes one.
 fn staging_is_verified(staging: &Path, platform: Option<&str>) -> bool {
     match read_record(staging) {
         RecordReading::Entries(record) => {
-            !record.is_for_another_platform(platform) && compare_record(staging, &record.entries).0
+            record.platform_fit(platform) == PlatformFit::Native
+                && compare_record(staging, &record.entries).0
         }
         RecordReading::Missing | RecordReading::Unreadable => false,
     }
@@ -1654,6 +1696,140 @@ mod tests {
         assert!(
             matches!(&outcome, Err(message) if message.contains("cannot download")),
             "expected the download failure, not a start of the {OTHER_PLATFORM} binary | received {outcome:?}"
+        );
+    }
+
+    // A pair from `RUNS_THROUGH_TRANSLATION`: an Apple silicon launcher over a
+    // tree an Intel launcher installed in a shared home.
+    const TRANSLATED_FROM: &str = "darwin-x64";
+    const TRANSLATED_ON: &str = "darwin-arm64";
+
+    #[test]
+    fn a_translated_platform_tree_is_started_when_the_repair_cannot_download() {
+        let offline = ClosedConnectionServer::start();
+        let fixture = InstallFixture::new();
+        fixture.install_as_platform(TRANSLATED_FROM, "x64 binary");
+
+        let outcome = ensure_install(
+            &fixture.release_for_platform(TRANSLATED_ON, offline.base_url()),
+            &fixture.install_dir(),
+        );
+
+        assert!(
+            matches!(&outcome, Ok(InstallStart::KeptInstalled { reason }) if reason.contains("cannot download")),
+            "expected the {TRANSLATED_FROM} tree to be kept after the failed repair on {TRANSLATED_ON} | received {outcome:?}"
+        );
+        assert_eq!(fixture.installed_binary_body(), "x64 binary");
+    }
+
+    #[test]
+    fn a_translated_platform_tree_is_replaced_by_a_native_one_when_online() {
+        let fixture = InstallFixture::new();
+        fixture.install_as_platform(TRANSLATED_FROM, "x64 binary");
+        fixture.publish_for_platform(TRANSLATED_ON, "arm64 binary");
+
+        let outcome = ensure_install(
+            &fixture.release_for_platform(TRANSLATED_ON, fixture.server.base_url()),
+            &fixture.install_dir(),
+        );
+
+        assert_eq!(
+            outcome,
+            Ok(InstallStart::Installed),
+            "expected the {TRANSLATED_FROM} tree to be replaced on {TRANSLATED_ON}"
+        );
+        assert_eq!(fixture.installed_binary_body(), "arm64 binary");
+        assert_eq!(
+            fixture
+                .server
+                .request_count(&format!("/{}", asset_name(fixture.version, TRANSLATED_ON))),
+            1,
+            "expected one download of the {TRANSLATED_ON} archive"
+        );
+
+        // Now native: the next start needs no request.
+        fixture.server.forget_requests();
+        let restart = ensure_install(
+            &fixture.release_for_platform(TRANSLATED_ON, fixture.server.base_url()),
+            &fixture.install_dir(),
+        );
+        assert_eq!(restart, Ok(InstallStart::Complete));
+        assert!(fixture.no_requests());
+    }
+
+    #[test]
+    fn a_damaged_translated_platform_tree_is_never_started() {
+        let offline = ClosedConnectionServer::start();
+        let fixture = InstallFixture::new();
+        fixture.install_as_platform(TRANSLATED_FROM, "x64 binary");
+        fixture.shorten_binary();
+
+        let outcome = ensure_install(
+            &fixture.release_for_platform(TRANSLATED_ON, offline.base_url()),
+            &fixture.install_dir(),
+        );
+
+        assert!(
+            matches!(&outcome, Err(message) if message.contains("cannot download")),
+            "expected a short {TRANSLATED_FROM} binary to fail the start, not run | received {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn a_staged_tree_of_a_translated_platform_is_not_adopted() {
+        let fixture = InstallFixture::new();
+        fixture.publish_for_platform(TRANSLATED_ON, "arm64 binary");
+        let staging = fixture.staging_dir("11-1");
+        fixture.lay_down_tree_for_platform(&staging, TRANSLATED_FROM, "x64 binary");
+
+        let outcome = ensure_install(
+            &fixture.release_for_platform(TRANSLATED_ON, fixture.server.base_url()),
+            &fixture.install_dir(),
+        );
+
+        assert_eq!(outcome, Ok(InstallStart::Installed));
+        assert_eq!(
+            fixture.installed_binary_body(),
+            "arm64 binary",
+            "expected a download instead of adopting the {TRANSLATED_FROM} staging tree"
+        );
+    }
+
+    #[test]
+    fn platform_fit_accepts_only_the_listed_translated_pairs() {
+        let recorded = |platform: &str| InstallRecord {
+            platform: Some(platform.to_string()),
+            entries: vec![(BINARY_NAME.to_string(), 1)],
+        };
+
+        for (from, on) in RUNS_THROUGH_TRANSLATION {
+            assert_eq!(
+                recorded(from).platform_fit(Some(on)),
+                PlatformFit::Emulated,
+                "expected a {from} tree to run on {on}"
+            );
+        }
+        // Direction matters: Intel Macs cannot run arm64 binaries. The Linux
+        // libc variants are not interchangeable either: the musl hub needs the
+        // musl loader and the glibc hub the glibc loader.
+        for (from, on) in [
+            ("darwin-arm64", "darwin-x64"),
+            ("linux-x64", "linux-x64-musl"),
+            ("linux-x64-musl", "linux-x64"),
+            ("linux-arm64", "linux-arm64-musl"),
+            ("linux-arm64-musl", "linux-arm64"),
+            ("linux-x64", "linux-arm64"),
+            ("darwin-x64", "linux-x64"),
+        ] {
+            assert_eq!(
+                recorded(from).platform_fit(Some(on)),
+                PlatformFit::Foreign,
+                "expected a {from} tree not to run on {on}"
+            );
+        }
+        assert_eq!(
+            recorded("darwin-x64").platform_fit(Some("darwin-x64")),
+            PlatformFit::Native
         );
     }
 
