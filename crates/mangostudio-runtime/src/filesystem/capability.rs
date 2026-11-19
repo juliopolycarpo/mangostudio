@@ -1110,6 +1110,10 @@ mod tests {
             .expect("an existing subdirectory opens");
 
         let expected = std::fs::canonicalize(root.join("nested")).unwrap();
+        // `canonicalize` returns a `\\?\`-prefixed path on Windows; a final
+        // path is reported without the prefix.
+        #[cfg(windows)]
+        let expected = crate::filesystem::policy::normalize_windows_final_path(&expected);
         assert!(
             paths_equal(&child.final_path, &expected),
             "expected the final path of the opened subdirectory | expected: {} | received: {}",
