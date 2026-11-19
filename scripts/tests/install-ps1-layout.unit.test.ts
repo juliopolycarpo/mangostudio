@@ -1621,6 +1621,44 @@ describe('install.ps1 version lock', () => {
     };
   }
 
+  // The same rule as install.sh: plain digits (at most 9) are kept, anything else warns and
+  // falls back to 3600. Each answer is "<value>=<seconds>/<warned>".
+  test.skipIf(!POWERSHELL)(
+    'Get-InstallLockTimeoutSeconds keeps plain digits and warns about anything else',
+    () => {
+      const l = layout();
+      const values = ['0', '7', '123456789', '10s', '-1', '1.5', '+5', ' 5', '1234567890'];
+      const script = values
+        .map(
+          (value) =>
+            `$env:MANGOSTUDIO_INSTALL_LOCK_TIMEOUT = ${psQuote(value)}; ` +
+            `$out = @(Get-InstallLockTimeoutSeconds 3>&1); ` +
+            `Write-Output ('[' + ${psQuote(value)} + ']=' + $out[-1] + '/' + ($out.Count -gt 1))`
+        )
+        .join('; ');
+
+      const result = runDotSourced(l.scriptPath, script);
+
+      const lines = result.stdout.replace(/\r/g, '').split('\n');
+      const expected = [
+        '[0]=0/False',
+        '[7]=7/False',
+        '[123456789]=123456789/False',
+        '[10s]=3600/True',
+        '[-1]=3600/True',
+        '[1.5]=3600/True',
+        '[+5]=3600/True',
+        '[ 5]=3600/True',
+        '[1234567890]=3600/True',
+      ];
+      expect(
+        lines.filter((line) => line.startsWith('[')),
+        `expected the timeout rule of install.sh | received: ${JSON.stringify(result)}`
+      ).toEqual(expected);
+    },
+    60000
+  );
+
   test.skipIf(!POWERSHELL)(
     'Enter-VersionLock holds the lock until Exit-VersionLock and then gives up at the timeout',
     () => {

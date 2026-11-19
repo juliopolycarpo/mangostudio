@@ -67,7 +67,7 @@ function Show-Usage {
   Write-Host '  MANGOSTUDIO_INSTALL_ORIGIN  Set to "upgrade" when the hub itself runs this script'
   Write-Host '  MANGOSTUDIO_INSTALL_LOCK_TIMEOUT'
   Write-Host '                              Seconds to wait for another installer or launcher of the same'
-  Write-Host '                              version before giving up (default 3600)'
+  Write-Host '                              version before giving up (digits only, default 3600)'
   Write-Host '  GITHUB_TOKEN                Authenticates api.github.com requests (GH_TOKEN if unset); raises the'
   Write-Host '                              rate limit. Release downloads never receive it.'
 }
@@ -582,10 +582,13 @@ function Set-CurrentJunction([string]$InstallRoot, [string]$Version) {
 #
 # Seconds to wait for another installer of the same version before giving up.
 # The launcher's own ceiling is an hour; the variable exists for tests.
+# Plain digits only, up to 9 of them, the same rule as install.sh: anything else
+# ("10s", "-1", " 5", "1.5") warns and falls back to the default.
 function Get-InstallLockTimeoutSeconds {
-  $seconds = 0
-  $raw = [Environment]::GetEnvironmentVariable('MANGOSTUDIO_INSTALL_LOCK_TIMEOUT')
-  if ([int]::TryParse([string]$raw, [ref]$seconds) -and $seconds -ge 0) { return $seconds }
+  $raw = [string][Environment]::GetEnvironmentVariable('MANGOSTUDIO_INSTALL_LOCK_TIMEOUT')
+  if ($raw -eq '') { return 3600 }
+  if ($raw -cmatch '\A[0-9]{1,9}\z') { return [int]$raw }
+  Write-Warning "MANGOSTUDIO_INSTALL_LOCK_TIMEOUT=$raw is not a whole number of seconds; using 3600"
   return 3600
 }
 
@@ -896,20 +899,22 @@ function Complete-Install([string]$InstallRoot, [string]$BinDir, [string]$Origin
 
   # The smoke check ran on the scratch copy, so the lock is held only for the
   # swap itself: no launcher or second installer can move a tree in between
-  # the Remove-Item and the Move-Item. A holder that outlasts the timeout
-  # leaves the installed tree alone and takes the scratch copy with it.
+  # the Remove-Item and the Move-Item. The scratch copy is removed by the
+  # finally block when the swap never started: a holder that outlasts the
+  # timeout, or Ctrl-C during the wait (which can last an hour), leaves the
+  # installed tree alone and takes the scratch copy with it.
   $versionLock = $null
+  $swapStarted = $false
   try {
     $versionLock = Enter-VersionLock $InstallRoot $InstallVersion
-  } catch {
-    Remove-Item $tempInstall -Recurse -Force -ErrorAction SilentlyContinue
-    throw
-  }
-  try {
+    $swapStarted = $true
     if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force }
     Move-Item $tempInstall $installDir
   } finally {
     Exit-VersionLock $versionLock
+    if (-not $swapStarted) {
+      Remove-Item $tempInstall -Recurse -Force -ErrorAction SilentlyContinue
+    }
   }
 
   $oldVersion = Resolve-CurrentVersion $InstallRoot (Get-BinCmdPath $BinDir)

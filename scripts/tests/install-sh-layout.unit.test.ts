@@ -169,13 +169,21 @@ function run(args: string[], env: Record<string, string | undefined>): RunResult
   return shell(installerCommand(args), env);
 }
 
-/** Start install.sh without waiting for it, e.g. to run it while a lock is held. */
-function runInBackground(args: string[], env: Record<string, string | undefined>) {
+/**
+ * Start install.sh without waiting for it, e.g. to run it while a lock is held. `detached` makes
+ * it a process group leader, so a test can signal the whole group as a terminal's Ctrl-C does.
+ */
+function runInBackground(
+  args: string[],
+  env: Record<string, string | undefined>,
+  detached = false
+) {
   return Bun.spawn({
     cmd: [BASH, ...installerCommand(args)],
     env: shellEnvironment(env),
     stdout: 'pipe',
     stderr: 'pipe',
+    detached,
   });
 }
 
@@ -759,6 +767,39 @@ async function waitForExit(
   await Promise.race([process.exited, Bun.sleep(milliseconds)]);
 }
 
+/** The `.install-*` scratch trees in `root`. */
+function scratchTrees(root: string): string[] {
+  return readdirSync(root).filter((entry) => entry.startsWith('.install-'));
+}
+
+/** Resolve once `process` has printed `needle` on stdout; fail with what it printed after `milliseconds`. */
+async function waitForOutput(
+  process: ReturnType<typeof runInBackground>,
+  needle: string,
+  milliseconds: number
+): Promise<void> {
+  const reader = process.stdout.getReader();
+  const decoder = new TextDecoder();
+  const deadline = Date.now() + milliseconds;
+  let seen = '';
+  try {
+    while (!seen.includes(needle)) {
+      const chunk = await Promise.race([
+        reader.read(),
+        Bun.sleep(Math.max(0, deadline - Date.now())).then(() => null),
+      ]);
+      if (chunk === null || chunk.done) {
+        throw new Error(
+          `install.sh stdout | expected to contain: ${JSON.stringify(needle)} | received: ${JSON.stringify(seen)}`
+        );
+      }
+      seen += decoder.decode(chunk.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 describe.skipIf(!PERL)('install.sh version lock', () => {
   /** A root holding 0.1.0 with a marker the next install of 0.1.0 must replace. */
   function installedWithMarker() {
@@ -809,6 +850,45 @@ describe.skipIf(!PERL)('install.sh version lock', () => {
       await lock.release();
     }
   }, 30000);
+
+  // Ctrl-C during the wait (up to an hour) must not leave `.install-<version>.<pid>` behind.
+  // SIGINT goes to the whole process group, as a terminal sends it, so the `sleep` child that
+  // bash is waiting on dies of it too; a SIGINT sent to bash alone is deferred by bash.
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    test.skipIf(IS_WINDOWS)(
+      `${signal} during the lock wait removes the scratch tree and keeps the installed one`,
+      async () => {
+        const { root, env, archive, marker } = installedWithMarker();
+        const lock = await holdLauncherLock(root, '0.1.0');
+        const installer = runInBackground(['--local', archive], env, true);
+        try {
+          await waitForOutput(installer, 'Waiting for another installer', 10000);
+          const scratchWhileWaiting = scratchTrees(root);
+          expect(
+            scratchWhileWaiting.length,
+            `expected one .install-0.1.0.<pid> tree while waiting on the lock | received: ${JSON.stringify(scratchWhileWaiting)}`
+          ).toBe(1);
+
+          process.kill(signal === 'SIGINT' ? -installer.pid : installer.pid, signal);
+          const exited = await Promise.race([installer.exited, Bun.sleep(10000).then(() => null)]);
+
+          expect(
+            exited,
+            `expected install.sh to exit ${signal === 'SIGINT' ? 130 : 143} after ${signal} | received: ${exited ?? 'still running'}`
+          ).toBe(signal === 'SIGINT' ? 130 : 143);
+          expect(
+            scratchTrees(root),
+            `expected no .install-* tree in ${root} after ${signal}`
+          ).toEqual([]);
+          expect(existsSync(marker), `expected ${marker} untouched`).toBe(true);
+        } finally {
+          installer.kill('SIGKILL');
+          await lock.release();
+        }
+      },
+      60000
+    );
+  }
 
   test('the lock is per version: another version installs while one is held', async () => {
     const { workDir, root, env } = layout();
@@ -913,6 +993,69 @@ describe('install.sh lock primitive', () => {
 
     expect(result.stdout.trim(), JSON.stringify(result)).toBe('rc=0');
     expect(result.stderr).toContain('without the install lock');
+  });
+
+  // flock(1) comes in two flavours that disagree about errors. A fake of each, named for what
+  // it reports, drives try_lock_fd without either tool installed.
+  const FLOCK_FAKES: ReadonlyArray<readonly [string, string, number]> = [
+    ['takes a free lock', 'fake_flock() { return 0; }', 0],
+    [
+      'reports a held lock as exit 1 with no output (util-linux and busybox)',
+      'fake_flock() { return 1; }',
+      1,
+    ],
+    [
+      'treats exit 1 with a message as unsupported (busybox on a file system without locking)',
+      'fake_flock() { echo "flock: Function not implemented" >&2; return 1; }',
+      2,
+    ],
+    [
+      'treats another exit code with a message as unsupported (util-linux)',
+      'fake_flock() { echo "flock: 200: Bad file descriptor" >&2; return 65; }',
+      2,
+    ],
+  ];
+  test.each(FLOCK_FAKES)('try_lock_fd %s', (_name, fake, expected) => {
+    const result = sourceAndCall(
+      `${fake}; flock() { fake_flock "$@"; }; have_command() { [ "$1" = flock ]; }; rc=0; try_lock_fd || rc=$?; echo "rc=$rc"`
+    );
+
+    expect(result.stdout.trim(), JSON.stringify(result)).toBe(`rc=${expected}`);
+  });
+
+  test.each([
+    { value: '0', kept: true },
+    { value: '7', kept: true },
+    { value: '123456789', kept: true },
+    { value: '10s', kept: false },
+    { value: '-1', kept: false },
+    { value: '1.5', kept: false },
+    { value: '+5', kept: false },
+    { value: ' 5', kept: false },
+    { value: '1234567890', kept: false },
+  ])('MANGOSTUDIO_INSTALL_LOCK_TIMEOUT=$value is kept: $kept', ({ value, kept }) => {
+    const result = sourceAndCall(
+      `INSTALL_LOCK_TIMEOUT='${value}'; validate_install_lock_timeout; echo "timeout=$INSTALL_LOCK_TIMEOUT"`
+    );
+
+    expect(
+      result.stdout.trim(),
+      `expected ${JSON.stringify(value)} to ${kept ? 'be kept' : 'fall back to 3600'} | received: ${JSON.stringify(result)}`
+    ).toBe(`timeout=${kept ? value : '3600'}`);
+    expect(result.stderr.includes('not a whole number of seconds'), JSON.stringify(result)).toBe(
+      !kept
+    );
+  });
+
+  test('an install with a non-numeric lock timeout warns and installs instead of looping', () => {
+    const { workDir, root, env } = layout();
+    const archive = buildReleaseArchive(workDir, `mangostudio-0.1.0-${PLATFORM}.tar.gz`, '0.1.0');
+
+    const result = run(['--local', archive], { ...env, MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '10s' });
+
+    expect(result.exitCode, JSON.stringify(result)).toBe(0);
+    expect(result.stderr).toContain('MANGOSTUDIO_INSTALL_LOCK_TIMEOUT=10s is not a whole number');
+    expect(readlinkSync(join(root, 'current'))).toBe('0.1.0');
   });
 });
 

@@ -52,8 +52,8 @@ Environment:
   MANGOSTUDIO_INSTALL_ORIGIN  Set to "upgrade" when the hub itself runs this script
   MANGOSTUDIO_INSTALL_LOCK_TIMEOUT
                               Seconds to wait for another installer or launcher of the same
-                              version before giving up (default 3600)
-  GITHUB_TOKEN               Authenticates api.github.com requests (GH_TOKEN if unset); raises the
+                              version before giving up (digits only, default 3600)
+  GITHUB_TOKEN                Authenticates api.github.com requests (GH_TOKEN if unset); raises the
                               rate limit. Release downloads never receive it.
 USAGE
 }
@@ -626,7 +626,22 @@ print_next_steps() {
 # Seconds to wait for another installer of the same version before giving up.
 # The launcher's own ceiling is an hour; the variable exists for tests.
 INSTALL_LOCK_TIMEOUT="${MANGOSTUDIO_INSTALL_LOCK_TIMEOUT:-3600}"
+INSTALL_LOCK_TIMEOUT_DEFAULT=3600
 INSTALL_LOCK_NOTICE_EVERY=30
+
+# A value that is not a plain count of seconds ("10s", "-1", "1.5") would make
+# the `[ -ge ]` comparison in acquire_version_lock fail on every pass and the
+# wait never end, so it is replaced with the default, as install.ps1 does. At
+# most 9 digits, so the comparison stays inside a shell's integer range.
+validate_install_lock_timeout() {
+  case "$INSTALL_LOCK_TIMEOUT" in
+    '' | *[!0-9]* | ??????????*)
+      printf 'Warning: MANGOSTUDIO_INSTALL_LOCK_TIMEOUT=%s is not a whole number of seconds; using %s\n' \
+        "$INSTALL_LOCK_TIMEOUT" "$INSTALL_LOCK_TIMEOUT_DEFAULT" >&2
+      INSTALL_LOCK_TIMEOUT="$INSTALL_LOCK_TIMEOUT_DEFAULT"
+      ;;
+  esac
+}
 
 have_command() {
   command -v "$1" >/dev/null 2>&1
@@ -637,12 +652,20 @@ have_command() {
 # (no tool, or a file system without locking).
 # flock(1) is util-linux and busybox; macOS has neither, but always has perl,
 # whose flock is the same flock(2) call and acts on the descriptor it inherits.
+# util-linux exits 1 for a held lock and another code for any other failure.
+# busybox exits 1 for both (flock.c returns EXIT_FAILURE on EWOULDBLOCK and
+# dies with its default status 1 on any other errno, such as ENOLCK), but only
+# the second prints a message, so exit 1 with output is "cannot lock".
 try_lock_fd() {
-  local status=0
+  local status=0 complaint=''
   if have_command flock; then
-    flock -n 200 || status=$?
+    complaint="$(flock -n 200 2>&1)" || status=$?
     case "$status" in
-      0 | 1) return "$status" ;;
+      0) return 0 ;;
+      1)
+        if [ -z "$complaint" ]; then return 1; fi
+        return 2
+        ;;
       *) return 2 ;;
     esac
   fi
@@ -703,6 +726,13 @@ release_version_lock() {
   exec 200>&-
 }
 
+# The scratch directory this process extracts <version> into. $$ is the main
+# shell's pid even inside a command substitution, so finish_install can name the
+# directory (for the exit trap) before extract_archive creates it.
+install_scratch_path() {
+  printf '%s\n' "${1}/.install-${2}.$$"
+}
+
 # Extract into a scratch directory and return its path. Never touches
 # "<install_root>/<version>" — that swap only happens once finish_install has
 # smoke-checked these bytes, so a corrupt re-install of an already-installed
@@ -710,7 +740,8 @@ release_version_lock() {
 # strip=1 for an npm tarball, whose members live under package/.
 extract_archive() {
   local archive="$1" version="$2" install_root="$3" strip="${4:-0}"
-  local tmp_install="${install_root}/.install-${version}.$$"
+  local tmp_install
+  tmp_install="$(install_scratch_path "$install_root" "$version")"
 
   mkdir -p "$install_root"
   rm -rf "$tmp_install"
@@ -826,18 +857,20 @@ finish_install() {
   [ "$source_kind" = 'npm-registry' ] && strip=1
 
   local tmp_install install_dir="${INSTALL_ROOT}/${version}"
+  # Registered for the exit trap before it exists and until the mv below, so an
+  # interrupt (Ctrl-C during the up-to-an-hour lock wait, a SIGTERM) or any
+  # failure on the way removes it instead of leaving `.install-<version>.<pid>`.
+  INSTALL_SCRATCH="$(install_scratch_path "$INSTALL_ROOT" "$version")"
   tmp_install="$(extract_archive "$archive" "$version" "$INSTALL_ROOT" "$strip")"
   smoke_or_fail "$tmp_install" "$version" 1
 
   # The smoke check ran on the scratch copy, so the lock is held only for the
   # swap itself: no launcher or second installer can move a tree in between
   # the rm and the mv.
-  if ! acquire_version_lock "$INSTALL_ROOT" "$version"; then
-    rm -rf "$tmp_install"
-    exit 1
-  fi
+  acquire_version_lock "$INSTALL_ROOT" "$version" || exit 1
   rm -rf "$install_dir"
   mv "$tmp_install" "$install_dir"
+  INSTALL_SCRATCH=''
   release_version_lock
 
   local old_version=''
@@ -1065,9 +1098,15 @@ do_uninstall() {
 # class of abort in general, even though the specific "unbound variable"
 # crash this script used to hit is what the empty-array guards above
 # actually eliminate.
+#
+# It also removes INSTALL_SCRATCH, the `.install-<version>.<pid>` tree of an
+# install that has not been moved into place yet.
 cleanup_tmp_dir() {
   rc=$?
   rm -rf "$TMP_DIR"
+  if [ -n "${INSTALL_SCRATCH:-}" ]; then
+    rm -rf "$INSTALL_SCRATCH"
+  fi
   exit "$rc"
 }
 
@@ -1118,14 +1157,22 @@ main() {
   done
 
   PLATFORM="$(detect_platform)"
+  validate_install_lock_timeout
   INSTALL_ROOT="${MANGOSTUDIO_INSTALL_DIR:-${HOME}/.mango/dist}"
   BIN_DIR="${MANGOSTUDIO_BIN_DIR:-${HOME}/.local/bin}"
   BIN_LINK="${BIN_DIR}/mangostudio"
   ORIGIN_KIND='installer'
   [ "${MANGOSTUDIO_INSTALL_ORIGIN:-}" = 'upgrade' ] && ORIGIN_KIND='upgrade'
 
+  INSTALL_SCRATCH=''
   TMP_DIR="$(mktemp -d)"
   trap cleanup_tmp_dir EXIT
+  # Without these, a Ctrl-C that lands while bash forks a child (the lock
+  # wait's `sleep` and `flock` every second) is swallowed: the child shrugs the
+  # signal off before it execs, exits normally, and bash then carries on. A trap
+  # makes the interrupt always end the script, through the EXIT trap above.
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
 
   case "$ACTION" in
     install) do_install ;;
