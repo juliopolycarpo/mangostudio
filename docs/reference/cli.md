@@ -109,8 +109,10 @@ The unit runs `serve` through whichever program survives an upgrade:
   pnpm's shim in the pnpm home (POSIX), Scoop's `current` directory. npm and bun
   put no version in the resolved executable's path, so it is used as is. Never
   the npm wrapper, which is a `.js` file. A unit written by an earlier release
-  with a versioned path is moved onto the launcher by `mangostudio restart` and
-  by an upgrade's restart, keeping its environment and arguments.
+  with a versioned path is moved onto the launcher by `mangostudio restart`, by
+  an upgrade's restart and by the machine page's restart, keeping its
+  environment and arguments. If the move fails the unit is restarted as it was
+  and a warning names `mangostudio service install` as the repair.
 - **Source checkout** — the workspace entry through Bun, with the directory
   `install` was run from as the unit's working directory.
 - **Installer layout with no launcher yet** — this version's own directory. The
