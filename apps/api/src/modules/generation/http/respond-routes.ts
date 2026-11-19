@@ -4,6 +4,7 @@ import type { Elysia } from 'elysia';
 
 import { getDb } from '../../../db/database';
 import { apiErrorStatus } from '../../../lib/api-error-status';
+import { generationDeadlineResponse } from '../../../lib/generation-deadline-response';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { ChatAttachmentNotFoundError } from '../../attachments/infrastructure/attachment-repository';
 import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
@@ -124,6 +125,8 @@ export const respondRoutes = (app: Elysia) =>
           }
           // A client that hung up is not a server fault worth logging.
           if (!request.signal.aborted) console.error('[respond] Error:', err);
+          const timedOut = generationDeadlineResponse(err);
+          if (timedOut) return timedOut;
           return apiErrorStatus(500, {
             error: 'Text generation failed. Please try again.',
             code: ERROR_CODES.PROVIDER_ERROR,
