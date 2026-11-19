@@ -5,6 +5,7 @@ import {
   type RuntimeMutationResult,
   type RuntimeMutationSnapshot,
   SNAPSHOT_CHUNK_MAX_BYTES,
+  SNAPSHOT_HARD_MAX_BYTES,
 } from '@mangostudio/shared/runtime-contract';
 
 import { getDb } from '../../db/database';
@@ -282,7 +283,13 @@ async function storeStagedBefore(
   try {
     const runtime = await getRuntimeClient(context.userId, context.environmentId);
     const { blobKey } = await storeCheckpointBlobStream(
-      pullStagedChunks(runtime, stagedId, snapshot.sizeBytes),
+      pullStagedChunks(
+        runtime,
+        stagedId,
+        snapshot.sizeBytes,
+        // The runtime clamps what it stages to the hard maximum, whatever was configured.
+        Math.min(getConfig().checkpoints.maxFileBytes, SNAPSHOT_HARD_MAX_BYTES)
+      ),
       hash
     );
     return {
@@ -312,21 +319,59 @@ async function storeStagedBefore(
   }
 }
 
-/** Reads a staged capture as consecutive bounded slices, until its end. */
-async function* pullStagedChunks(
-  runtime: Awaited<ReturnType<typeof getRuntimeClient>>,
+/** The one runtime method a staged pull uses. */
+export interface StagedChunkSource {
+  readonly snapshot: {
+    readonly readChunk: (params: {
+      stagedId: string;
+      offset: number;
+      length: number;
+    }) => Promise<{ contentBase64: string }>;
+  };
+}
+
+/**
+ * Reads a staged capture as consecutive bounded slices, until its end.
+ *
+ * The runtime is trusted to stage what it reports, not to stay inside the
+ * bounds: the pull ends at `min(sizeBytes, maxBytes)` whatever the runtime
+ * keeps returning, asks for no more than is left of that, and refuses a chunk
+ * longer than it asked for, so a faulty or hostile peer cannot make the hub
+ * write more than the checkpoint limit to disk. A chunk that comes back empty
+ * before the reported size is reached is a truncated capture and an error,
+ * where treating it as the end would only surface later as a hash mismatch.
+ *
+ * // Usage: storeCheckpointBlobStream(pullStagedChunks(runtime, stagedId, sizeBytes, limit), hash)
+ */
+export async function* pullStagedChunks(
+  runtime: StagedChunkSource,
   stagedId: string,
-  sizeBytes: number | undefined
+  sizeBytes: number | undefined,
+  maxBytes: number
 ): AsyncGenerator<Uint8Array> {
+  if (sizeBytes !== undefined && sizeBytes > maxBytes) {
+    throw new Error(
+      `staged capture ${stagedId} reports ${sizeBytes} bytes, past the ${maxBytes}-byte checkpoint limit`
+    );
+  }
+  const total = sizeBytes ?? maxBytes;
   let offset = 0;
-  while (sizeBytes === undefined || offset < sizeBytes) {
-    const { contentBase64 } = await runtime.snapshot.readChunk({
-      stagedId,
-      offset,
-      length: SNAPSHOT_CHUNK_MAX_BYTES,
-    });
+  while (offset < total) {
+    const length = Math.min(SNAPSHOT_CHUNK_MAX_BYTES, total - offset);
+    const { contentBase64 } = await runtime.snapshot.readChunk({ stagedId, offset, length });
     const chunk = Buffer.from(contentBase64, 'base64');
-    if (chunk.byteLength === 0) return;
+    if (chunk.byteLength > length) {
+      throw new Error(
+        `staged capture ${stagedId} returned ${chunk.byteLength} bytes at offset ${offset}, ` +
+          `but ${length} were requested`
+      );
+    }
+    if (chunk.byteLength === 0) {
+      if (sizeBytes === undefined) return;
+      throw new Error(
+        `staged capture ${stagedId} ended at offset ${offset}, before its reported ${sizeBytes} bytes`
+      );
+    }
     yield chunk;
     offset += chunk.byteLength;
   }
