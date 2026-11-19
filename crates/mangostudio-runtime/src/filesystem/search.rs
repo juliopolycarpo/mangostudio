@@ -16,11 +16,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use cap_fs_ext::DirExt as _;
-
 use super::capability::{
-    BoundDir, bind_opened_directory, open_directory_if_present, open_existing_file,
-    verify_opened_file,
+    BoundDir, CheckedChild, is_outside_policy_error, open_checked_child, open_directory_if_present,
+    open_existing_file, verify_opened_file,
 };
 use super::grep_prefilter::LinePrefilter;
 use super::io::{check_cancel, io_error, path_error, read};
@@ -1057,16 +1055,38 @@ fn walk_opened_capability(
 ) -> Result<(), RemoteError> {
     // Resolved once: every entry's policy check needs the absolute spelling.
     let root_absolute = absolute(root_path)?;
-    let mut directories = vec![(root, PathBuf::new())];
-    while let Some((directory, relative_directory)) = directories.pop() {
-        check_cancel(cancel)?;
-        let requested_directory = root_absolute.join(&relative_directory);
-        // The directory was bound and checked when it was opened, so its
-        // non-symlink children are authorized from that one check instead of
-        // by resolving every entry's path again.
-        let plain_children = policy.plain_children_of(&requested_directory, directory.final_path());
-        let control = match directory.with_dir(|handle| {
-            let entries = handle.entries().map_err(io_error)?;
+    // The root is re-opened from the filesystem root, as `with_dir` always does,
+    // and cloned out so the walk can keep it and open its children below it.
+    let root_handle = match root.with_dir(|handle| handle.try_clone().map_err(io_error)) {
+        Ok(handle) => handle,
+        Err(error) if is_anchor_reopen_error(&error) => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    // Depth-first, one frame per directory on the path to the one being listed.
+    // A frame keeps its handle and the names of its subdirectories still to
+    // visit, not handles to them: a directory with thousands of subdirectories
+    // would otherwise hold thousands of descriptors, and every descriptor past
+    // the table's current size grows it, which stalls on a process with several
+    // threads. Subdirectories are visited last to first, so the order matches a
+    // stack that pushes each one as it is listed.
+    let mut frames: Vec<WalkFrame> = Vec::new();
+    let mut entering = Some(CheckedChild {
+        dir: root_handle,
+        final_path: root.final_path().to_path_buf(),
+    });
+    let mut entering_relative = PathBuf::new();
+    loop {
+        if let Some(directory) = entering.take() {
+            check_cancel(cancel)?;
+            let relative_directory = std::mem::take(&mut entering_relative);
+            let requested_directory = root_absolute.join(&relative_directory);
+            // The directory was checked when it was opened, so its non-symlink
+            // children are authorized from that one check instead of by
+            // resolving every entry's path again.
+            let plain_children =
+                policy.plain_children_of(&requested_directory, &directory.final_path);
+            let mut subdirectories = Vec::new();
+            let entries = directory.dir.entries().map_err(io_error)?;
             for entry in entries {
                 check_cancel(cancel)?;
                 let entry = entry.map_err(io_error)?;
@@ -1088,7 +1108,7 @@ fn walk_opened_capability(
                 // file can disclose a name that already sits inside an allowed
                 // directory, nothing more: contents are read through a handle
                 // checked by `verify_opened_file`, and descent goes through
-                // `open_dir_nofollow` plus `bind_opened_directory`.
+                // `open_checked_child`, which opens without following a symlink.
                 let allowed = if cfg!(unix) && (is_directory || file_type.is_file()) {
                     plain_children.allows(&name)
                 } else {
@@ -1104,25 +1124,46 @@ fn walk_opened_capability(
                     })?,
                     WalkControl::Stop
                 ) {
-                    return Ok(WalkControl::Stop);
+                    return Ok(());
                 }
                 if is_directory && allowed {
-                    let child = handle.open_dir_nofollow(&name).map_err(io_error)?;
-                    let child = bind_opened_directory(policy, &absolute, child)?;
-                    directories.push((child, relative));
+                    subdirectories.push(name);
                 }
             }
-            Ok(WalkControl::Continue)
-        }) {
-            Ok(control) => control,
-            Err(error) if is_anchor_reopen_error(&error) => continue,
+            frames.push(WalkFrame {
+                dir: directory.dir,
+                relative: relative_directory,
+                subdirectories,
+            });
+        }
+        let Some(frame) = frames.last_mut() else {
+            return Ok(());
+        };
+        let Some(name) = frame.subdirectories.pop() else {
+            frames.pop();
+            continue;
+        };
+        let relative = frame.relative.join(&name);
+        // A child that vanished or turned into a symlink since its parent was
+        // listed is skipped. So is one that resolves outside the policy: the
+        // frame's handle follows its directory when it is renamed, so that is a
+        // parent moved out of the policy mid-walk, and its subtree is simply no
+        // longer inside the search. Any other failure ends the request.
+        entering = match open_checked_child(policy, &root_path.join(&relative), &frame.dir, &name) {
+            Ok(child) => child,
+            Err(error) if is_outside_policy_error(&error) => None,
             Err(error) => return Err(error),
         };
-        if matches!(control, WalkControl::Stop) {
-            return Ok(());
-        }
+        entering_relative = relative;
     }
-    Ok(())
+}
+
+/// A directory the capability walk has listed and is still descending into.
+struct WalkFrame {
+    dir: cap_std::fs::Dir,
+    relative: PathBuf,
+    /// Names of the subdirectories not yet visited, the next one last.
+    subdirectories: Vec<std::ffi::OsString>,
 }
 
 fn is_anchor_reopen_error(error: &RemoteError) -> bool {
@@ -1803,6 +1844,308 @@ mod tests {
             root.display()
         );
         assert_eq!(result["filesScanned"], 2);
+    }
+
+    /// Every path a walk reports below `root`, in the order it reports them.
+    fn walked_paths(root: &Path, policy: &CompiledPolicy) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        walk(root, false, policy, None, &token(), |entry| {
+            paths.push(entry.relative.to_path_buf());
+            Ok(WalkControl::Continue)
+        })
+        .unwrap();
+        paths
+    }
+
+    #[test]
+    fn capability_walk_reports_entries_in_the_ambient_walks_order() {
+        let root = scratch_dir("filesystem-search-walk-order");
+        for directory in ["a/x", "a/y", "b/z/deep", "c", "d/e"] {
+            fs::create_dir_all(root.join(directory)).unwrap();
+        }
+        for file in [
+            "a/x/1.txt",
+            "a/y/2.txt",
+            "b/z/deep/3.txt",
+            "b/4.txt",
+            "d/e/5.txt",
+        ] {
+            fs::write(root.join(file), "x").unwrap();
+        }
+        let ambient = walked_paths(&root, &PathPolicy::default().compile().unwrap());
+        let restricted = walked_paths(
+            &root,
+            &PathPolicy {
+                allowed_roots: vec![root.to_path_buf()],
+                ..PathPolicy::default()
+            }
+            .compile()
+            .unwrap(),
+        );
+
+        assert_eq!(ambient.len(), 14, "expected every entry of the fixture");
+        assert_eq!(
+            restricted, ambient,
+            "expected the capability walk to visit entries in the ambient walk's order"
+        );
+    }
+
+    /// The descriptors this process holds on a directory at or below `root`,
+    /// read from `/proc`. Counting only this test's own scratch tree keeps the
+    /// measurement independent of descriptors that tests running on other
+    /// threads open and close; a count of every descriptor would flake under
+    /// `cargo test`, which runs them in one process.
+    #[cfg(target_os = "linux")]
+    fn descriptors_held_below(root: &Path) -> usize {
+        fs::read_dir("/proc/self/fd")
+            .unwrap()
+            .filter_map(|descriptor| fs::read_link(descriptor.ok()?.path()).ok())
+            .filter(|target| target.starts_with(root))
+            .count()
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn capability_walk_holds_descriptors_for_the_current_path_not_for_every_sibling() {
+        const SIBLINGS: usize = 300;
+        let scratch = scratch_dir("filesystem-search-walk-descriptors");
+        // `/proc` reports resolved paths, so compare against the resolved root.
+        let root = fs::canonicalize(&scratch).unwrap();
+        for index in 0..SIBLINGS {
+            let directory = root.join(format!("dir-{index}"));
+            fs::create_dir(&directory).unwrap();
+            fs::write(directory.join("file.txt"), "x").unwrap();
+        }
+        let policy = PathPolicy {
+            allowed_roots: vec![root.clone()],
+            ..PathPolicy::default()
+        }
+        .compile()
+        .unwrap();
+        assert_eq!(
+            descriptors_held_below(&root),
+            0,
+            "expected no descriptor on the fixture before the walk starts"
+        );
+        let mut most_held = 0;
+        let mut files = 0;
+
+        walk(&root, false, &policy, None, &token(), |entry| {
+            if !entry.is_directory {
+                files += 1;
+                most_held = most_held.max(descriptors_held_below(&root));
+            }
+            Ok(WalkControl::Continue)
+        })
+        .unwrap();
+
+        assert_eq!(files, SIBLINGS, "expected one file in each directory");
+        assert!(
+            (1..8).contains(&most_held),
+            "expected a walk over {SIBLINGS} sibling directories to hold the root and the current directory, a handful of descriptors | most held below {} during the walk: {most_held}",
+            root.display()
+        );
+    }
+
+    /// Swaps the directory `victim` for a symlink to `outside` the moment the
+    /// walk reports `victim` itself. The walk enters a directory only after it
+    /// listed its parent in full, so the swap always lands between listing and
+    /// descent.
+    #[cfg(unix)]
+    struct SwapListedDirectory {
+        victim: PathBuf,
+        /// `victim` as the walk reports it, relative to the search root.
+        victim_relative: PathBuf,
+        parked: PathBuf,
+        outside: PathBuf,
+        done: std::cell::Cell<bool>,
+    }
+
+    #[cfg(unix)]
+    impl SwapListedDirectory {
+        fn swap_when_reported(&self, reported: &Path) {
+            if reported != self.victim_relative || self.done.replace(true) {
+                return;
+            }
+            fs::rename(&self.victim, &self.parked).unwrap();
+            std::os::unix::fs::symlink(&self.outside, &self.victim).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restricted_walk_never_enters_a_subdirectory_swapped_for_a_symlink_after_it_was_listed() {
+        let sandbox = scratch_dir("filesystem-search-listed-swap");
+        let root = sandbox.join("root");
+        let outside = sandbox.join("outside");
+        fs::create_dir_all(root.join("victim")).unwrap();
+        fs::create_dir_all(root.join("bystander")).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(root.join("victim/inside.txt"), "inside").unwrap();
+        fs::write(root.join("bystander/kept.txt"), "kept").unwrap();
+        fs::write(outside.join("secret.txt"), "leaked").unwrap();
+        let swap = SwapListedDirectory {
+            victim: root.join("victim"),
+            victim_relative: PathBuf::from("victim"),
+            parked: sandbox.join("parked"),
+            outside,
+            done: std::cell::Cell::new(false),
+        };
+        let policy = PathPolicy {
+            allowed_roots: vec![root.clone()],
+            containment_root: Some(root.clone()),
+            ..PathPolicy::default()
+        }
+        .compile()
+        .unwrap();
+        let mut seen = Vec::new();
+
+        walk(&root, false, &policy, None, &token(), |entry| {
+            seen.push(entry.relative.to_path_buf());
+            swap.swap_when_reported(entry.relative);
+            Ok(WalkControl::Continue)
+        })
+        .unwrap();
+
+        assert!(
+            swap.done.get(),
+            "expected the walk to report `victim` and trigger the swap | seen: {seen:?}"
+        );
+        // `victim` was reported as a directory, so the walk tried to enter it
+        // and `open_checked_child` had to refuse the symlink in its place. An
+        // entry below it, from the symlink target or the parked directory,
+        // means the walk entered one of them.
+        let below_victim: Vec<_> = seen
+            .iter()
+            .filter(|path| path.starts_with("victim") && path.as_path() != Path::new("victim"))
+            .collect();
+        assert!(
+            below_victim.is_empty(),
+            "expected the walk to skip the symlink that replaced `victim` and list nothing below it | entries below victim: {below_victim:?}"
+        );
+        assert!(
+            seen.contains(&Path::new("bystander").join("kept.txt")),
+            "expected the unrelated sibling to still be walked | seen: {seen:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restricted_walk_skips_the_subtree_of_a_directory_renamed_out_of_the_policy_mid_walk() {
+        let sandbox = scratch_dir("filesystem-search-parent-moved");
+        let root = sandbox.join("root");
+        let relocated = sandbox.join("relocated");
+        fs::create_dir_all(root.join("parent/child")).unwrap();
+        fs::create_dir_all(root.join("bystander")).unwrap();
+        fs::write(root.join("parent/child/deep.txt"), "moved").unwrap();
+        fs::write(root.join("bystander/kept.txt"), "kept").unwrap();
+        let policy = PathPolicy {
+            allowed_roots: vec![root.clone()],
+            containment_root: Some(root.clone()),
+            ..PathPolicy::default()
+        }
+        .compile()
+        .unwrap();
+        let moved_when = Path::new("parent").join("child");
+        let mut moved = false;
+        let mut seen = Vec::new();
+
+        let outcome = walk(&root, false, &policy, None, &token(), |entry| {
+            seen.push(entry.relative.to_path_buf());
+            // `parent/child` is reported while the walk holds `parent`'s handle
+            // and still has to descend into `child` through it. Renaming
+            // `parent` now leaves that handle outside the policy.
+            if entry.relative == moved_when && !moved {
+                fs::rename(root.join("parent"), &relocated).unwrap();
+                moved = true;
+            }
+            Ok(WalkControl::Continue)
+        });
+
+        assert!(
+            outcome.is_ok(),
+            "expected the walk to finish and skip the moved subtree | received: {:?}",
+            outcome.err().map(|error| error.message)
+        );
+        assert!(
+            moved,
+            "expected the walk to report `parent/child` and trigger the rename | seen: {seen:?}"
+        );
+        assert!(
+            !seen.contains(&moved_when.join("deep.txt")),
+            "expected nothing below the renamed `parent` to be listed | seen: {seen:?}"
+        );
+        assert!(
+            seen.contains(&Path::new("bystander").join("kept.txt")),
+            "expected the unrelated sibling to still be walked | seen: {seen:?}"
+        );
+    }
+
+    /// Runs `mklink /J`, the junction a restricted walk must not follow out.
+    #[cfg(windows)]
+    fn create_junction(link: &Path, target: &Path) {
+        let output = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "expected `mklink /J` to create {} | stderr: {}",
+            link.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn restricted_glob_and_grep_never_follow_a_junction_out_of_the_root() {
+        let sandbox = scratch_dir("filesystem-search-junction-escape");
+        let root = sandbox.join("root");
+        let outside = sandbox.join("outside");
+        fs::create_dir_all(root.join("inside")).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(root.join("inside").join("kept.txt"), "needle kept\n").unwrap();
+        fs::write(outside.join("secret.txt"), "needle leaked\n").unwrap();
+        create_junction(&root.join("linked-dir"), &outside);
+        let policy = PathPolicy {
+            allowed_roots: vec![root.clone()],
+            containment_root: Some(root.clone()),
+            ..PathPolicy::default()
+        };
+
+        let mut params = glob_params(&root, "**/*.txt");
+        params.path_policy = policy.clone();
+        let globbed = glob(params, &token()).unwrap();
+        let found: Vec<String> = globbed["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|path| path.as_str().unwrap().replace('\\', "/"))
+            .collect();
+        assert_eq!(
+            found,
+            ["inside/kept.txt"],
+            "expected only entries that resolve inside {} | a `linked-dir/secret.txt` entry means the junction was followed",
+            root.display()
+        );
+
+        let mut params = grep_params(&root, "needle");
+        params.path_policy = policy;
+        let grepped = grep(params, &token()).unwrap();
+        let files: Vec<String> = grepped["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|hit| hit["file"].as_str().unwrap().replace('\\', "/"))
+            .collect();
+        assert_eq!(
+            files,
+            ["inside/kept.txt"],
+            "expected hits only from files that resolve inside {} | a `leaked` hit means the junction was followed",
+            root.display()
+        );
     }
 
     #[test]
