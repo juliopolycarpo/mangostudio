@@ -694,8 +694,9 @@ and that is its own outcome rather than a rejection or a rethrown error:
 
 - The part is corrected in place to `status: 'delivery-unknown'` (no `reasonCode`), the live stream
   sends the same `external_steer` chunk with that status, and the route answers `200` with
-  `{ accepted: false, deliveryUnknown: true }` (`ExternalSteerResponseSchema`). The runtime contract
-  is untouched: the runtime never says "unknown", so `ExternalAgentSteerResultSchema` and the
+  `{ accepted: false, deliveryUnknown: true }`. The 200 declares `ExternalSteerSuccessResponseSchema`
+  (accepted or delivery-unknown) and the 409 declares `ExternalSteerRejectedResultSchema`, so Eden's
+  `data` never types as a refusal. The runtime contract is untouched: the runtime never says "unknown", so `ExternalAgentSteerResultSchema` and the
   rejection reasons stay refusals only. Parts stored before the status existed read unchanged.
 - It is not `rejected` because the agent may have taken the steer. A durable rejection cannot later
   be corrected to accepted, and it invites a resend under a fresh id after a reload, which can

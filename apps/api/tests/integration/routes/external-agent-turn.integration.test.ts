@@ -202,6 +202,8 @@ describe('external agent approval route', () => {
       post(`/chats/${chatId}/external-agent/respond`, { requestId: 'req-1', optionId: 'nope' })
     );
     expect(optionResponse.status).toBe(400);
+    // The wire body is the rejection alone, unchanged by the per-status schemas.
+    expect(await optionResponse.json()).toEqual({ status: 'rejected', reason: 'unknown-option' });
     restoreAuth?.();
 
     const unknownRequest = mount(
@@ -211,6 +213,7 @@ describe('external agent approval route', () => {
       post(`/chats/${chatId}/external-agent/respond`, { requestId: 'gone', optionId: 'approve' })
     );
     expect(requestResponse.status).toBe(404);
+    expect(await requestResponse.json()).toEqual({ status: 'rejected', reason: 'not-found' });
   });
 
   it('maps an expired or already-resolved approval to 409', async () => {
