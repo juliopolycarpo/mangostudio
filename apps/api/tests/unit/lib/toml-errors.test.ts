@@ -8,6 +8,7 @@ import {
   parseTomlDocument,
   parseTomlStringSections,
   readTomlDocument,
+  TomlParseError,
 } from '../../../src/lib/toml';
 import { createSubagentAdapter } from '../../../src/modules/library/application/adapters/subagent-frontmatter';
 import { createGeminiSecretService } from '../../../src/services/providers/gemini/secret';
@@ -15,42 +16,19 @@ import { InMemorySecretStore } from '../../support/mocks/mock-secret-store';
 
 const SECRET = 'sk-private-fixture-SECRET';
 const INVALID_DOCUMENT = `secret = ${SECRET}`;
-const FIXED_SHAPE_DIAGNOSTICS = [
-  {
-    label: 'array at EOF',
-    content: 'values = [',
-    message: "TOML Parse error: Unterminated array; expected ']'",
-  },
-  {
-    label: 'inline table at EOF',
-    content: 'value = {',
-    message: "TOML Parse error: Unterminated inline table; expected '}'",
-  },
-  {
-    label: 'array with a trailing private comment',
-    content: `values = [ # ${SECRET}\n`,
-    message: "TOML Parse error: Unterminated array; expected ']'",
-  },
-  {
-    label: 'inline table with a trailing private comment',
-    content: `value = { # ${SECRET}\n`,
-    message: "TOML Parse error: Unterminated inline table; expected '}'",
-  },
-  {
-    label: 'missing value at EOF',
-    content: 'value =',
-    message: "TOML Parse error: Missing value after '='",
-  },
-  {
-    label: 'missing value before a newline',
-    content: `value =\nsecret = "${SECRET}"`,
-    message: "TOML Parse error: Missing value after '='; values must be on the same line",
-  },
-  {
-    label: 'offset without a separator',
-    content: 'when = 1979-05-27T00:32+0100',
-    message: "TOML Parse error: Invalid date-time offset: expected ':' between hours and minutes",
-  },
+/** The only text a TOML failure may expose, whatever Bun's diagnostic says. */
+const FIXED_MESSAGE = 'Invalid TOML document.';
+const MALFORMED_DOCUMENTS = [
+  { label: 'an unquoted value', content: INVALID_DOCUMENT },
+  { label: 'an array at EOF', content: 'values = [' },
+  { label: 'an inline table at EOF', content: 'value = {' },
+  { label: 'an array with a trailing private comment', content: `values = [ # ${SECRET}\n` },
+  { label: 'a missing value at EOF', content: 'value =' },
+  { label: 'a missing value before a newline', content: `value =\nsecret = "${SECRET}"` },
+  { label: 'an offset without a separator', content: 'when = 1979-05-27T00:32+0100' },
+  { label: 'an unterminated table header', content: '[auth\nsecret = "s"' },
+  { label: 'an impossible date', content: 'when = 1979-02-30' },
+  { label: 'a duplicate private key', content: `"${SECRET}" = 1\n"${SECRET}" = 2` },
 ];
 let directory: string;
 let configPath: string;
@@ -78,6 +56,28 @@ function fakeUnexpectedMetadata(): Promise<never> {
   throw new Error('Unexpected metadata access; expected malformed TOML rejection before I/O.');
 }
 
+/** Stand in for Bun.TOML.parse with a parser that throws `thrown`, as a Bun upgrade might reword it.
+ * @example const restore = fakeBunTomlParseThrowing(new SyntaxError('reworded'));
+ */
+function fakeBunTomlParseThrowing(thrown: unknown): () => void {
+  const spy = spyOn(Bun.TOML, 'parse').mockImplementation(() => {
+    throw thrown;
+  });
+  return () => spy.mockRestore();
+}
+
+/** Run `action` and return what it threw, failing when it returns.
+ * @example const error = thrownBy(() => parseTomlDocument('value ='));
+ */
+function thrownBy(action: () => unknown): Error {
+  try {
+    action();
+  } catch (caught) {
+    return caught as Error;
+  }
+  throw new Error('Expected the action to throw a TOML error; received a return value.');
+}
+
 beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), 'mango-toml-errors-'));
   configPath = join(directory, 'config.toml');
@@ -91,79 +91,79 @@ afterEach(() => {
   rmSync(directory, { recursive: true, force: true });
 });
 
-describe('TOML parser diagnostics', () => {
-  it.each([parseTomlDocument, parseTomlStringSections])(
-    'withholds private source values from a direct parser error',
-    (parse) => {
-      let error: Error | undefined;
-      try {
-        parse(INVALID_DOCUMENT);
-      } catch (caught) {
-        error = caught as Error;
+describe('TOML parser errors', () => {
+  it.each(MALFORMED_DOCUMENTS)(
+    'throws one project error with a fixed message for $label',
+    ({ content }) => {
+      for (const parse of [parseTomlDocument, parseTomlStringSections]) {
+        const error = thrownBy(() => parse(content));
+        expect(error).toBeInstanceOf(TomlParseError);
+        expect(error.message).toBe(FIXED_MESSAGE);
+        expect(error.name).toBe('TomlParseError');
+        expect(error.cause).toBeUndefined();
+        expect(error.stack).not.toContain(SECRET);
       }
-      expect(error).toBeInstanceOf(SyntaxError);
-      expect(error?.message).toContain('Strings must be quoted');
-      expect(error?.message).toContain('<source value omitted>');
-      expect(error?.stack).not.toContain(SECRET);
-      expect(error?.cause).toBeUndefined();
     }
   );
 
-  it('keeps structural expected-shape diagnostics intact', () => {
-    expect(() => parseTomlDocument('[auth\nsecret = "s"')).toThrow(
-      "TOML Parse error: Expected ']'"
-    );
-    expect(() => parseTomlDocument('when = 1979-02-30')).toThrow('day is out of range');
+  it.each([
+    ['a quoted source value', `TOML Parse error: Strings must be quoted: "${SECRET}"`],
+    ['an unquoted source value', `TOML Parse error: Expected a value but found ${SECRET}`],
+    ['a reworded allow-listed prefix', `TOML Parse error: Expected ']' but saw ${SECRET}`],
+    ['a punctuation-only quote', "TOML Parse error: Unterminated array; expected ']'"],
+    ['an empty message', ''],
+  ])('does not depend on how Bun words a diagnostic: %s', (_label, bunMessage) => {
+    const restore = fakeBunTomlParseThrowing(new SyntaxError(bunMessage));
+    try {
+      const error = thrownBy(() => parseTomlDocument('anything'));
+      expect(error).toBeInstanceOf(TomlParseError);
+      expect(error.message).toBe(FIXED_MESSAGE);
+      expect(error.cause).toBeUndefined();
+      expect(error.stack).not.toContain(SECRET);
+    } finally {
+      restore();
+    }
   });
 
   it.each([
-    '[auth\nsecret = "s"',
-    '[[auth\nsecret = "s"',
-    'when = 1979-05x27',
-    'when = 1979-05-27T00:32+0100',
-  ])('keeps native structural punctuation in file diagnostics: %s', (content) => {
-    writeFileSync(configPath, content);
-    let nativeMessage = '';
+    ['a RangeError', new RangeError(`out of range ${SECRET}`)],
+    ['a plain Error', new Error(`broken ${SECRET}`)],
+    ['a thrown string', `broken ${SECRET}`],
+    ['undefined', undefined],
+  ])('maps %s from the parser to the same fixed message', (_label, thrown) => {
+    const restore = fakeBunTomlParseThrowing(thrown);
     try {
-      Bun.TOML.parse(content);
-    } catch (error) {
-      nativeMessage = (error as Error).message;
+      const error = thrownBy(() => parseTomlDocument('anything'));
+      expect(error).toBeInstanceOf(TomlParseError);
+      expect(error.message).toBe(FIXED_MESSAGE);
+      expect(error.stack).not.toContain(SECRET);
+    } finally {
+      restore();
     }
-    expect(nativeMessage).toContain('TOML Parse error');
-    expect(() => readTomlDocument(configPath)).toThrow(JSON.stringify(nativeMessage));
   });
 
-  it.each(FIXED_SHAPE_DIAGNOSTICS)(
-    'keeps a direct expected-shape diagnostic for $label',
-    ({ content, message }) => {
-      for (const parse of [parseTomlDocument, parseTomlStringSections]) {
-        expect(() => parse(content)).toThrow(message);
-      }
-    }
-  );
+  it('does not wrap a document the parser accepts', () => {
+    expect(parseTomlDocument('[auth]\nsecret = "s"')).toEqual({ auth: { secret: 's' } });
+  });
 
-  it.each(FIXED_SHAPE_DIAGNOSTICS)(
-    'keeps a file expected-shape diagnostic for $label',
-    ({ content, message }) => {
+  it.each(MALFORMED_DOCUMENTS)(
+    'keeps the file path and the fixed message in a file error for $label',
+    ({ content }) => {
       writeFileSync(configPath, content);
-      let error: Error | undefined;
-      try {
-        readTomlDocument(configPath);
-      } catch (caught) {
-        error = caught as Error;
-      }
-      expect(error).toBeInstanceOf(Error);
-      expect(error?.message).toBe(
-        `Cannot parse TOML file ${JSON.stringify(configPath)}: ${JSON.stringify(message)}`
+      const error = thrownBy(() => readTomlDocument(configPath));
+      expect(error).not.toBeInstanceOf(TomlParseError);
+      expect(error.message).toBe(
+        `Cannot parse TOML file ${JSON.stringify(configPath)}: ${JSON.stringify(FIXED_MESSAGE)}`
       );
-      expect((error?.cause as Error)?.message).toBe(message);
-      expect(error?.stack).not.toContain(SECRET);
+      expect(error.cause).toBeInstanceOf(TomlParseError);
+      expect((error.cause as Error).message).toBe(FIXED_MESSAGE);
+      expect(error.stack).not.toContain(SECRET);
     }
   );
 
-  it.each(FIXED_SHAPE_DIAGNOSTICS)(
-    'keeps a public subagent expected-shape diagnostic for $label',
-    async ({ content, message }) => {
+  it.each(MALFORMED_DOCUMENTS)(
+    'returns the fixed message from a public subagent conversion for $label',
+    async ({ content }) => {
       const adapter = createSubagentAdapter('toml-agent', 'markdown-frontmatter');
       const result = await adapter.adapt({
         content,
@@ -174,9 +174,9 @@ describe('TOML parser diagnostics', () => {
       });
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error('Expected malformed TOML to reject conversion.');
-      expect(result.error.message).toBe(message);
-      expect(result.error.message).not.toContain(SECRET);
+      expect(result.error.message).toBe(FIXED_MESSAGE);
       expect(result.error.code).toBe('invalid-source');
+      expect('content' in result).toBe(false);
     }
   );
 
@@ -188,8 +188,8 @@ describe('TOML parser diagnostics', () => {
     expect(warning).toBeDefined();
     if (!warning) throw new Error('Expected a malformed config warning.');
     expect(warning[0]).toContain(configPath);
-    expect(warning[1]).toBeInstanceOf(SyntaxError);
-    expect(String(warning[1])).toContain('Strings must be quoted');
+    expect(warning[1]).toBeInstanceOf(TomlParseError);
+    expect((warning[1] as Error).message).toBe(FIXED_MESSAGE);
     expect((warning[1] as Error).stack).not.toContain(SECRET);
   });
 
@@ -208,25 +208,8 @@ describe('TOML parser diagnostics', () => {
     expect(warnings).toHaveLength(1);
     const warning = warnings[0];
     expect(warning[0]).toBe('[config] Failed to sync config.toml:');
-    expect(warning[1]).toBeInstanceOf(SyntaxError);
-    expect(String(warning[1])).toContain('Strings must be quoted');
+    expect(warning[1]).toBeInstanceOf(TomlParseError);
+    expect((warning[1] as Error).message).toBe(FIXED_MESSAGE);
     expect((warning[1] as Error).stack).not.toContain(SECRET);
-  });
-
-  it('keeps a subagent conversion error useful without returning its private value', async () => {
-    const adapter = createSubagentAdapter('toml-agent', 'markdown-frontmatter');
-    const result = await adapter.adapt({
-      content: INVALID_DOCUMENT,
-      kind: 'subagent',
-      from: 'toml-agent',
-      to: 'markdown-frontmatter',
-      resourceKey: 'subagent:reviewer',
-    });
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('Expected malformed TOML to reject conversion.');
-    expect(result.error.message).not.toContain(SECRET);
-    expect(result.error.message).toContain('Strings must be quoted');
-    expect(result.error.code).toBe('invalid-source');
-    expect('content' in result).toBe(false);
   });
 });
