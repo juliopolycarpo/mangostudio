@@ -462,6 +462,14 @@ export const EnvironmentConnectionStatusSchema = Type.Object(
      */
     pullingImage: Type.Optional(Type.Boolean()),
     /**
+     * Set while a launched runtime process has not yet said hello. The hub has
+     * started the child and is inside its handshake budget (5s, 30s on
+     * Windows), so `connecting` alone cannot tell a slow cold start from a
+     * wedged child. It names the phase, not a verdict: the attempt ends in
+     * `connected` or `error` as usual.
+     */
+    handshaking: Type.Optional(Type.Boolean()),
+    /**
      * Set while the hub is swapping this runtime's binary over its own
      * connection. A live update ends with a deliberate disconnect, and without
      * this the card would report the handoff as an outage — the one state where

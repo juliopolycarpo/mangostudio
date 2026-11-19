@@ -43,6 +43,7 @@ import {
   type UserFixture,
 } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { waitUntil } from '../../support/wait-until';
 
 class ControlledProvider implements AIProvider {
   readonly providerType = 'openai-compatible' as const;
@@ -97,13 +98,13 @@ function request(path: string, body?: unknown) {
       : undefined
   );
 }
-async function waitFor(check: () => Promise<boolean> | boolean) {
-  // Await observable work, never timing-based assertions or retries of production work.
-  for (let i = 0; i < 200; i++) {
-    if (await check()) return;
-    await Bun.sleep(5);
-  }
-  throw new Error('expected condition did not become true');
+/**
+ * Awaits observable work, never timing-based assertions or retries of production work.
+ * The deadline is wall-clock and generous (see `waitUntil`): a poll count shrank the
+ * budget to about a second, which a loaded host spent before the first route read returned.
+ */
+function waitFor(check: () => Promise<boolean> | boolean) {
+  return waitUntil(check, 'the awaited product-operation state to be observed');
 }
 async function receipt(id: string) {
   return (await app.handle(request(`/operations/${id}`))).json() as Promise<OperationReceipt>;
@@ -147,41 +148,52 @@ afterEach(async () => {
   invalidateProviderRoutingCache(user.id);
 });
 
-describe('durable authorized product operations over real routes/storage', () => {
-  it('recovers the same durable receipt after an actual process restart', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'product-operation-'));
-    const worker = fileURLToPath(
-      new URL('../../support/fixtures/product-operation-worker.ts', import.meta.url)
-    );
-    const database = join(directory, 'db.sqlite');
-    async function runWorker(mode: 'reserve' | 'recover'): Promise<string> {
-      const child = Bun.spawn([process.execPath, worker, database, mode], {
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      const [exitCode, stdout, stderr] = await Promise.all([
-        child.exited,
-        new Response(child.stdout).text(),
-        new Response(child.stderr).text(),
-      ]);
-      expect(
-        exitCode,
-        `receipt ${mode} worker exited with ${exitCode} | stderr: ${stderr.trim()}`
-      ).toBe(0);
-      return stdout;
-    }
+/**
+ * The restart test starts two cold `bun` processes that each load the module
+ * graph; a loaded host spends more than the lane's 15 s on them. The bound is
+ * there for a hung worker, not for speed.
+ */
+const RESTART_WORKERS_TIMEOUT_MS = 60_000;
 
-    try {
-      await runWorker('reserve');
-      const result = await runWorker('recover');
-      expect(JSON.parse(result)).toMatchObject({
-        receipt: { operationId: 'durable', state: 'unresolved' },
-        claimed: false,
-      });
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
+describe('durable authorized product operations over real routes/storage', () => {
+  it(
+    'recovers the same durable receipt after an actual process restart',
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'product-operation-'));
+      const worker = fileURLToPath(
+        new URL('../../support/fixtures/product-operation-worker.ts', import.meta.url)
+      );
+      const database = join(directory, 'db.sqlite');
+      async function runWorker(mode: 'reserve' | 'recover'): Promise<string> {
+        const child = Bun.spawn([process.execPath, worker, database, mode], {
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
+        const [exitCode, stdout, stderr] = await Promise.all([
+          child.exited,
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+        ]);
+        expect(
+          exitCode,
+          `receipt ${mode} worker exited with ${exitCode} | stderr: ${stderr.trim()}`
+        ).toBe(0);
+        return stdout;
+      }
+
+      try {
+        await runWorker('reserve');
+        const result = await runWorker('recover');
+        expect(JSON.parse(result)).toMatchObject({
+          receipt: { operationId: 'durable', state: 'unresolved' },
+          claimed: false,
+        });
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+    RESTART_WORKERS_TIMEOUT_MS
+  );
   it('atomically creates one chat for concurrent equal keys, and replays a lost response', async () => {
     const responses = await Promise.all(
       Array.from({ length: 8 }, () =>

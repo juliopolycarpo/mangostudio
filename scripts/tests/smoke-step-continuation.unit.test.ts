@@ -22,6 +22,20 @@ import {
   smokeStepRuns,
 } from './support/smoke-workflows';
 
+/**
+ * What a stuck fake costs before the run gives up on it.
+ *
+ * Every fake answers at once and the polling loops advance by iteration, so a
+ * step that outlives this is hung. Cold `bun` and `bash` starts are the cost
+ * of a step, and a host running other builds multiplies them by an order of
+ * magnitude (a full workflow took 10 s under a 13x CPU oversubscription, and
+ * the lane's 15 s test timeout and the old 10 s step timeout both fired). The
+ * bounds assert liveness, not speed, so they stay far above any loaded run.
+ */
+const STEP_HANG_BOUND_MS = 60_000;
+/** A workflow run is a dozen or so steps in sequence, each under the bound above. */
+const WORKFLOW_RUN_TIMEOUT_MS = 120_000;
+
 const scratchRoots: string[] = [];
 afterEach(() => {
   for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -142,18 +156,17 @@ async function runWorkflowSteps(
       },
       stdout: 'pipe',
       stderr: 'pipe',
-      timeout: 10_000,
+      timeout: STEP_HANG_BOUND_MS,
     });
     const [stdout, stderr, code] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
       child.exited,
     ]);
-    // The 10 s spawn timeout only bounds a hang: every fake answers at once and
-    // the polling loops advance by iteration, so a kill means a step is stuck.
+    // The spawn timeout only bounds a hang: a kill means a step is stuck.
     expect(
       code,
-      `step "${step.name}": expected exit code 0, 1 or 9 within 10000ms | received: code ${code}, signal ${child.signalCode ?? 'none'}\n${stdout}${stderr}`
+      `step "${step.name}": expected exit code 0, 1 or 9 within ${STEP_HANG_BOUND_MS}ms | received: code ${code}, signal ${child.signalCode ?? 'none'}\n${stdout}${stderr}`
     ).toBeOneOf([0, 1, 9]);
     outcomes.push({ name: step.name ?? '', code });
   }
@@ -165,143 +178,167 @@ async function runWorkflowSteps(
 }
 
 describe.skipIf(process.platform === 'win32')('folded smoke command continuation', () => {
-  test('both Docker assertions report an occupied port before starting an image container', async () => {
-    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
-    const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
-    if (!matrix)
-      throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
-    const { outcomes, events, containers } = await runWorkflowSteps(job, matrix, 'ports');
-    const dockerAssertions = outcomes.filter(({ name }) => name.includes('Docker smoke test'));
-    expect(dockerAssertions.map(({ code }) => code)).toEqual([1, 1]);
-    expect(
-      events.filter(
-        ({ command, args }) => command === 'docker' && args[0] === 'run' && args.includes('-p')
-      )
-    ).toEqual([]);
-    expect(
-      events.filter(
-        ({ command, args, platform, skipBuild }) =>
-          command === 'bun' &&
-          args.includes('.mango/smoke/test-build.mjs') &&
-          platform === matrix.musl_platform &&
-          skipBuild === '1'
-      )
-    ).toHaveLength(1);
-    expect(containers).toEqual([]);
-  });
+  test(
+    'both Docker assertions report an occupied port before starting an image container',
+    async () => {
+      const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+      const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
+      if (!matrix)
+        throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
+      const { outcomes, events, containers } = await runWorkflowSteps(job, matrix, 'ports');
+      const dockerAssertions = outcomes.filter(({ name }) => name.includes('Docker smoke test'));
+      expect(dockerAssertions.map(({ code }) => code)).toEqual([1, 1]);
+      expect(
+        events.filter(
+          ({ command, args }) => command === 'docker' && args[0] === 'run' && args.includes('-p')
+        )
+      ).toEqual([]);
+      expect(
+        events.filter(
+          ({ command, args, platform, skipBuild }) =>
+            command === 'bun' &&
+            args.includes('.mango/smoke/test-build.mjs') &&
+            platform === matrix.musl_platform &&
+            skipBuild === '1'
+        )
+      ).toHaveLength(1);
+      expect(containers).toEqual([]);
+    },
+    WORKFLOW_RUN_TIMEOUT_MS
+  );
 
-  test('a container left up by a killed image step is removed before the port precheck', async () => {
-    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
-    const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
-    if (!matrix)
-      throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
-    // A step killed at its deadline never runs its EXIT trap, so the next
-    // image step meets the same-named container still publishing 13002.
-    const { outcomes, containers } = await runWorkflowSteps(job, matrix, 'none', false, [
-      'mangostudio-smoke-linux-amd64-13002',
-    ]);
-    const received = outcomes
-      .filter(({ name }) => name.includes('Docker smoke test'))
-      .map(({ name, code }) => `${name}=${code}`)
-      .join(', ');
-    const expected = 'Run Bookworm Docker smoke test=0, Run Alpine Docker smoke test=0';
-    if (received !== expected || containers.length) {
-      throw new Error(
-        `expected the leftover container removed and both images tested (${expected}; containers []) | received: ${received}; containers [${containers.join(', ')}]`
-      );
-    }
-  }, 15_000);
+  test(
+    'a container left up by a killed image step is removed before the port precheck',
+    async () => {
+      const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+      const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
+      if (!matrix)
+        throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
+      // A step killed at its deadline never runs its EXIT trap, so the next
+      // image step meets the same-named container still publishing 13002.
+      const { outcomes, containers } = await runWorkflowSteps(job, matrix, 'none', false, [
+        'mangostudio-smoke-linux-amd64-13002',
+      ]);
+      const received = outcomes
+        .filter(({ name }) => name.includes('Docker smoke test'))
+        .map(({ name, code }) => `${name}=${code}`)
+        .join(', ');
+      const expected = 'Run Bookworm Docker smoke test=0, Run Alpine Docker smoke test=0';
+      if (received !== expected || containers.length) {
+        throw new Error(
+          `expected the leftover container removed and both images tested (${expected}; containers []) | received: ${received}; containers [${containers.join(', ')}]`
+        );
+      }
+    },
+    WORKFLOW_RUN_TIMEOUT_MS
+  );
 
-  test('a port docker-proxy releases a moment late does not fail the image assertion', async () => {
-    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
-    const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
-    if (!matrix)
-      throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
-    const { outcomes } = await runWorkflowSteps(job, matrix, 'slow-port');
-    const received = outcomes
-      .filter(({ name }) => name.includes('Docker smoke test'))
-      .map(({ name, code }) => `${name}=${code}`)
-      .join(', ');
-    const expected = 'Run Bookworm Docker smoke test=0, Run Alpine Docker smoke test=0';
-    if (received !== expected) {
-      throw new Error(
-        `expected the precheck to wait out a port released on its third probe (${expected}) | received: ${received}`
-      );
-    }
-  }, 15_000);
+  test(
+    'a port docker-proxy releases a moment late does not fail the image assertion',
+    async () => {
+      const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+      const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
+      if (!matrix)
+        throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
+      const { outcomes } = await runWorkflowSteps(job, matrix, 'slow-port');
+      const received = outcomes
+        .filter(({ name }) => name.includes('Docker smoke test'))
+        .map(({ name, code }) => `${name}=${code}`)
+        .join(', ');
+      const expected = 'Run Bookworm Docker smoke test=0, Run Alpine Docker smoke test=0';
+      if (received !== expected) {
+        throw new Error(
+          `expected the precheck to wait out a port released on its third probe (${expected}) | received: ${received}`
+        );
+      }
+    },
+    WORKFLOW_RUN_TIMEOUT_MS
+  );
 
-  test('an image whose PID 1 is not tini fails the Docker smoke before the stop check', async () => {
-    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
-    const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
-    if (!matrix)
-      throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
-    const { outcomes, events, containers } = await runWorkflowSteps(job, matrix, 'no-init');
-    const received = outcomes
-      .filter(({ name }) => name.includes('Docker smoke test'))
-      .map(({ name, code }) => `${name}=${code}`)
-      .join(', ');
-    const expected = 'Run Bookworm Docker smoke test=1, Run Alpine Docker smoke test=1';
-    if (received !== expected) {
-      throw new Error(
-        `expected an image with PID 1 "mangostudio" to fail both image smokes (${expected}) | received: ${received}`
-      );
-    }
-    expect(
-      events.filter(({ command, args }) => command === 'docker' && args[0] === 'stop'),
-      'a failed PID 1 check must stop before the SIGTERM check'
-    ).toEqual([]);
-    expect(containers).toEqual([]);
-  });
+  test(
+    'an image whose PID 1 is not tini fails the Docker smoke before the stop check',
+    async () => {
+      const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+      const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
+      if (!matrix)
+        throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
+      const { outcomes, events, containers } = await runWorkflowSteps(job, matrix, 'no-init');
+      const received = outcomes
+        .filter(({ name }) => name.includes('Docker smoke test'))
+        .map(({ name, code }) => `${name}=${code}`)
+        .join(', ');
+      const expected = 'Run Bookworm Docker smoke test=1, Run Alpine Docker smoke test=1';
+      if (received !== expected) {
+        throw new Error(
+          `expected an image with PID 1 "mangostudio" to fail both image smokes (${expected}) | received: ${received}`
+        );
+      }
+      expect(
+        events.filter(({ command, args }) => command === 'docker' && args[0] === 'stop'),
+        'a failed PID 1 check must stop before the SIGTERM check'
+      ).toEqual([]);
+      expect(containers).toEqual([]);
+    },
+    WORKFLOW_RUN_TIMEOUT_MS
+  );
 
-  test('a leaked native hub fails only the native teardown check, not the image assertions', async () => {
-    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
-    const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
-    if (!matrix)
-      throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
-    const { outcomes, events } = await runWorkflowSteps(job, matrix, 'native-port');
-    // The images bind 13002 only, so a listener on 13001 is the native
-    // step's finding alone; repeating it would leave both images untested.
-    const received = outcomes
-      .filter(({ name }) => name.includes('Docker') || name.includes('teardown'))
-      .map(({ name, code }) => `${name}=${code}`)
-      .join(', ');
-    const expected = [
-      'Assert native binary teardown=1',
-      'Run Bookworm Docker smoke test=0',
-      'Assert Bookworm Docker teardown=0',
-      'Run Alpine Docker smoke test=0',
-      'Assert Alpine Docker teardown=0',
-    ].join(', ');
-    if (received !== expected) {
-      throw new Error(
-        `expected a port 13001 listener to fail only the native teardown check (${expected}) | received: ${received}`
-      );
-    }
-    expect(
-      events.filter(
-        ({ command, args }) => command === 'docker' && args[0] === 'run' && args.includes('-p')
-      )
-    ).toHaveLength(2);
-  });
+  test(
+    'a leaked native hub fails only the native teardown check, not the image assertions',
+    async () => {
+      const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+      const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
+      if (!matrix)
+        throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
+      const { outcomes, events } = await runWorkflowSteps(job, matrix, 'native-port');
+      // The images bind 13002 only, so a listener on 13001 is the native
+      // step's finding alone; repeating it would leave both images untested.
+      const received = outcomes
+        .filter(({ name }) => name.includes('Docker') || name.includes('teardown'))
+        .map(({ name, code }) => `${name}=${code}`)
+        .join(', ');
+      const expected = [
+        'Assert native binary teardown=1',
+        'Run Bookworm Docker smoke test=0',
+        'Assert Bookworm Docker teardown=0',
+        'Run Alpine Docker smoke test=0',
+        'Assert Alpine Docker teardown=0',
+      ].join(', ');
+      if (received !== expected) {
+        throw new Error(
+          `expected a port 13001 listener to fail only the native teardown check (${expected}) | received: ${received}`
+        );
+      }
+      expect(
+        events.filter(
+          ({ command, args }) => command === 'docker' && args[0] === 'run' && args.includes('-p')
+        )
+      ).toHaveLength(2);
+    },
+    WORKFLOW_RUN_TIMEOUT_MS
+  );
 
-  test('a broken first container assertion still reports the other three and both leak checks', async () => {
-    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-container.yml')).jobs
-      .container;
-    const { outcomes, events } = await runWorkflowSteps(job, {}, 'container');
-    const assertions = outcomes.filter(({ name }) => name.includes('container transport smoke'));
-    expect(assertions.map(({ code }) => code)).toEqual([9, 0, 0, 0]);
-    expect(outcomes.filter(({ name }) => name.includes('outlived'))).toEqual([
-      { name: 'Assert no docker container outlived the suite', code: 0 },
-      { name: 'Assert no podman container outlived the suite', code: 0 },
-    ]);
-    expect(
-      events.filter(({ command, args }) => command === 'bun' && args[0] === 'test')
-    ).toHaveLength(4);
-    expect(
-      outcomes.some(({ code }) => code !== 0),
-      'later successes retain the first failure'
-    ).toBe(true);
-  }, 15_000);
+  test(
+    'a broken first container assertion still reports the other three and both leak checks',
+    async () => {
+      const job = parseSmokeWorkflow(readText('.github/workflows/smoke-container.yml')).jobs
+        .container;
+      const { outcomes, events } = await runWorkflowSteps(job, {}, 'container');
+      const assertions = outcomes.filter(({ name }) => name.includes('container transport smoke'));
+      expect(assertions.map(({ code }) => code)).toEqual([9, 0, 0, 0]);
+      expect(outcomes.filter(({ name }) => name.includes('outlived'))).toEqual([
+        { name: 'Assert no docker container outlived the suite', code: 0 },
+        { name: 'Assert no podman container outlived the suite', code: 0 },
+      ]);
+      expect(
+        events.filter(({ command, args }) => command === 'bun' && args[0] === 'test')
+      ).toHaveLength(4);
+      expect(
+        outcomes.some(({ code }) => code !== 0),
+        'later successes retain the first failure'
+      ).toBe(true);
+    },
+    WORKFLOW_RUN_TIMEOUT_MS
+  );
 
   test.each(['linux-x64', 'linux-arm64'])(
     'a broken %s binary assertion still reports both images and removes their containers',
@@ -335,71 +372,81 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
         outcomes.some(({ code }) => code !== 0),
         'later successes retain the first failure'
       ).toBe(true);
-    }
+    },
+    WORKFLOW_RUN_TIMEOUT_MS
   );
 
-  test('the manual fallback builds each image target once and runs every assertion', async () => {
-    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
-    const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-arm64');
-    if (!matrix)
-      throw new Error('Missing linux-arm64 matrix case; expected a native Linux smoke leg');
-    const { outcomes, events, containers } = await runWorkflowSteps(job, matrix, 'none', true);
-    expect(outcomes.every(({ code }) => code === 0)).toBe(true);
-    expect(
-      events
-        .filter(({ command, args }) => command === 'bun' && args.includes('build:binary'))
-        .map(({ args }) => args[args.indexOf('--platform') + 1]),
-      'the native and Alpine harnesses each build their target once'
-    ).toEqual([matrix.platform, matrix.musl_platform]);
-    const builds = events.filter(
-      ({ command, args, buildCaller }) =>
-        command === 'bun' && args.includes('build:binary') && buildCaller !== 'native-harness'
-    );
-    // The binary smoke step already built the glibc target; only musl is new.
-    const received = builds.map(({ args }) => args[args.indexOf('--platform') + 1]).join(', ');
-    if (received !== 'linux-arm64-musl') {
-      throw new Error(
-        `expected the image steps to build only the target the binary smoke did not (linux-arm64-musl) | received: ${received}`
-      );
-    }
-    expect(
-      events.find(
-        ({ command, args }) => command === 'bun' && args.includes('.mango/smoke/test-build.mjs')
-      )?.skipBuild
-    ).toBe('0');
-    expect(containers).toEqual([]);
-  });
-
-  test('the manual fallback rebuilds existing musl executables after the native glibc build succeeds', async () => {
-    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
-    const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-arm64');
-    if (!matrix)
-      throw new Error('Missing linux-arm64 matrix case; expected a native Linux smoke leg');
-    const { outcomes, events, containers } = await runWorkflowSteps(
-      job,
-      matrix,
-      'none',
-      true,
-      [],
-      [matrix.musl_platform]
-    );
-    const builds = events
-      .filter(
+  test(
+    'the manual fallback builds each image target once and runs every assertion',
+    async () => {
+      const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+      const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-arm64');
+      if (!matrix)
+        throw new Error('Missing linux-arm64 matrix case; expected a native Linux smoke leg');
+      const { outcomes, events, containers } = await runWorkflowSteps(job, matrix, 'none', true);
+      expect(outcomes.every(({ code }) => code === 0)).toBe(true);
+      expect(
+        events
+          .filter(({ command, args }) => command === 'bun' && args.includes('build:binary'))
+          .map(({ args }) => args[args.indexOf('--platform') + 1]),
+        'the native and Alpine harnesses each build their target once'
+      ).toEqual([matrix.platform, matrix.musl_platform]);
+      const builds = events.filter(
         ({ command, args, buildCaller }) =>
           command === 'bun' && args.includes('build:binary') && buildCaller !== 'native-harness'
-      )
-      .map(({ args }) => args[args.indexOf('--platform') + 1]);
-    expect(builds, 'the native glibc completion marker cannot verify existing musl output').toEqual(
-      [matrix.musl_platform]
-    );
-    expect(outcomes.every(({ code }) => code === 0)).toBe(true);
-    expect(
-      events.find(
-        ({ command, args }) => command === 'bun' && args.includes('.mango/smoke/test-build.mjs')
-      )?.skipBuild
-    ).toBe('0');
-    expect(containers, 'both Docker EXIT traps remove their fixed-port containers').toEqual([]);
-  });
+      );
+      // The binary smoke step already built the glibc target; only musl is new.
+      const received = builds.map(({ args }) => args[args.indexOf('--platform') + 1]).join(', ');
+      if (received !== 'linux-arm64-musl') {
+        throw new Error(
+          `expected the image steps to build only the target the binary smoke did not (linux-arm64-musl) | received: ${received}`
+        );
+      }
+      expect(
+        events.find(
+          ({ command, args }) => command === 'bun' && args.includes('.mango/smoke/test-build.mjs')
+        )?.skipBuild
+      ).toBe('0');
+      expect(containers).toEqual([]);
+    },
+    WORKFLOW_RUN_TIMEOUT_MS
+  );
+
+  test(
+    'the manual fallback rebuilds existing musl executables after the native glibc build succeeds',
+    async () => {
+      const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+      const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-arm64');
+      if (!matrix)
+        throw new Error('Missing linux-arm64 matrix case; expected a native Linux smoke leg');
+      const { outcomes, events, containers } = await runWorkflowSteps(
+        job,
+        matrix,
+        'none',
+        true,
+        [],
+        [matrix.musl_platform]
+      );
+      const builds = events
+        .filter(
+          ({ command, args, buildCaller }) =>
+            command === 'bun' && args.includes('build:binary') && buildCaller !== 'native-harness'
+        )
+        .map(({ args }) => args[args.indexOf('--platform') + 1]);
+      expect(
+        builds,
+        'the native glibc completion marker cannot verify existing musl output'
+      ).toEqual([matrix.musl_platform]);
+      expect(outcomes.every(({ code }) => code === 0)).toBe(true);
+      expect(
+        events.find(
+          ({ command, args }) => command === 'bun' && args.includes('.mango/smoke/test-build.mjs')
+        )?.skipBuild
+      ).toBe('0');
+      expect(containers, 'both Docker EXIT traps remove their fixed-port containers').toEqual([]);
+    },
+    WORKFLOW_RUN_TIMEOUT_MS
+  );
 
   test.each([
     ['incomplete', 'binary'],
@@ -435,7 +482,8 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
         outcomes.filter(({ name }) => name.includes('teardown')).map(({ code }) => code)
       ).toEqual([0, 0, 0]);
       expect(containers, 'both Docker EXIT traps remove their fixed-port containers').toEqual([]);
-    }
+    },
+    WORKFLOW_RUN_TIMEOUT_MS
   );
 });
 
@@ -562,7 +610,7 @@ async function runContainerScript(
     },
     stdout: 'pipe',
     stderr: 'pipe',
-    timeout: 10_000,
+    timeout: STEP_HANG_BOUND_MS,
   });
   const [stdout, stderr, code] = await Promise.all([
     new Response(child.stdout).text(),

@@ -360,9 +360,11 @@ build):
   from-scratch render. `bun scripts/bench/markdown-stream.ts` measures it.
 
 **Rail panel bodies are lazy.** `rail/panel-registry.ts` is imported by the command palette and
-the chat page, so the Git, GitHub and Todo bodies load through `retryableLazy`
+the chat page, so the Git, GitHub, Todo and Terminal bodies load through `retryableLazy`
 (`src/lib/retryable-lazy.ts`) instead of a static import: that took 117 KB raw (27 KB
-Brotli) out of the entry. The rail starts those imports on hover or focus of the dock
+Brotli) out of the entry, and the Terminal body (tab strip and close dialog, in front of the
+already lazy xterm view) another 3.3 KB Brotli. `tests/unit/lazy-entry-modules.test.ts`
+walks the entry's static imports and names the importer if one of them comes back. The rail starts those imports on hover or focus of the dock
 button and, once the page is idle, for every available panel (`src/lib/idle-preload.ts`;
 skipped under `saveData`; hover and focus still start the chunk), so a click rarely waits.
 A switch on an open rail keeps the previous body up while the new chunk arrives (a React
@@ -379,11 +381,12 @@ about 11.6 KB Brotli out of the entry. The chip or button that opens one stays e
 the chunk on hover or focus (the palette on the chord's modifier key). `createLazyOverlay`
 (`components/layout/LazyOverlay.tsx`) is the pattern: the owner keeps its `open` state and
 mounts `Overlay` only while open, `onLoadFailed` closes it, and a chunk that cannot be fetched
-raises a toast instead of a dead click. Three things stay eager on purpose. The folder picker
-opens on its own for a chat with no folder, and a lazy chat-feed card would pop in after a
-round trip. The third-party notice costs under 1 KB Brotli, and its send-time gate has no
-sensible answer to a failed fetch: declining silently would drop a send the person asked for.
-And the palette's frame (`PaletteFrame`: backdrop, panel and the search input, about 1.3 KB)
+raises a toast instead of a dead click. The chat page's folder picker is one of them (3.9 KB
+Brotli). It opens on its own for a chat with no folder, so that chat asks for the chunk when
+the page mounts, and every other chat warms it once the page is idle (`preloadWhenIdle`), so
+the folder chip opens it from cache. Two things stay eager on purpose. The third-party notice
+costs about 1.2 KB Brotli, and its send-time gate has no sensible answer to a failed fetch:
+declining silently would drop a send the person asked for. And the palette's frame (`PaletteFrame`: backdrop, panel and the search input, about 1.3 KB)
 owns focus and the keys from the first commit, so characters typed while the results chunk is
 in flight stay in the input and become the results' initial query rather than reaching the
 composer. Until the results mount, Enter and the navigation keys are swallowed; Escape closes.

@@ -8,12 +8,13 @@ import type {
 import type { ModelUnavailableDetails } from '@mangostudio/shared/generation';
 import type { ReasoningEffort } from '@mangostudio/shared/types';
 import type { WorkspaceSettings } from '@mangostudio/shared/workspaces';
-import { type ComponentProps, useCallback, useMemo, useState } from 'react';
+import { type ComponentProps, useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
+import { lazyWorkdirPickerDialog } from '@/features/workspace/LazyWorkdirPickerDialog';
 import { WorkspaceRail } from '@/features/workspace/rail/WorkspaceRail';
-import { WorkdirPickerDialog } from '@/features/workspace/WorkdirPickerDialog';
 import { useUserFirstName } from '@/hooks/use-user-first-name';
+import { preloadWhenIdle } from '@/lib/idle-preload';
 
 import { ChatPageContent } from './components/ChatPageContent';
 import { ChatContextDecisionNotice, ChatFallbackNotice } from './components/ChatPageNotices';
@@ -165,6 +166,16 @@ export function ChatPage({
   isForkingRunner = false,
   migrationRunnerAvailable = false,
 }: ChatPageProps) {
+  // The picker opens by itself for a chat with no folder, so that chat asks for
+  // the chunk now; every other chat warms it once the page is quiet, so the
+  // folder chip opens it without a fetch.
+  useEffect(() => {
+    if (!workdir) {
+      lazyWorkdirPickerDialog.preload();
+      return undefined;
+    }
+    return preloadWhenIdle([lazyWorkdirPickerDialog.preload]);
+  }, [workdir]);
   const { messages, status, older } = useChatPageMessages({ chatId, seedContextInfo });
   // Reads the same query as `messages` above; this is the conservative framing
   // (an unloaded transcript locks) rather than a bare `messages.length > 0`.
@@ -328,9 +339,9 @@ export function ChatPage({
           />
         ) : null}
       </div>
-      {onCloseWorkdirPicker && onSelectWorkdir ? (
-        <WorkdirPickerDialog
-          open={isWorkdirPickerOpen}
+      {isWorkdirPickerOpen && onCloseWorkdirPicker && onSelectWorkdir ? (
+        <lazyWorkdirPickerDialog.Overlay
+          open
           chatId={chatId ?? undefined}
           initialPath={workdir || workspaceSettings.defaultWorkdir}
           defaultWorkdir={workspaceSettings.defaultWorkdir}
@@ -341,6 +352,7 @@ export function ChatPage({
           onRestrictToolsToWorkdirOverrideChange={onRestrictToolsToWorkdirOverrideChange}
           onSelect={onSelectWorkdir}
           onClose={onCloseWorkdirPicker}
+          onLoadFailed={onCloseWorkdirPicker}
         />
       ) : null}
     </>

@@ -20,6 +20,7 @@ import {
   createTerminalSocketRelay,
   type TerminalSocketRelayDeps,
 } from '../../../src/modules/terminals/application/terminal-socket-relay';
+import type { TerminalRuntimeClient } from '../../../src/modules/terminals/domain/terminal-runtime-client';
 import { createTerminalSocketRoutes } from '../../../src/modules/terminals/http/terminal-socket-routes';
 import { insertTestUser } from '../../support/factories';
 import { listenOnEphemeralPort } from '../../support/listen-ephemeral';
@@ -27,8 +28,14 @@ import {
   FAKE_TERMINAL_MANIFEST,
   FakeTerminalRuntimeClient,
 } from '../../support/mocks/fake-terminal-runtime-client';
+import { RefusingTerminalWriteClient } from '../../support/mocks/refusing-terminal-write-client';
 import { resolveRustRuntimeBinary, skipWithoutRustBinary } from '../../support/rust-runtime-binary';
 import { spawnRustStdioRuntime } from '../../support/rust-stdio-runtime';
+import {
+  describeTerminalWrites,
+  type TerminalWriteTrace,
+  traceTerminalWrites,
+} from '../../support/terminal-write-trace';
 
 const ENVIRONMENT_ID = 'workshop';
 
@@ -81,9 +88,12 @@ function createRelayWithDroppedSend(deps: TerminalSocketRelayDeps) {
 interface Connected {
   readonly socket: WebSocket;
   readonly messages: TerminalServerMessage[];
+  /** `performance.now()` at which each entry of `messages` arrived. */
+  readonly messageTimes: number[];
   readonly closed: Promise<CloseEvent>;
   nextMessage(
-    predicate?: (message: TerminalServerMessage) => boolean
+    predicate?: (message: TerminalServerMessage) => boolean,
+    timeoutMs?: number
   ): Promise<TerminalServerMessage>;
 }
 
@@ -97,11 +107,13 @@ function connect(
   sockets.add(socket);
 
   const messages: TerminalServerMessage[] = [];
+  const messageTimes: number[] = [];
   const pending: TerminalServerMessage[] = [];
   const waiters = new Set<(message: TerminalServerMessage) => void>();
   socket.addEventListener('message', (event) => {
     const message = decodeTerminalServerMessage(new Uint8Array(event.data as ArrayBuffer));
     messages.push(message);
+    messageTimes.push(performance.now());
     pending.push(message);
     for (const waiter of waiters) waiter(message);
   });
@@ -117,7 +129,8 @@ function connect(
   });
 
   function nextMessage(
-    predicate: (message: TerminalServerMessage) => boolean = () => true
+    predicate: (message: TerminalServerMessage) => boolean = () => true,
+    timeoutMs = receiveTimeoutMs
   ): Promise<TerminalServerMessage> {
     const index = pending.findIndex(predicate);
     if (index !== -1) return Promise.resolve(pending.splice(index, 1)[0] as TerminalServerMessage);
@@ -125,7 +138,7 @@ function connect(
       const timer = setTimeout(() => {
         waiters.delete(onMessage);
         reject(new Error('Timed out waiting for a terminal socket message'));
-      }, receiveTimeoutMs);
+      }, timeoutMs);
       const onMessage = (message: TerminalServerMessage): void => {
         if (!predicate(message)) return;
         clearTimeout(timer);
@@ -138,7 +151,7 @@ function connect(
     });
   }
 
-  return { socket, messages, closed, nextMessage };
+  return { socket, messages, messageTimes, closed, nextMessage };
 }
 
 /**
@@ -153,22 +166,25 @@ function waitForTerminalText(
   viewer: Connected,
   marker: string,
   firstMessage = 0,
-  phase: 'terminal-text' | 'prompt' | 'constructed-output' = 'terminal-text'
+  phase: 'terminal-text' | 'prompt' | 'constructed-output' = 'terminal-text',
+  timeoutMs?: number
 ): Promise<TerminalServerMessage> {
   const decoder = new TextDecoder();
   let output = '';
   const beforeObservation = new Set(viewer.messages.slice(0, firstMessage));
+  const startedAt = performance.now();
   return viewer
     .nextMessage((message) => {
       if (message.type !== 'data' || beforeObservation.has(message)) return false;
       output += decoder.decode(message.data, { stream: true });
       return output.includes(marker);
-    })
+    }, timeoutMs)
     .catch((cause: unknown) => {
       const terminalEvents = viewer.messages
         .slice(firstMessage)
         .filter((message) => message.type !== 'data')
         .slice(-8);
+      const lastFrameAt = viewer.messageTimes.at(-1);
       throw new Error(
         [
           cause instanceof Error ? cause.message : String(cause),
@@ -177,11 +193,92 @@ function waitForTerminalText(
           `outputTail=${JSON.stringify(output.slice(-4_096))}`,
           `terminalEvents=${JSON.stringify(terminalEvents)}`,
           `observedFrames=${viewer.messages.length - firstMessage}`,
+          `waitedMs=${Math.round(performance.now() - startedAt)}`,
+          // Distinguishes a shell that went quiet after speaking from one that never spoke.
+          `lastFrameAgoMs=${
+            firstMessage < viewer.messages.length && lastFrameAt !== undefined
+              ? Math.round(performance.now() - lastFrameAt)
+              : 'none'
+          }`,
           `socketReadyState=${viewer.socket.readyState}`,
         ].join('; '),
         { cause }
       );
     });
+}
+
+/** What {@link collectSilentShellEvidence} watches and sends after a silent timeout. */
+interface SilentShellProbe {
+  readonly viewer: Connected;
+  readonly marker: string;
+  /** Index of the first frame after the command was sent. */
+  readonly firstMessage: number;
+  readonly writes: readonly TerminalWriteTrace[];
+  readonly runtimeStderr: () => string;
+  /** How much longer to wait for the original marker. */
+  readonly lateWindowMs: number;
+  /** How long to wait for any frame after a bare Enter. */
+  readonly nudgeWindowMs: number;
+}
+
+/**
+ * Runs after a command's output never arrived, to say why in one failure message: whether the
+ * runtime refused the write, whether the marker was only late, and whether the shell still
+ * reacts to later input. The probe only runs on failure, so a green run never pays for it.
+ *
+ * @example
+ * const evidence = await collectSilentShellEvidence({ viewer, marker, firstMessage, writes,
+ *   runtimeStderr: () => runtime.stderrTail(), lateWindowMs: 6_000, nudgeWindowMs: 2_000 });
+ */
+async function collectSilentShellEvidence(probe: SilentShellProbe): Promise<string> {
+  const lateStartedAt = performance.now();
+  let lateMarker: string;
+  try {
+    await waitForTerminalText(
+      probe.viewer,
+      probe.marker,
+      probe.firstMessage,
+      'constructed-output',
+      probe.lateWindowMs
+    );
+    lateMarker = `arrived ${Math.round(performance.now() - lateStartedAt)}ms after the timeout`;
+  } catch {
+    lateMarker = `absent for a further ${probe.lateWindowMs}ms`;
+  }
+
+  let nudge = 'not sent: the socket was closed';
+  if (probe.viewer.socket.readyState === WebSocket.OPEN) {
+    const seen = new Set(probe.viewer.messages);
+    const nudgedAt = performance.now();
+    probe.viewer.socket.send(
+      encodeTerminalClientMessage({ type: 'data', data: new TextEncoder().encode('\r\n') })
+    );
+    try {
+      await probe.viewer.nextMessage(
+        (message) => message.type === 'data' && !seen.has(message),
+        probe.nudgeWindowMs
+      );
+      nudge = `answered after ${Math.round(performance.now() - nudgedAt)}ms`;
+    } catch {
+      nudge = `no frame within ${probe.nudgeWindowMs}ms`;
+    }
+  }
+  // Same clock as the write trace (`performance.now()`), so a frame lines up with the write
+  // that should have provoked it.
+  const frames = probe.viewer.messages.slice(-12).map((message, index, tail) => ({
+    atMs: Math.round(
+      probe.viewer.messageTimes[probe.viewer.messages.length - tail.length + index] ?? 0
+    ),
+    type: message.type,
+    ...(message.type === 'data' ? { bytes: message.data.length } : {}),
+  }));
+  return [
+    describeTerminalWrites(probe.writes),
+    `frames=${JSON.stringify(frames)}`,
+    `lateMarker=${lateMarker}`,
+    `enterNudge=${nudge}`,
+    `runtimeStderr=${JSON.stringify(probe.runtimeStderr().slice(-2_048))}`,
+  ].join('; ');
 }
 
 /**
@@ -285,7 +382,7 @@ describe('terminal socket relay', () => {
     return client;
   }
 
-  function relayService(runtime: FakeTerminalRuntimeClient): TerminalSessionService {
+  function relayService(runtime: TerminalRuntimeClient): TerminalSessionService {
     return createTerminalSessionService({
       getConfig: () => ({
         enabled: true,
@@ -443,6 +540,124 @@ describe('terminal socket relay', () => {
       expect(runtime.calls.write).toHaveLength(0);
     }
   );
+
+  it('reports how long a silent command wait lasted and that no frame ever arrived', async () => {
+    const user = await insertTestUser();
+    const runtime = new FakeTerminalRuntimeClient();
+    const service = relayService(runtime);
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+    const attached = runtime.waitForCall('attach');
+    const viewer = await openViewer(service, user.id, session.id);
+    await attached;
+
+    const failure = await waitForTerminalText(
+      viewer,
+      'never-printed',
+      viewer.messages.length,
+      'constructed-output',
+      50
+    ).catch((cause: unknown) => cause);
+
+    const message = (failure as Error).message;
+    expect(message).toContain('lastFrameAgoMs=none');
+    const waited = Number(/waitedMs=(\d+)/.exec(message)?.[1]);
+    expect(waited, `expected waitedMs >= 40 | received message: ${message}`).toBeGreaterThanOrEqual(
+      40
+    );
+  });
+
+  describe('silent shell evidence', () => {
+    async function silentSession(runtime: FakeTerminalRuntimeClient, refuse: boolean) {
+      const user = await insertTestUser();
+      const traced = traceTerminalWrites(
+        refuse
+          ? new RefusingTerminalWriteClient(runtime, 'UNAVAILABLE: shell consent unconfirmed')
+          : runtime
+      );
+      const service = relayService(traced.client);
+      const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+      const attached = runtime.waitForCall('attach');
+      const viewer = await openViewer(service, user.id, session.id);
+      await attached;
+      const { marker, command } = terminalOutputProbe('powershell');
+      const written = refuse ? Promise.resolve() : runtime.waitForCall('write');
+      runtime.emitOutput(session.id, {
+        kind: 'data',
+        data: Buffer.from(`PS ${session.cwd}> `).toString('base64'),
+      });
+      const firstMessage = await writeAfterTerminalText(viewer, `PS ${session.cwd}> `, command);
+      await written;
+      // The refused write rejects inside the hub; let it settle before reading the trace.
+      await Bun.sleep(20);
+      return { session, viewer, marker, firstMessage, traced };
+    }
+
+    it('names a write the runtime refused, and that the marker never came', async () => {
+      const runtime = new FakeTerminalRuntimeClient();
+      const { viewer, marker, firstMessage, traced } = await silentSession(runtime, true);
+
+      const evidence = await collectSilentShellEvidence({
+        viewer,
+        marker,
+        firstMessage,
+        writes: traced.writes,
+        runtimeStderr: () => 'consent read for shell did not finish within 2s',
+        lateWindowMs: 50,
+        nudgeWindowMs: 50,
+      });
+
+      expect(evidence).toContain('"outcome":"rejected"');
+      expect(evidence).toContain('UNAVAILABLE: shell consent unconfirmed');
+      expect(evidence).toContain('lateMarker=absent for a further 50ms');
+      expect(evidence).toContain('enterNudge=no frame within 50ms');
+      expect(evidence).toContain('consent read for shell did not finish within 2s');
+    });
+
+    it('reports a marker that arrives after the first timeout as late, not lost', async () => {
+      const runtime = new FakeTerminalRuntimeClient();
+      const { session, viewer, marker, firstMessage, traced } = await silentSession(runtime, false);
+      const evidence = collectSilentShellEvidence({
+        viewer,
+        marker,
+        firstMessage,
+        writes: traced.writes,
+        runtimeStderr: () => '',
+        lateWindowMs: 2_000,
+        nudgeWindowMs: 50,
+      });
+
+      runtime.emitOutput(session.id, {
+        kind: 'data',
+        data: Buffer.from(`${marker}\r\n`).toString('base64'),
+      });
+
+      const text = await evidence;
+      expect(text).toContain('"outcome":"ok"');
+      expect(text).toMatch(/lateMarker=arrived \d+ms after the timeout/);
+    });
+
+    it('reports a shell that answers a bare Enter after ignoring the command', async () => {
+      const runtime = new FakeTerminalRuntimeClient();
+      const { session, viewer, marker, firstMessage, traced } = await silentSession(runtime, false);
+      const nudged = runtime.waitForCall('write');
+      const evidence = collectSilentShellEvidence({
+        viewer,
+        marker,
+        firstMessage,
+        writes: traced.writes,
+        runtimeStderr: () => '',
+        lateWindowMs: 50,
+        nudgeWindowMs: 2_000,
+      });
+      await nudged;
+      runtime.emitOutput(session.id, {
+        kind: 'data',
+        data: Buffer.from(`PS ${session.cwd}> `).toString('base64'),
+      });
+
+      expect(await evidence).toMatch(/enterNudge=answered after \d+ms/);
+    });
+  });
 
   it.each([
     {
@@ -1145,6 +1360,18 @@ const binary = resolveRustRuntimeBinary();
 
 describe('terminal socket over a real Rust runtime', () => {
   it.skipIf(skipWithoutRustBinary(binary, 'terminal-socket'))(
+    'exposes the runtime stderr tail that failure messages quote',
+    async () => {
+      const runtime = await spawnRustStdioRuntime(binary.path, { label: 'terminal-stderr' });
+      try {
+        expect(typeof runtime.stderrTail()).toBe('string');
+      } finally {
+        await runtime.close();
+      }
+    }
+  );
+
+  it.skipIf(skipWithoutRustBinary(binary, 'terminal-socket'))(
     'opens, attaches, and relays real PTY output from the platform shell',
     async () => {
       const shell = process.platform === 'win32' ? 'powershell' : 'bash';
@@ -1156,8 +1383,10 @@ describe('terminal socket over a real Rust runtime', () => {
         expect(runtime.client.manifest.terminal).toBe(true);
         // The attestation gate is covered by the unit tests; this case proves
         // the PTY relay from a real runtime through the hub's socket route.
+        // Traced so a silent timeout can say whether the runtime ever took the input.
+        const traced = traceTerminalWrites(runtime.client);
         const service = createTerminalSessionService({
-          getRuntimeClient: () => Promise.resolve(runtime.client),
+          getRuntimeClient: () => Promise.resolve(traced.client),
           isIdentityAttested: () => true,
         });
         // PowerShell expands Windows short paths in its prompt. Launch in the
@@ -1193,7 +1422,24 @@ describe('terminal socket over a real Rust runtime', () => {
           marker,
           firstMessage,
           'constructed-output'
-        );
+        ).catch(async (cause: unknown) => {
+          // Issue #1311: a Windows run once timed out here with no frame at all.
+          const evidence = await collectSilentShellEvidence({
+            viewer,
+            marker,
+            firstMessage,
+            writes: traced.writes,
+            runtimeStderr: () => runtime.stderrTail(),
+            lateWindowMs: 6_000,
+            nudgeWindowMs: 2_000,
+          });
+          throw new Error(
+            `${cause instanceof Error ? cause.message : String(cause)}; ${evidence}`,
+            {
+              cause,
+            }
+          );
+        });
         expect(output).toBeDefined();
 
         await service.close(user.id, session.id);

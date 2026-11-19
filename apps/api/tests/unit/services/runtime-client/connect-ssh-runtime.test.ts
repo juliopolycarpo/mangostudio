@@ -74,6 +74,20 @@ describe('connectSshRuntime', () => {
     }
   });
 
+  it('names the handshake while ssh is running and has not said hello', async () => {
+    const launcher = new FailedSshLauncher(DNS_FAILURE);
+    const phases: string[] = [];
+
+    await connectSshRuntime(
+      { userId: 'test-user', id: 'build-01', config: { host: 'ssh-target.invalid' } },
+      () => undefined,
+      { report: (phase) => phases.push(phase) },
+      { spawnPort: launcher.spawnPort }
+    ).catch(() => undefined);
+
+    expect(phases).toEqual(['handshaking']);
+  });
+
   it.each(['', 'ssh: remote side closed without a diagnostic signature'])(
     'keeps an unclassified failure generic: %j',
     async (stderr) => {

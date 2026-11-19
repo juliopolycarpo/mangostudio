@@ -4,24 +4,18 @@
  * collision check, a hub's withdrawal, and the session methods' fail-closed
  * workspace authority, all over a real stdio child.
  *
- * The claim the collision check depends on is byte identity. A spawned runtime
- * attests `os-account` (or `container`) and the in-process TypeScript Local
- * connector attested `single-user-host`, but both digest the same
- * credential-home identity with no method prefix. So one OS account reached
- * through Local by one user and through a Rust stdio runtime by another
- * produces one fingerprint, and the hub refuses both. A Rust derivation that
- * differed by a single byte would let the second user through, silently.
- *
- * The TypeScript Local attestation is recorded here as its derivation
- * (`localCredentialHomeAttestation`), since the digest input — the home's
- * device and inode — is machine-dependent.
+ * The claim the collision check depends on is that one credential home yields one
+ * fingerprint. Every runtime keys it with the host secret stored in that home, so
+ * two runtimes reading one OS account, whatever their MANGO_HOME, agree and the hub
+ * refuses both users; a different account or host has another secret and another
+ * fingerprint. A fingerprint that differed between runtimes on one home would let
+ * the second user through, silently.
  */
 
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
-import { mkdir, realpath, symlink } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { mkdir, readFile, realpath, stat, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { sanitizedEnv, spawnPort } from '@mangostudio/protocol/spawn';
@@ -68,15 +62,17 @@ const binary = resolveRustRuntimeBinary();
 const fakeCursorAgent = resolveFakeCursorAgent();
 
 /**
- * The attestation the retired in-process TypeScript Local connector made for
- * this process's credential home: `single-user-host`, digesting platform, uid,
- * canonical home path, device and inode joined by NUL, with no method prefix.
+ * The unkeyed digest the runtime published before it had a host secret: platform,
+ * uid, canonical home path, device and inode joined by NUL, hashed with no key.
+ * Everything in it is guessable, so the keyed fingerprint must never equal it.
  */
-function localCredentialHomeAttestation() {
+function unkeyedCredentialHomeFingerprint(credentialHome: string): string {
   // The runtime expands a Windows 8.3 short name (the test home sits under `RUNNER~1`
   // on hosted runners) and normalizes casing; only the native call does the same.
   const home =
-    process.platform === 'win32' ? realpathSync.native(homedir()) : realpathSync(homedir());
+    process.platform === 'win32'
+      ? realpathSync.native(credentialHome)
+      : realpathSync(credentialHome);
   const info = statSync(home);
   const identity = [
     process.platform,
@@ -85,10 +81,12 @@ function localCredentialHomeAttestation() {
     info.dev,
     info.ino,
   ].join('\0');
-  return {
-    method: 'single-user-host' as const,
-    credentialHomeFingerprint: `sha256:${createHash('sha256').update(identity).digest('hex')}`,
-  };
+  return `sha256:${createHash('sha256').update(identity).digest('hex')}`;
+}
+
+/** Points a spawned runtime at `credentialHome` as its account home on every platform. */
+function credentialHomeEnv(credentialHome: string): Record<string, string> {
+  return { HOME: credentialHome, USERPROFILE: credentialHome };
 }
 
 describe('Real Rust runtime external-agent admission', () => {
@@ -140,24 +138,59 @@ describe('Real Rust runtime external-agent admission', () => {
   }
 
   it.skipIf(!binary.available)(
-    'attests the credential home Local attests, so the hub sees two users collide',
+    'keys the fingerprint to the credential home, so the hub sees two users collide on it',
     async () => {
-      const rust = await spawnRustRuntime('rust-external-agents-attest');
-
-      const rustAttestation = rust.manifest.identityIsolation;
-      const localAttestation = localCredentialHomeAttestation();
-      expect(rustAttestation?.method).toMatch(/^(os-account|container)$/);
-      // The whole point: one home, one digest, whichever route reached it.
-      expect(rustAttestation?.credentialHomeFingerprint).toBe(
-        localAttestation.credentialHomeFingerprint
+      const credentialHome = await scratchMangoHome('rust-external-agents-credential-home');
+      const otherHome = await scratchMangoHome('rust-external-agents-other-home');
+      cleanups.push(
+        () => cleanupMangoHome(credentialHome),
+        () => cleanupMangoHome(otherHome)
       );
 
-      const health = await rust.health();
+      // Two runtimes, each with its own MANGO_HOME, reading one account's credential home.
+      const first = await spawnRustRuntime('rust-external-agents-attest-a', {
+        env: credentialHomeEnv(credentialHome),
+      });
+      const second = await spawnRustRuntime('rust-external-agents-attest-b', {
+        env: credentialHomeEnv(credentialHome),
+      });
+      // A different host: its own account home, and so its own secret.
+      const elsewhere = await spawnRustRuntime('rust-external-agents-attest-c', {
+        env: credentialHomeEnv(otherHome),
+      });
+
+      const firstAttestation = first.manifest.identityIsolation;
+      const secondAttestation = second.manifest.identityIsolation;
+      const elsewhereAttestation = elsewhere.manifest.identityIsolation;
+      expect(firstAttestation?.method).toMatch(/^(os-account|container)$/);
+      expect(firstAttestation?.credentialHomeFingerprint).toMatch(/^hmac-sha256:[0-9a-f]{64}$/);
+      // One credential home, one fingerprint, whichever runtime reached it.
+      expect(secondAttestation?.credentialHomeFingerprint).toBe(
+        firstAttestation?.credentialHomeFingerprint
+      );
+      // Another host cannot be confused with it, and nothing is reproducible from the path.
+      expect(elsewhereAttestation?.credentialHomeFingerprint).not.toBe(
+        firstAttestation?.credentialHomeFingerprint
+      );
+      expect(firstAttestation?.credentialHomeFingerprint).not.toBe(
+        unkeyedCredentialHomeFingerprint(credentialHome)
+      );
+
+      // The secret is stored owner-only and never rendered into the attestation.
+      const secretPath = join(credentialHome, '.mango', 'host-secret');
+      const secret = await readFile(secretPath);
+      expect(secret.byteLength).toBe(32);
+      if (process.platform !== 'win32') {
+        expect((await stat(secretPath)).mode & 0o777).toBe(0o600);
+      }
+      expect(JSON.stringify(firstAttestation)).not.toContain(secret.toString('hex'));
+
+      const health = await first.health();
       expect(health.externalAgents).toMatchObject({
         targets: ['codex', 'cursor', 'claude'],
         liveSessionCount: 0,
         liveSessions: [],
-        identityIsolation: rustAttestation,
+        identityIsolation: firstAttestation,
       });
 
       const reaped: string[] = [];
@@ -170,12 +203,16 @@ describe('Real Rust runtime external-agent admission', () => {
         },
       });
       expect(
-        registry.resolve({ userId: 'user-a', environmentId: 'local', isolation: localAttestation })
-      ).toEqual(localAttestation);
+        registry.resolve({ userId: 'user-a', environmentId: 'first', isolation: firstAttestation })
+      ).toEqual(firstAttestation);
       expect(
-        registry.resolve({ userId: 'user-b', environmentId: 'rust', isolation: rustAttestation })
+        registry.resolve({
+          userId: 'user-b',
+          environmentId: 'second',
+          isolation: secondAttestation,
+        })
       ).toBeUndefined();
-      expect(registry.isContested(rustAttestation?.credentialHomeFingerprint ?? 'missing')).toBe(
+      expect(registry.isContested(firstAttestation?.credentialHomeFingerprint ?? 'missing')).toBe(
         true
       );
       expect(reaped.sort()).toEqual(['user-a', 'user-b']);

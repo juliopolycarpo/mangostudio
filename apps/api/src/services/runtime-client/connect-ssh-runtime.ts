@@ -65,6 +65,8 @@ export interface SshConnectContext {
    * exchange and the far process start.
    */
   readonly signal?: AbortSignal;
+  /** Told once `ssh` is running and the hub is waiting for the far runtime's hello. */
+  readonly report?: (phase: 'handshaking') => void;
 }
 
 /**
@@ -131,6 +133,7 @@ export async function connectSshRuntime(
             : describeSshFailure(failureReason, config, failure.stderr);
         },
         onClosed: onUnavailable,
+        onHandshakeStart: () => context.report?.('handshaking'),
         ...(context.signal ? { signal: context.signal } : {}),
       },
       deps

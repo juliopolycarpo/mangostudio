@@ -90,14 +90,29 @@ function listingFor(digest: string, name = `${ASSET}.zip`, marker = ''): string 
  */
 const STALL = Symbol('stall');
 
-/** A response body, a status code to fail the request with, or a stall. */
-type Reply = string | number | typeof STALL;
+/** A body that arrives only after `delayMs`: a loopback fetch on a starved host. */
+interface SlowReply {
+  readonly slowBody: string;
+  readonly delayMs: number;
+}
+
+/** A response body, a status code to fail the request with, a late body, or a stall. */
+type Reply = string | number | typeof STALL | SlowReply;
+
+function slowly(slowBody: string, delayMs: number): SlowReply {
+  return { slowBody, delayMs };
+}
 
 function reply(value: Reply): Response | Promise<Response> {
   if (value === STALL) {
     // Never resolved: the connection is accepted and the reply never comes.
     return new Promise<Response>(() => {
       // no settle
+    });
+  }
+  if (typeof value === 'object') {
+    return new Promise<Response>((resolve) => {
+      setTimeout(() => resolve(new Response(value.slowBody)), value.delayMs);
     });
   }
   return typeof value === 'number'
@@ -728,13 +743,16 @@ describe('downloadVerifiedAsset', () => {
   });
 
   test('bounds a stalled release metadata request', async () => {
+    // The listing answers later than the 50 ms bound, as a loopback fetch can on a
+    // starved Windows runner. Only the metadata read is bounded that short, so the
+    // slow listing cannot be named in its place.
     const server = serve({
-      listing: () => listingFor(sha256('old')),
+      listing: () => slowly(listingFor(sha256('old')), 150),
       body: () => 'body',
       metadata: () => STALL,
     });
     await expect(
-      downloadVerifiedAsset(ASSET, CHANNEL, archivePath, server.base, { checksumMs: 50 })
+      downloadVerifiedAsset(ASSET, CHANNEL, archivePath, server.base, { metadataMs: 50 })
     ).rejects.toThrow('Timed out after 50ms reading release metadata');
   });
 

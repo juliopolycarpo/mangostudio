@@ -12,9 +12,12 @@
 //! `single-user-host` is a claim about the *hub* serving one user, which only
 //! the hub's in-process connector can make.
 //!
-//! The fingerprint input is byte-identical to the TypeScript derivation so a
-//! hub comparing fingerprints across environments sees one credential home as
-//! one value whichever runtime implementation reported it.
+//! Every digest built here is keyed by the credential home's
+//! [`host_secret`](super::host_secret): the fingerprint is an HMAC of the home's
+//! identity, never a bare hash of guessable material. Runtimes that share a
+//! credential home share the secret, so they still report one value for it;
+//! another host reports a different one. Without a usable secret nothing is
+//! attested and no fingerprint is sent.
 //!
 //! # Hub withdrawal
 //!
@@ -29,10 +32,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use super::host_secret::{HostSecret, host_secret_dir, load_or_create};
 use super::port::AccountKey;
 use mangostudio_runtime_contract::manifest::{ExternalIdentityIsolation, IdentityIsolationMethod};
-
-use mangostudio_runtime_core::hex::sha256_hex;
 
 /// Vendor credential locations relative to the credential home.
 const VENDOR_CREDENTIAL_PATHS: [&str; 7] = [
@@ -53,14 +55,21 @@ const VENDOR_HOME_VARIABLES: [&str; 2] = ["CLAUDE_CONFIG_DIR", "CODEX_HOME"];
 const XDG_VENDOR_SUBDIRECTORIES: [&str; 3] = ["claude", "codex", "cursor"];
 
 /// Domain prefix separating [`host_local_digest_key`] from the published
-/// fingerprint.
+/// fingerprint: one is key material, the other leaves the machine.
 const HOST_DIGEST_KEY_DOMAIN: &str = "mangostudio/host-digest-key\0";
+
+/// Domain prefix of the published `credentialHomeFingerprint`.
+const CREDENTIAL_HOME_FINGERPRINT_DOMAIN: &str = "mangostudio/credential-home-fingerprint\0";
+
+/// Leads every published fingerprint, naming the construction.
+const FINGERPRINT_PREFIX: &str = "hmac-sha256:";
 
 /// The attestation this process can make about the live machine.
 ///
 /// Reads the home through [`mangostudio_runtime_core::runtime_home::home_dir`] and the
 /// environment through the existing probing snapshot, so no new environment
-/// read site exists. Blocking: it stats the home and reads `/proc`.
+/// read site exists. Blocking: it stats the home, reads `/proc` and, on first
+/// use, creates the host secret. `None` when the secret cannot be had.
 ///
 /// # Example
 ///
@@ -70,6 +79,7 @@ const HOST_DIGEST_KEY_DOMAIN: &str = "mangostudio/host-digest-key\0";
 /// ```
 pub fn detect_external_agent_isolation() -> Option<ExternalIdentityIsolation> {
     let home = mangostudio_runtime_core::runtime_home::home_dir().ok()?;
+    let secret = load_or_create(&host_secret_dir(&home)).ok()?;
     let env = crate::probing::host::build_runtime_path_env(None).env;
     let containerized = is_containerized();
     let mount_info = if containerized {
@@ -77,7 +87,7 @@ pub fn detect_external_agent_isolation() -> Option<ExternalIdentityIsolation> {
     } else {
         None
     };
-    resolve_external_agent_isolation(&home, containerized, mount_info.as_deref(), &env)
+    resolve_external_agent_isolation(&home, &secret, containerized, mount_info.as_deref(), &env)
 }
 
 /// Chooses the attestation by what this machine is: container first, because
@@ -87,18 +97,19 @@ pub fn detect_external_agent_isolation() -> Option<ExternalIdentityIsolation> {
 /// # Example
 ///
 /// ```ignore
-/// let isolation = resolve_external_agent_isolation(&home, false, None, &env);
+/// let isolation = resolve_external_agent_isolation(&home, &secret, false, None, &env);
 /// ```
 pub(crate) fn resolve_external_agent_isolation(
     home: &Path,
+    secret: &HostSecret,
     containerized: bool,
     mount_info: Option<&str>,
     env: &HashMap<String, String>,
 ) -> Option<ExternalIdentityIsolation> {
     if containerized {
-        return container_isolation(home, mount_info, env);
+        return container_isolation(home, secret, mount_info, env);
     }
-    os_account_isolation(home)
+    os_account_isolation(home, secret)
 }
 
 /// Attests that this process runs as its own OS account with a readable
@@ -107,10 +118,13 @@ pub(crate) fn resolve_external_agent_isolation(
 /// # Example
 ///
 /// ```ignore
-/// let isolation = os_account_isolation(Path::new("/home/ada"));
+/// let isolation = os_account_isolation(Path::new("/home/ada"), &secret);
 /// ```
-pub(crate) fn os_account_isolation(home: &Path) -> Option<ExternalIdentityIsolation> {
-    attestation(IdentityIsolationMethod::OsAccount, home)
+pub(crate) fn os_account_isolation(
+    home: &Path,
+    secret: &HostSecret,
+) -> Option<ExternalIdentityIsolation> {
+    attestation(IdentityIsolationMethod::OsAccount, home, secret)
 }
 
 /// Attests a per-user container whose isolation is intact. `None` when the
@@ -119,10 +133,11 @@ pub(crate) fn os_account_isolation(home: &Path) -> Option<ExternalIdentityIsolat
 /// # Example
 ///
 /// ```ignore
-/// let isolation = container_isolation(&home, Some(&mountinfo), &env);
+/// let isolation = container_isolation(&home, &secret, Some(&mountinfo), &env);
 /// ```
 pub(crate) fn container_isolation(
     home: &Path,
+    secret: &HostSecret,
     mount_info: Option<&str>,
     env: &HashMap<String, String>,
 ) -> Option<ExternalIdentityIsolation> {
@@ -130,7 +145,7 @@ pub(crate) fn container_isolation(
     if has_vendor_credential_mount(home, mount_info, env) {
         return None;
     }
-    attestation(IdentityIsolationMethod::Container, home)
+    attestation(IdentityIsolationMethod::Container, home, secret)
 }
 
 /// True when a mount point in `mount_info` exposes a vendor credential path.
@@ -175,23 +190,24 @@ pub(crate) fn has_vendor_credential_mount(
 }
 
 /// A key for digests that must not be reproducible off this machine: hex
-/// `sha256("mangostudio/host-digest-key\0" + identity)`. Callers must degrade
-/// rather than fall back to an unkeyed digest when it is `None`.
+/// `HMAC-SHA256(secret, "mangostudio/host-digest-key\0" + identity)`. Callers
+/// must degrade rather than fall back to an unkeyed digest when it is `None`.
 ///
 /// # Example
 ///
 /// ```ignore
-/// let key = host_local_digest_key(&home).expect("readable home");
+/// let key = host_local_digest_key(&home, &secret).expect("readable home");
 /// ```
-pub(crate) fn host_local_digest_key(home: &Path) -> Option<String> {
-    host_identity(home).map(|identity| digest_key_for(&identity))
+pub(crate) fn host_local_digest_key(home: &Path, secret: &HostSecret) -> Option<String> {
+    host_identity(home).map(|identity| digest_key_for(secret, &identity))
 }
 
 /// The Codex account-fingerprint key for this machine, from the live home.
 ///
 /// Reads the home through [`mangostudio_runtime_core::runtime_home::home_dir`], as
 /// [`detect_external_agent_isolation`] does. `None` when the home cannot be
-/// read, and then no fingerprint is sent at all. Blocking: it stats the home.
+/// read or the host secret cannot be had, and then no fingerprint is sent at
+/// all. Blocking: it stats the home and, on first use, creates the secret.
 ///
 /// # Example
 ///
@@ -200,7 +216,8 @@ pub(crate) fn host_local_digest_key(home: &Path) -> Option<String> {
 /// ```
 pub(crate) fn detect_account_fingerprint_key() -> Option<AccountKey> {
     let home = mangostudio_runtime_core::runtime_home::home_dir().ok()?;
-    account_fingerprint_key(host_local_digest_key(&home)?)
+    let secret = load_or_create(&host_secret_dir(&home)).ok()?;
+    account_fingerprint_key(host_local_digest_key(&home, &secret)?)
 }
 
 /// The account key for a [`host_local_digest_key`]: the hex text's own bytes, the
@@ -211,26 +228,33 @@ pub(crate) fn detect_account_fingerprint_key() -> Option<AccountKey> {
 /// # Example
 ///
 /// ```ignore
-/// let key = account_fingerprint_key(host_local_digest_key(&home)?)?;
+/// let key = account_fingerprint_key(host_local_digest_key(&home, &secret)?)?;
 /// ```
 pub(crate) fn account_fingerprint_key(digest_key: String) -> Option<AccountKey> {
     AccountKey::new(digest_key.into_bytes())
 }
 
-fn attestation(method: IdentityIsolationMethod, home: &Path) -> Option<ExternalIdentityIsolation> {
+fn attestation(
+    method: IdentityIsolationMethod,
+    home: &Path,
+    secret: &HostSecret,
+) -> Option<ExternalIdentityIsolation> {
     let identity = host_identity(home)?;
     Some(ExternalIdentityIsolation {
         method,
-        credential_home_fingerprint: fingerprint_for(&identity),
+        credential_home_fingerprint: fingerprint_for(secret, &identity),
     })
 }
 
-fn fingerprint_for(identity: &str) -> String {
-    format!("sha256:{}", sha256_hex(identity.as_bytes()))
+fn fingerprint_for(secret: &HostSecret, identity: &str) -> String {
+    format!(
+        "{FINGERPRINT_PREFIX}{}",
+        secret.hmac_hex(CREDENTIAL_HOME_FINGERPRINT_DOMAIN, identity)
+    )
 }
 
-fn digest_key_for(identity: &str) -> String {
-    sha256_hex(format!("{HOST_DIGEST_KEY_DOMAIN}{identity}").as_bytes())
+fn digest_key_for(secret: &HostSecret, identity: &str) -> String {
+    secret.hmac_hex(HOST_DIGEST_KEY_DOMAIN, identity)
 }
 
 /// The unpublished material every digest is built from. Not domain-separated
@@ -247,11 +271,12 @@ fn host_identity(home: &Path) -> Option<String> {
     ))
 }
 
-/// `[platform, uid | "no-uid", home, dev, ino].join("\0")` exactly as the
-/// TypeScript runtime builds it. `dev` and `ino` go through `f64` because
-/// Bun's `statSync` returns JavaScript numbers: a value above 2^53 is rounded
-/// there, and Rust's shortest round-trip `f64` display prints the same digits
-/// as JavaScript's `String(number)` for integers below 1e21.
+/// `[platform, uid | "no-uid", home, dev, ino].join("\0")`. `dev` and `ino` go
+/// through `f64` and keep the digits a JavaScript `String(number)` printed in
+/// the TypeScript runtime, so a credential home keeps the identity it had
+/// before that runtime was retired: a value above 2^53 is rounded, and Rust's
+/// shortest round-trip `f64` display prints the same digits as JavaScript for
+/// integers below 1e21.
 fn identity_string(platform: &str, uid: Option<u32>, home: &str, dev: u64, ino: u64) -> String {
     let uid = uid.map_or_else(|| "no-uid".to_owned(), |uid| uid.to_string());
     #[expect(
@@ -455,16 +480,25 @@ mod tests {
         isolation.map(|isolation| isolation.method)
     }
 
+    /// The secret of one test host. Tests that need a second host build their own.
+    fn host_secret() -> HostSecret {
+        HostSecret::from_bytes([1; crate::external_agents::host_secret::HOST_SECRET_LEN])
+    }
+
+    fn other_host_secret() -> HostSecret {
+        HostSecret::from_bytes([2; crate::external_agents::host_secret::HOST_SECRET_LEN])
+    }
+
     fn assert_fingerprint_shape(fingerprint: &str) {
-        let digest = fingerprint.strip_prefix("sha256:").unwrap_or_else(|| {
-            panic!("expected fingerprint shape: sha256:<64 hex> | received: {fingerprint}")
+        let digest = fingerprint.strip_prefix("hmac-sha256:").unwrap_or_else(|| {
+            panic!("expected fingerprint shape: hmac-sha256:<64 hex> | received: {fingerprint}")
         });
         assert!(
             digest.len() == 64
                 && digest
                     .bytes()
                     .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')),
-            "expected fingerprint shape: sha256:<64 hex> | received: {fingerprint}"
+            "expected fingerprint shape: hmac-sha256:<64 hex> | received: {fingerprint}"
         );
     }
 
@@ -472,8 +506,12 @@ mod tests {
 
     #[test]
     fn single_user_host_fingerprints_the_home_without_exposing_it() {
-        let isolation = attestation(IdentityIsolationMethod::SingleUserHost, &real_home())
-            .expect("expected attestation for a readable home | received: none");
+        let isolation = attestation(
+            IdentityIsolationMethod::SingleUserHost,
+            &real_home(),
+            &host_secret(),
+        )
+        .expect("expected attestation for a readable home | received: none");
         assert_eq!(isolation.method, IdentityIsolationMethod::SingleUserHost);
         assert_fingerprint_shape(&isolation.credential_home_fingerprint);
     }
@@ -481,7 +519,11 @@ mod tests {
     #[test]
     fn single_user_host_degrades_when_the_home_is_unreadable() {
         assert_eq!(
-            attestation(IdentityIsolationMethod::SingleUserHost, &absent_home()),
+            attestation(
+                IdentityIsolationMethod::SingleUserHost,
+                &absent_home(),
+                &host_secret()
+            ),
             None,
             "unreadable home must yield no attestation, not a weaker one"
         );
@@ -491,7 +533,7 @@ mod tests {
 
     #[test]
     fn os_account_attests_the_account_this_process_runs_as() {
-        let isolation = os_account_isolation(&real_home())
+        let isolation = os_account_isolation(&real_home(), &host_secret())
             .expect("expected os-account attestation for a readable home | received: none");
         assert_eq!(isolation.method, IdentityIsolationMethod::OsAccount);
         assert_fingerprint_shape(&isolation.credential_home_fingerprint);
@@ -500,7 +542,7 @@ mod tests {
     #[test]
     fn os_account_degrades_rather_than_failing_on_an_unreadable_home() {
         assert_eq!(
-            os_account_isolation(&absent_home()),
+            os_account_isolation(&absent_home(), &host_secret()),
             None,
             "unreadable home must yield no attestation, not a weaker one"
         );
@@ -510,9 +552,14 @@ mod tests {
     fn same_home_produces_the_same_digest_whatever_the_method() {
         let home = real_home();
         assert_eq!(
-            os_account_isolation(&home).map(|isolation| isolation.credential_home_fingerprint),
-            attestation(IdentityIsolationMethod::SingleUserHost, &home)
+            os_account_isolation(&home, &host_secret())
                 .map(|isolation| isolation.credential_home_fingerprint),
+            attestation(
+                IdentityIsolationMethod::SingleUserHost,
+                &home,
+                &host_secret()
+            )
+            .map(|isolation| isolation.credential_home_fingerprint),
             "fingerprints must not be domain-separated by method"
         );
     }
@@ -520,7 +567,7 @@ mod tests {
     #[test]
     fn fingerprint_leaks_the_home_path_into_neither_digest_nor_prefix() {
         let home = real_home();
-        let fingerprint = os_account_isolation(&home)
+        let fingerprint = os_account_isolation(&home, &host_secret())
             .map(|isolation| isolation.credential_home_fingerprint)
             .unwrap_or_default();
         assert!(
@@ -530,36 +577,77 @@ mod tests {
         assert_fingerprint_shape(&fingerprint);
     }
 
-    // Byte identity with the TypeScript derivation. Expected digests were
-    // computed independently with both `printf ... | sha256sum` and `bun -e`
-    // (node:crypto) over the same `join("\0")` input.
+    // Pinned derivations. Expected digests were computed independently with
+    // Python's `hmac` over the same `join("\0")` identity, under a secret of
+    // thirty-two `0x01` bytes.
 
     #[test]
-    fn fingerprint_matches_the_typescript_derivation_byte_for_byte() {
+    fn fingerprint_and_digest_key_are_pinned_hmacs_of_the_identity() {
         let identity = identity_string("linux", Some(1000), "/home/ada", 66306, 12345);
         assert_eq!(identity, "linux\u{0}1000\u{0}/home/ada\u{0}66306\u{0}12345");
         assert_eq!(
-            fingerprint_for(&identity),
-            "sha256:881d44614682d550dc48486ecd5fde20d8b1e86a2a3d41c541578ea74c7bc431"
+            fingerprint_for(&host_secret(), &identity),
+            "hmac-sha256:53127dce6be5791a10be95c90e8b526d81b48a73da2f31e3cf189eaa5ce0b387"
         );
         assert_eq!(
-            digest_key_for(&identity),
-            "79c4430d903946ca831095f75c583bc244f415701866baf23852fdb88d191734"
+            digest_key_for(&host_secret(), &identity),
+            "26662ef73b5faff85437cc5101fabbefe87274f331973829f1b29dcb240120fb"
         );
     }
 
-    /// Bun reports `dev`/`ino` as JavaScript numbers, so values above 2^53
+    #[test]
+    fn the_fingerprint_is_not_derivable_from_the_identity_alone() {
+        // The reported gap: an observer who guesses platform, uid, home path,
+        // dev and ino must still not reproduce the published value.
+        let identity = identity_string("linux", Some(1000), "/home/ada", 66306, 12345);
+        let unkeyed = format!(
+            "sha256:{}",
+            mangostudio_runtime_core::hex::sha256_hex(identity.as_bytes())
+        );
+        assert_ne!(
+            fingerprint_for(&host_secret(), &identity),
+            unkeyed,
+            "expected a keyed fingerprint, received the unkeyed sha256 of the identity"
+        );
+    }
+
+    #[test]
+    fn two_hosts_report_different_fingerprints_for_one_identity() {
+        let identity = identity_string("linux", Some(1000), "/home/ada", 66306, 12345);
+        assert_ne!(
+            fingerprint_for(&host_secret(), &identity),
+            fingerprint_for(&other_host_secret(), &identity),
+            "expected a fingerprint that does not collide across hosts"
+        );
+        assert_ne!(
+            digest_key_for(&host_secret(), &identity),
+            digest_key_for(&other_host_secret(), &identity),
+            "expected an account key that does not collide across hosts"
+        );
+    }
+
+    #[test]
+    fn one_secret_keeps_one_home_one_fingerprint_across_restarts() {
+        let home = real_home();
+        let scratch = crate::test_support::scratch_dir("mangostudio-isolation-restart-");
+        let before_restart = load_or_create(scratch.path()).unwrap();
+        let after_restart = load_or_create(scratch.path()).unwrap();
+        assert_eq!(
+            os_account_isolation(&home, &before_restart),
+            os_account_isolation(&home, &after_restart),
+            "expected the same fingerprint for the same home across a restart"
+        );
+    }
+
+    /// Bun reported `dev`/`ino` as JavaScript numbers, so values above 2^53
     /// round; `String(Number(18446744073709551615n))` is `18446744073709552000`.
+    /// The identity keeps those digits so existing homes keep their identity.
     #[test]
     fn large_inodes_and_no_uid_format_like_javascript_numbers() {
         let identity = identity_string("win32", None, r"C:\Users\ada", 3_405_691_582, u64::MAX);
         assert_eq!(
             identity,
             "win32\u{0}no-uid\u{0}C:\\Users\\ada\u{0}3405691582\u{0}18446744073709552000"
-        );
-        assert_eq!(
-            fingerprint_for(&identity),
-            "sha256:0a88146e3c2930f6cfba4ee9faa73ef958d11fb63f601349cd60f99d27c55f1f"
         );
     }
 
@@ -592,16 +680,16 @@ mod tests {
     #[test]
     fn host_local_digest_key_is_domain_separated_and_absent_for_an_unreadable_home() {
         let home = real_home();
-        let key = host_local_digest_key(&home).expect("readable home yields a key");
-        let fingerprint = os_account_isolation(&home)
+        let key = host_local_digest_key(&home, &host_secret()).expect("readable home yields a key");
+        let fingerprint = os_account_isolation(&home, &host_secret())
             .expect("readable home yields an attestation")
             .credential_home_fingerprint;
         assert_ne!(
-            format!("sha256:{key}"),
+            format!("{FINGERPRINT_PREFIX}{key}"),
             fingerprint,
             "key must not equal the published fingerprint"
         );
-        assert_eq!(host_local_digest_key(&absent_home()), None);
+        assert_eq!(host_local_digest_key(&absent_home(), &host_secret()), None);
     }
 
     #[test]
@@ -631,8 +719,12 @@ mod tests {
     #[test]
     fn container_attests_when_the_credential_home_is_its_own() {
         let (_dir, home) = temp_home("mangostudio-container-home-");
-        let isolation =
-            container_isolation(Path::new(&home), Some(&mount_line("/proc")), &no_env());
+        let isolation = container_isolation(
+            Path::new(&home),
+            &host_secret(),
+            Some(&mount_line("/proc")),
+            &no_env(),
+        );
         assert_eq!(
             method_of(isolation.as_ref()),
             Some(IdentityIsolationMethod::Container)
@@ -646,6 +738,7 @@ mod tests {
         for vendor in [".claude", ".codex", ".cursor", ".config/cursor"] {
             let isolation = container_isolation(
                 Path::new(&home),
+                &host_secret(),
                 Some(&mount_line(&join(&home, vendor))),
                 &no_env(),
             );
@@ -661,7 +754,12 @@ mod tests {
     fn container_refuses_when_the_whole_home_is_mounted() {
         let (_dir, home) = temp_home("mangostudio-container-home-");
         assert_eq!(
-            container_isolation(Path::new(&home), Some(&mount_line(&home)), &no_env()),
+            container_isolation(
+                Path::new(&home),
+                &host_secret(),
+                Some(&mount_line(&home)),
+                &no_env()
+            ),
             None,
             "ancestor rule: a mount at the credential home must refuse"
         );
@@ -672,7 +770,7 @@ mod tests {
     fn container_refuses_when_the_mount_table_cannot_be_read() {
         let (_dir, home) = temp_home("mangostudio-container-home-");
         assert_eq!(
-            container_isolation(Path::new(&home), None, &no_env()),
+            container_isolation(Path::new(&home), &host_secret(), None, &no_env()),
             None,
             "an unverifiable container must be unproven"
         );
@@ -753,7 +851,8 @@ mod tests {
             "root exception: `/` is every container's own rootfs"
         );
         let table = format!("{}\n{}", mount_line("/"), mount_line("/proc"));
-        let isolation = container_isolation(Path::new(&home), Some(&table), &no_env());
+        let isolation =
+            container_isolation(Path::new(&home), &host_secret(), Some(&table), &no_env());
         assert_eq!(
             method_of(isolation.as_ref()),
             Some(IdentityIsolationMethod::Container),
@@ -811,7 +910,13 @@ mod tests {
     #[test]
     fn resolve_reports_os_account_off_a_container() {
         let (_dir, home) = temp_home("mangostudio-resolve-home-");
-        let isolation = resolve_external_agent_isolation(Path::new(&home), false, None, &no_env());
+        let isolation = resolve_external_agent_isolation(
+            Path::new(&home),
+            &host_secret(),
+            false,
+            None,
+            &no_env(),
+        );
         assert_eq!(
             method_of(isolation.as_ref()),
             Some(IdentityIsolationMethod::OsAccount)
@@ -824,6 +929,7 @@ mod tests {
         let (_dir, home) = temp_home("mangostudio-resolve-home-");
         let clean = resolve_external_agent_isolation(
             Path::new(&home),
+            &host_secret(),
             true,
             Some(&mount_line("/proc")),
             &no_env(),
@@ -834,7 +940,13 @@ mod tests {
         );
         let shared = mount_line(&join(&home, ".claude"));
         assert_eq!(
-            resolve_external_agent_isolation(Path::new(&home), true, Some(&shared), &no_env()),
+            resolve_external_agent_isolation(
+                Path::new(&home),
+                &host_secret(),
+                true,
+                Some(&shared),
+                &no_env()
+            ),
             None,
             "a containerized runtime must not fall back to os-account past the mount check"
         );
@@ -846,6 +958,7 @@ mod tests {
         for containerized in [false, true] {
             let isolation = resolve_external_agent_isolation(
                 Path::new(&home),
+                &host_secret(),
                 containerized,
                 Some(&mount_line("/proc")),
                 &no_env(),
@@ -861,7 +974,13 @@ mod tests {
     #[test]
     fn resolve_attests_nothing_when_the_credential_home_is_unreadable() {
         assert_eq!(
-            resolve_external_agent_isolation(&absent_home(), false, None, &no_env()),
+            resolve_external_agent_isolation(
+                &absent_home(),
+                &host_secret(),
+                false,
+                None,
+                &no_env()
+            ),
             None,
             "unreadable home must yield no attestation, not a weaker one"
         );

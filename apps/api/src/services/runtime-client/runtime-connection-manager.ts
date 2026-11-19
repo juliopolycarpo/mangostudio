@@ -116,8 +116,13 @@ export type RuntimeEnvironmentResolver = (
  * all: it says the runtime came from this hub's cache because the release could
  * not be reached, which is the one thing about a successful launch worth
  * saying. Only container and WSL launches raise either.
+ *
+ * `handshaking` is the wait for a spawned child's hello: the process exists and
+ * the handshake budget is counting. Every launch that spawns a child raises it
+ * (Local, `stdio`, `wsl`, `ssh`, `container`), so a slow cold start reads as a
+ * named step instead of an unexplained `connecting`.
  */
-export type RuntimeConnectPhase = 'pulling' | 'offline-cache';
+export type RuntimeConnectPhase = 'pulling' | 'offline-cache' | 'handshaking';
 
 /**
  * What an attempt hands its connector besides the definition.
@@ -1310,6 +1315,16 @@ export class RuntimeConnectionManager {
       return;
     }
 
+    if (phase === 'handshaking') {
+      if (entry.status.handshaking) return;
+      // A container launch pulls before it spawns, so the download is over by
+      // the time the child exists. Leaving `pullingImage` up would keep the
+      // card saying "pulling" for the whole handshake.
+      entry.status = { ...entry.status, pullingImage: undefined, handshaking: true };
+      this.#publish(userId);
+      return;
+    }
+
     if (entry.status.pullingImage) return;
     entry.status = { ...entry.status, pullingImage: true };
     this.#publish(userId);
@@ -1604,6 +1619,8 @@ export interface LocalRuntimeOpenOptions {
   readonly externalAgentIsolation: HubExternalAgentIsolation;
   /** Aborted when the attempt is released; terminates a child still handshaking. */
   readonly signal: AbortSignal;
+  /** Names the phase the attempt is in; see {@link RuntimeConnectPhase}. */
+  readonly report?: (phase: RuntimeConnectPhase) => void;
 }
 
 /**
@@ -1645,6 +1662,7 @@ async function openLocalRuntime(
         return `The Local runtime binary was not found at ${failure.command}. Reinstall MangoStudio so it ships beside the hub, or set MANGOSTUDIO_RUNTIME_BINARY to a runtime binary.`;
       },
       onClosed: options.onUnavailable,
+      onHandshakeStart: () => options.report?.('handshaking'),
       signal: options.signal,
     });
   } catch (error) {
@@ -1803,7 +1821,7 @@ export function createLocalRuntimeConnector(
   const admit = async (
     userId: string,
     onUnavailable: () => void,
-    signal: AbortSignal,
+    context: RuntimeConnectContext,
     claim: LocalCredentialClaim
   ) => {
     const requested = claim.withdrawn ? 'withdrawn' : 'single-user';
@@ -1811,7 +1829,8 @@ export function createLocalRuntimeConnector(
       onUnavailable,
       workspaceBinding: localWorkspaceBinding(userId),
       externalAgentIsolation: requested,
-      signal,
+      signal: context.signal,
+      report: context.report,
     });
     // Asked for attestation, but a second owner arrived while this open was
     // still running and withdrew the claim: the connection carries an
@@ -1864,6 +1883,7 @@ export function createLocalRuntimeConnector(
           workspaceBinding: localWorkspaceBinding(userId),
           externalAgentIsolation: 'withdrawn',
           signal: context.signal,
+          report: context.report,
         });
       }
       if (hasOtherOwner(userId)) {
@@ -1875,7 +1895,7 @@ export function createLocalRuntimeConnector(
       claims.add(claim);
       try {
         if (multipleOwners) await withdrawAttestation();
-        return await admit(userId, onUnavailable, context.signal, claim);
+        return await admit(userId, onUnavailable, context, claim);
       } finally {
         claims.delete(claim);
       }
@@ -1913,6 +1933,7 @@ async function connectStdioRuntime(
     // A development hub has no release for a cargo build to match.
     requireMatchingRelease: !isDevelopmentVersion(hubVersion),
     onClosed: onUnavailable,
+    onHandshakeStart: () => context.report('handshaking'),
     signal: context.signal,
   });
   return {
@@ -1971,6 +1992,7 @@ export async function connectWslRuntime(
     // cancel that lands after the distribution is ready would still run the
     // runtime spawn and handshake to completion before being discarded.
     signal: context?.signal,
+    onHandshakeStart: () => context?.report?.('handshaking'),
   });
   return {
     client: new RuntimeClient(connection.hub, onUnavailable, definition.id),
