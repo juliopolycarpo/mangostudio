@@ -3160,6 +3160,8 @@ export const messages = {
       winget: 'winget',
       git: 'Git',
       volta: 'Volta',
+      scoop: 'Scoop',
+      mise: 'mise',
       mangostudio: 'MangoStudio',
       claude: 'Claude Code',
       codex: 'Codex',
@@ -3811,6 +3813,8 @@ export const messages = {
       winget: 'via winget',
       bun: 'via instalador do Bun',
       'mangostudio-managed': 'gerenciado pelo MangoStudio',
+      scoop: 'via Scoop',
+      mise: 'via mise',
     },
     versions: {
       title: 'Gerenciado por {manager}',

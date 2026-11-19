@@ -915,6 +915,16 @@ describe('nodeUpdateAffordance', () => {
     });
   });
 
+  it.each(['scoop', 'mise'] as const)(
+    'reports managed-elsewhere for a %s-managed Node',
+    (source) => {
+      expect(nodeUpdateAffordance(effectiveNode(source), CATALOG)).toEqual({
+        kind: 'managed-elsewhere',
+        source,
+      });
+    }
+  );
+
   it('reports managed-elsewhere, defaulting to system, when no manager is recorded', () => {
     expect(nodeUpdateAffordance(effectiveNode(undefined), CATALOG)).toEqual({
       kind: 'managed-elsewhere',

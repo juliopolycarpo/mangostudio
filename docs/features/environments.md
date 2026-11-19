@@ -63,7 +63,9 @@ a runtime whose manifest does not advertise `features.toolchain`; such a peer ke
 
 Each installation carries a `pathSource`: `nvm`, `fnm` and `volta` come from the
 version-manager classification (fnm's Windows default root `%APPDATA%\fnm` and macOS root are
-recognised without `FNM_DIR`); `bun` is Bun's own installer; `winget` is not visible by path,
+recognised without `FNM_DIR`); `scoop` and `mise` are detect-only, matched by layout
+(`scoop\shims`, `scoop\apps\nodejs*`, `mise/shims`, `mise/installs`) so the card offers the
+copy-only update instead of the winget install on top of them; `bun` is Bun's own installer; `winget` is not visible by path,
 because winget's MSI and the nodejs.org MSI both land in `Program Files\nodejs`, so a Windows
 probe asks `winget list --id OpenJS.NodeJS.LTS --exact` once per scan and marks the match. A
 probe that times out leaves the installation as `system`; the exit-code allowlist on the winget
@@ -124,5 +126,5 @@ the same selection as the picker, for people on SSH. See [`cli.md`](../reference
 ## Deferred
 
 Node managers beyond winget LTS and fnm (nvm-windows v2 once it has a winget id, a POSIX
-`fnm.install`, detect-only classification for Scoop and mise) are tracked in
+`fnm.install`) are tracked in
 [#1011](https://github.com/juliopolycarpo/mangostudio/issues/1011).
