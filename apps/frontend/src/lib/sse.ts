@@ -13,7 +13,7 @@
  * own automatic batching, since an install script's output is already capped.
  */
 
-import { SSE_FRAME_MAX_CHARS } from '@mangostudio/shared/streaming';
+import { SSE_FRAME_MAX_CHARS } from '@mangostudio/shared/streaming/limits';
 import {
   DelimitedTextSplitter,
   RecordTooLongError,

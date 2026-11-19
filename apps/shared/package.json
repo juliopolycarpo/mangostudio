@@ -31,6 +31,7 @@
     "./agents": "./src/agents/index.ts",
     "./capabilities": "./src/capabilities/index.ts",
     "./streaming": "./src/streaming/index.ts",
+    "./streaming/limits": "./src/streaming/limits.ts",
     "./auth": "./src/auth/index.ts",
     "./errors": "./src/errors/index.ts",
     "./types": "./src/types/index.ts",
