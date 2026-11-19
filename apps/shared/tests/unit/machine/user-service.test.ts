@@ -624,6 +624,36 @@ describe('replaceUnitProgram', () => {
     expect(updated).toContain('ExecStart="/opt/My Apps/new" serve');
   });
 
+  // systemd reads `-`, `@`, `:`, `+` and `!` before the path as execution
+  // modifiers (ignore failure, argv[0] override, ...). They are the operator's
+  // and are not part of the program, so a retarget must neither drop them nor
+  // report them as part of the path.
+  for (const prefix of ['-', '@', ':', '+', '!', '!!', '-+']) {
+    it(`keeps the "${prefix}" ExecStart prefix while replacing the program`, () => {
+      const body = renderSystemdUnitFile(DEFINITION).replace(
+        'ExecStart="/opt/My Apps/example" serve',
+        `ExecStart=${prefix}/old/example serve`
+      );
+      expect(execPathFromUnitBody(body)).toBe('/old/example');
+
+      const updated = replaceUnitProgram(body, STABLE) ?? '';
+
+      expect(updated).toContain(`ExecStart=${prefix}${STABLE} serve`);
+      expect(execPathFromUnitBody(updated)).toBe(STABLE);
+    });
+  }
+
+  it('keeps a prefix in front of a quoted program', () => {
+    const body = renderSystemdUnitFile(DEFINITION).replace(
+      'ExecStart="/opt/My Apps/example"',
+      'ExecStart=-"/opt/My Apps/example"'
+    );
+    expect(execPathFromUnitBody(body)).toBe('/opt/My Apps/example');
+    expect(replaceUnitProgram(body, '/opt/My Apps/new')).toContain(
+      'ExecStart=-"/opt/My Apps/new" serve'
+    );
+  });
+
   it('replaces the launchd program and keeps the rest of the plist', () => {
     const body = renderLaunchdPlistFile('com.example.unit', DEFINITION);
     const updated = replaceUnitProgram(body, STABLE) ?? '';

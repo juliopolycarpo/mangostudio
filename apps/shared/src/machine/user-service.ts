@@ -458,25 +458,36 @@ function firstSystemdArg(execStart: string): string {
   return splitSystemdProgram(execStart).program;
 }
 
-/** The program an `ExecStart` value starts and the text after it, arguments included. */
-function splitSystemdProgram(execStart: string): { program: string; rest: string } {
-  if (!execStart.startsWith('"')) {
-    const program = execStart.split(/\s+/)[0] ?? execStart;
-    return { program, rest: execStart.slice(program.length) };
+/**
+ * What an `ExecStart` value starts. `prefix` is the run of execution modifiers
+ * systemd reads before the path (`-` ignore failure, `@` argv[0] override, `:`
+ * no expansion, `+` and `!` privileges); they are not part of the program.
+ * `rest` is the text after the program, arguments included.
+ */
+function splitSystemdProgram(execStart: string): {
+  prefix: string;
+  program: string;
+  rest: string;
+} {
+  const prefix = /^[-@:+!]*/.exec(execStart)?.[0] ?? '';
+  const command = execStart.slice(prefix.length);
+  if (!command.startsWith('"')) {
+    const program = command.split(/\s+/)[0] ?? command;
+    return { prefix, program, rest: command.slice(program.length) };
   }
   let out = '';
   let index = 1;
-  for (; index < execStart.length; index += 1) {
-    const char = execStart[index];
-    if (char === '\\' && index + 1 < execStart.length) {
-      out += execStart[index + 1];
+  for (; index < command.length; index += 1) {
+    const char = command[index];
+    if (char === '\\' && index + 1 < command.length) {
+      out += command[index + 1];
       index += 1;
       continue;
     }
     if (char === '"') break;
     out += char;
   }
-  return { program: out, rest: execStart.slice(index + 1) };
+  return { prefix, program: out, rest: command.slice(index + 1) };
 }
 
 /**
@@ -487,8 +498,8 @@ function splitSystemdProgram(execStart: string): { program: string; rest: string
 export function replaceUnitProgram(body: string, program: string): string | null {
   const execStart = /^ExecStart=(.+)$/m.exec(body);
   if (execStart?.[1]) {
-    const { rest } = splitSystemdProgram(execStart[1].trim());
-    const line = `ExecStart=${escapeSystemdArg(program, { execStart: true })}${rest}`;
+    const { prefix, rest } = splitSystemdProgram(execStart[1].trim());
+    const line = `ExecStart=${prefix}${escapeSystemdArg(program, { execStart: true })}${rest}`;
     return (
       body.slice(0, execStart.index) + line + body.slice(execStart.index + execStart[0].length)
     );
