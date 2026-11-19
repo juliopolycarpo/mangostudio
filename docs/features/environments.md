@@ -70,17 +70,23 @@ use`, `fnm env` or `volta` line in them rewrites `PATH`. When a selection resolv
 `terminal.open` therefore launches the shell through a shim (`terminal/shell_init.rs`) that runs
 the usual startup first and puts the pinned directories back in front:
 
-- **bash:** `--rcfile` on a shim that sources `~/.bashrc`. A login launch (macOS) ignores
-  `--rcfile`, so the shim sources what `bash -l` reads instead: `/etc/profile`, then the first of
-  `~/.bash_profile`, `~/.bash_login`, `~/.profile`.
-- **zsh:** `ZDOTDIR` points at a shim directory holding the four startup files. Each sources the
-  real one from the user's own `ZDOTDIR` (or `$HOME`); the last file zsh reads (`.zshrc`, or
-  `.zlogin` for a login shell) re-pins and restores `ZDOTDIR`.
+- **bash (Linux):** `--rcfile` on a shim that sources `~/.bashrc`, then prepends. A macOS bash
+  stays a plain `-l` login shell with no shim: `--rcfile` is ignored by a login shell, and
+  replacing `-l` would lose `login_shell`, the `-bash` `$0`, `logout` and `.bash_logout`. macOS
+  bash therefore does not get the re-pin (macOS's default shell is zsh).
+- **zsh:** `ZDOTDIR` points at a shim directory holding only `.zshenv`. It restores the user's
+  original `ZDOTDIR` (or unsets it) at once, sources the user's `.zshenv`, and registers a
+  one-shot `precmd` hook that prepends before the first prompt. `/etc/zshrc`, `.zprofile`,
+  `.zshrc` and `.zlogin` are read by zsh itself from the real `ZDOTDIR`, so `HISTFILE`,
+  `.zcompdump`, oh-my-zsh and p10k never see the shim, and the pin lands after profile `PATH`
+  rewrites. If `/etc/zshenv` or `/etc/zsh/zshenv` mentions `ZDOTDIR`, the shim could be
+  bypassed, so that host keeps the plain launch.
 - **PowerShell:** `-NoExit -Command` prepends after PowerShell has loaded `$PROFILE`.
 
 Shims live in a private directory under the OS temp directory and are removed when the session
 ends; nothing is written to the user's home. Bash and zsh on a Windows host keep the plain launch.
-The pin is applied once, after startup: a hook that re-runs per directory (`fnm env --use-on-cd`)
+The pin is applied once (zsh: at the first prompt, so a command run before it sees the
+profile's `PATH`): a hook that re-runs per directory (`fnm env --use-on-cd`)
 can still move the selection when the user `cd`s.
 
 ## What the scanner knows

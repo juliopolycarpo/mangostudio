@@ -1874,20 +1874,37 @@ fn pinned_node_selection() -> crate::commands::toolchain::Selection {
 
 #[cfg(unix)]
 #[test]
-fn a_profile_that_rewrites_path_cannot_displace_the_pinned_toolchain() {
-    for (platform, label) in [("linux", "interactive"), ("darwin", "login")] {
-        let (_scratch, host) = rewriting_profile_host("terminal-pin-profile", platform);
-        let mut params = open_params();
-        params.toolchain = Some(pinned_node_selection());
-        let prepared = prepare(params, host.clone()).unwrap();
-        let home = std::path::PathBuf::from(&host.home_dir);
-        let path = run_prepared_shell(&prepared, &home, "printf '%s' \"$PATH\"");
-        assert!(
-            path.starts_with("/pinned/node/bin:/pinned/bun/bin:/profile/rewrite/bin:"),
-            "{label} bash on {platform}: expected the pinned toolchain in front of the profile's \
-             PATH change | received {path:?}"
-        );
-    }
+fn a_profile_that_rewrites_path_cannot_displace_the_pinned_toolchain_in_linux_bash() {
+    let (_scratch, host) = rewriting_profile_host("terminal-pin-profile", "linux");
+    let mut params = open_params();
+    params.toolchain = Some(pinned_node_selection());
+    let prepared = prepare(params, host.clone()).unwrap();
+    let home = std::path::PathBuf::from(&host.home_dir);
+    let path = run_prepared_shell(&prepared, &home, "printf '%s' \"$PATH\"");
+    assert!(
+        path.starts_with("/pinned/node/bin:/pinned/bun/bin:/profile/rewrite/bin:"),
+        "interactive bash on linux: expected the pinned toolchain in front of the profile's \
+         PATH change | received {path:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn macos_bash_keeps_its_login_launch_without_a_shim() {
+    let (_scratch, host) = rewriting_profile_host("terminal-pin-macos-bash", "darwin");
+    let mut params = open_params();
+    params.toolchain = Some(pinned_node_selection());
+    let prepared = prepare(params, host).unwrap();
+    assert!(
+        prepared.shell_init.is_none(),
+        "expected no shim for macOS bash, which keeps login semantics"
+    );
+    assert_eq!(
+        prepared.request.args,
+        [std::ffi::OsString::from("-l")],
+        "expected macOS bash to launch with exactly [\"-l\"] | received {:?}",
+        prepared.request.args
+    );
 }
 
 #[cfg(unix)]

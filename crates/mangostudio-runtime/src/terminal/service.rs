@@ -1037,6 +1037,7 @@ fn prepare(params: OpenParams, host: PathEnv) -> Result<Prepared, RemoteError> {
         );
         let original_zdotdir = env.get("ZDOTDIR").cloned();
         let scratch_parent = std::env::temp_dir();
+        let global_zshenv_files = shell_init::default_global_zshenv_files();
         shell_init = shell_init::plan(&shell_init::Launch {
             shell,
             login: host.platform == "darwin",
@@ -1044,6 +1045,7 @@ fn prepare(params: OpenParams, host: PathEnv) -> Result<Prepared, RemoteError> {
             pinned: &pinned,
             path_separator: host.path_list_separator(),
             original_zdotdir: original_zdotdir.as_deref(),
+            global_zshenv_files: &global_zshenv_files,
             scratch_parent: &scratch_parent,
         });
         let args = match &shell_init {

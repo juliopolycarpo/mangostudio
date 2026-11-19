@@ -1,16 +1,21 @@
 //! Keeps the pinned toolchain in front of `PATH` after the user's own shell startup files ran.
 //!
 //! The terminal's environment already starts with the selected Node and Bun directories, but a
-//! profile that runs `nvm use`, `fnm env` or `volta` rewrites `PATH` afterwards. Each shell gets
-//! a small launch shim that runs the user's normal startup and then puts the pinned directories
-//! back in front:
+//! profile that runs `nvm use`, `fnm env` or `volta` rewrites `PATH` afterwards. Where the shell
+//! allows it, a small launch shim puts the pinned directories back in front:
 //!
-//! - bash: `--rcfile <shim>`. `--rcfile` is ignored by a login shell, so a login launch has the
-//!   shim read `/etc/profile` and the first of `~/.bash_profile`, `~/.bash_login`, `~/.profile`,
-//!   which is what `bash -l` reads.
-//! - zsh: `ZDOTDIR=<shim dir>` holds a shim for each startup file. Each one sources the user's
-//!   real file from the user's own `ZDOTDIR` (or `$HOME`), and the last file zsh reads for the
-//!   launch kind (`.zshrc`, or `.zlogin` for a login shell) re-pins and hands `ZDOTDIR` back.
+//! - bash (non-login, Linux): `--rcfile <shim>` sources `~/.bashrc`, then prepends. This is what
+//!   an interactive bash reads anyway (`SYS_BASHRC` aside). A login bash (macOS) gets no shim:
+//!   `--rcfile` is ignored by a login shell, and replacing `-l` would lose login semantics
+//!   (`login_shell`, the `-bash` `$0`, `logout`, `.bash_logout`). macOS defaults to zsh, so
+//!   bash there keeps its own `PATH` order.
+//! - zsh: `ZDOTDIR=<shim dir>` holds only a `.zshenv`. It restores the user's original `ZDOTDIR`
+//!   (or unsets it) at once, sources the user's own `.zshenv`, and registers a one-shot `precmd`
+//!   hook that prepends the pinned directories before the first prompt. Every later startup file
+//!   (`/etc/zshrc`, `.zprofile`, `.zshrc`, `.zlogin`) is read by zsh itself from the real
+//!   `ZDOTDIR`, so `HISTFILE`, `.zcompdump`, oh-my-zsh and p10k never see the shim, and the hook
+//!   runs after every profile `PATH` rewrite. A global `zshenv` that mentions `ZDOTDIR` could
+//!   redirect the lookup before the shim is read, so that host keeps the plain launch.
 //! - PowerShell: `-NoExit -Command`. PowerShell loads `$PROFILE` before it runs the command, so
 //!   the command only has to prepend.
 //!
@@ -57,12 +62,22 @@ pub(super) struct Launch<'a> {
     pub path_separator: &'a str,
     /// The `ZDOTDIR` the session would otherwise start with.
     pub original_zdotdir: Option<&'a str>,
+    /// Global zsh `zshenv` files; one that mentions `ZDOTDIR` disables the zsh shim.
+    pub global_zshenv_files: &'a [PathBuf],
     /// Where the shim directory is created.
     pub scratch_parent: &'a Path,
 }
 
 /// Plans the launch that re-pins the toolchain after profile init, or `None` when there is
 /// nothing to pin or the shim cannot be written (the terminal then starts the plain way).
+/// Where zsh looks for a global `zshenv` (`/etc/zshenv`, or `/etc/zsh/zshenv` on Debian builds).
+pub(super) fn default_global_zshenv_files() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from("/etc/zshenv"),
+        PathBuf::from("/etc/zsh/zshenv"),
+    ]
+}
+
 pub(super) fn plan(launch: &Launch<'_>) -> Option<ShellInit> {
     if launch.pinned.is_empty() {
         return None;
@@ -79,18 +94,22 @@ pub(super) fn plan(launch: &Launch<'_>) -> Option<ShellInit> {
             shim_dir: None,
         }),
         _ if launch.windows => None,
+        // A login bash ignores `--rcfile`; keep `-l` and its semantics instead of a shim.
+        RuntimeShellKind::Bash if launch.login => None,
         RuntimeShellKind::Bash => write_shim(launch, |dir, pin| {
             let rcfile = dir.join("bashrc");
-            std::fs::write(&rcfile, bash_rcfile(launch.login, pin))?;
+            std::fs::write(&rcfile, bash_rcfile(pin))?;
             Ok((
                 vec!["--rcfile".into(), rcfile.into_os_string(), "-i".into()],
                 Vec::new(),
             ))
         }),
+        RuntimeShellKind::Zsh if global_zshenv_mentions_zdotdir(launch.global_zshenv_files) => None,
         RuntimeShellKind::Zsh => write_shim(launch, |dir, pin| {
-            for (name, body) in zsh_files(dir, launch.original_zdotdir, launch.login, pin) {
-                std::fs::write(dir.join(name), body)?;
-            }
+            std::fs::write(
+                dir.join(".zshenv"),
+                zshenv_shim(launch.original_zdotdir, pin),
+            )?;
             let args = if launch.login {
                 vec!["-l".into()]
             } else {
@@ -163,63 +182,40 @@ fn posix_pin(pin: &str) -> String {
     format!("export PATH={}:\"$PATH\"\n", posix_quote(pin))
 }
 
-fn bash_rcfile(login: bool, pin: &str) -> String {
-    let startup = if login {
-        // What `bash -l` reads: the system profile, then the first personal profile that exists.
-        "if [ -r /etc/profile ]; then . /etc/profile; fi\n\
-         if [ -r \"$HOME/.bash_profile\" ]; then . \"$HOME/.bash_profile\"\n\
-         elif [ -r \"$HOME/.bash_login\" ]; then . \"$HOME/.bash_login\"\n\
-         elif [ -r \"$HOME/.profile\" ]; then . \"$HOME/.profile\"\n\
-         fi\n"
-    } else {
-        "if [ -r \"$HOME/.bashrc\" ]; then . \"$HOME/.bashrc\"; fi\n"
-    };
+fn bash_rcfile(pin: &str) -> String {
     format!(
-        "# Written by MangoStudio: the usual startup, then the pinned toolchain.\n{startup}{}",
+        "# Written by MangoStudio: the usual startup, then the pinned toolchain.\n\
+         if [ -r \"$HOME/.bashrc\" ]; then . \"$HOME/.bashrc\"; fi\n{}",
         posix_pin(pin)
     )
 }
 
-/// The four zsh startup files, as `(file name, body)`.
-fn zsh_files(
-    shim_dir: &Path,
-    original_zdotdir: Option<&str>,
-    login: bool,
-    pin: &str,
-) -> Vec<(&'static str, String)> {
-    let shim = posix_quote(&shim_dir.to_string_lossy());
+/// A global `zshenv` that sets or reads `ZDOTDIR` runs before the shim and may move it.
+fn global_zshenv_mentions_zdotdir(files: &[PathBuf]) -> bool {
+    files.iter().any(|file| {
+        std::fs::read(file).is_ok_and(|bytes| String::from_utf8_lossy(&bytes).contains("ZDOTDIR"))
+    })
+}
+
+/// The shim's only file. It hands `ZDOTDIR` back before anything else can read it, runs the
+/// user's `.zshenv`, and leaves a one-shot `precmd` hook to pin the toolchain at the first prompt.
+fn zshenv_shim(original_zdotdir: Option<&str>, pin: &str) -> String {
     let restore_original = match original_zdotdir {
         Some(value) => format!("ZDOTDIR={}\n", posix_quote(value)),
         None => "unset ZDOTDIR\n".to_owned(),
     };
-    let last = if login { ".zlogin" } else { ".zshrc" };
-    let mut files = vec![(
-        ".zshenv",
-        format!(
-            "# Written by MangoStudio: sources the real .zshenv, then keeps reading from here.\n\
-             __mango_shim_dir={shim}\n{restore_original}\
-             if [[ -r \"${{ZDOTDIR:-$HOME}}/.zshenv\" ]]; then . \"${{ZDOTDIR:-$HOME}}/.zshenv\"; fi\n\
-             __mango_user_zdotdir=${{ZDOTDIR-}}\n\
-             ZDOTDIR=$__mango_shim_dir\n"
-        ),
-    )];
-    for name in [".zprofile", ".zshrc", ".zlogin"] {
-        let mut body = format!(
-            "# Written by MangoStudio: sources the real {name} from the user's ZDOTDIR.\n\
-             if [[ -n $__mango_user_zdotdir ]]; then ZDOTDIR=$__mango_user_zdotdir; else unset ZDOTDIR; fi\n\
-             if [[ -r \"${{ZDOTDIR:-$HOME}}/{name}\" ]]; then . \"${{ZDOTDIR:-$HOME}}/{name}\"; fi\n\
-             __mango_user_zdotdir=${{ZDOTDIR-}}\n"
-        );
-        if name == last {
-            // The user's ZDOTDIR is already back in place; finish with the pin.
-            body.push_str(&posix_pin(pin));
-            body.push_str("unset __mango_shim_dir __mango_user_zdotdir\n");
-        } else {
-            body.push_str("ZDOTDIR=$__mango_shim_dir\n");
-        }
-        files.push((name, body));
-    }
-    files
+    format!(
+        "# Written by MangoStudio: restores ZDOTDIR, runs the real .zshenv, pins at the first prompt.\n\
+         {restore_original}\
+         if [[ -r \"${{ZDOTDIR:-$HOME}}/.zshenv\" ]]; then . \"${{ZDOTDIR:-$HOME}}/.zshenv\"; fi\n\
+         __mango_pin_toolchain() {{\n\
+         \x20 {pin_command}\
+         \x20 precmd_functions=(\"${{(@)precmd_functions:#__mango_pin_toolchain}}\")\n\
+         \x20 unfunction __mango_pin_toolchain\n\
+         }}\n\
+         precmd_functions+=(__mango_pin_toolchain)\n",
+        pin_command = posix_pin(pin),
+    )
 }
 
 /// The PowerShell command that prepends the pinned directories to `$env:PATH`.

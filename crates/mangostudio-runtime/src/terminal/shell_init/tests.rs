@@ -23,6 +23,7 @@ fn launch<'a>(
         pinned,
         path_separator: ":",
         original_zdotdir: None,
+        global_zshenv_files: &[],
         scratch_parent,
     }
 }
@@ -38,10 +39,17 @@ fn find_shell(name: &str) -> Option<PathBuf> {
         return None;
     }
     // Fixed locations rather than a PATH read, which the config boundary test restricts.
-    ["/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin"]
+    let found = ["/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin"]
         .iter()
         .map(|dir| Path::new(dir).join(name))
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| candidate.is_file());
+    // macOS ships zsh, and these tests are its only coverage of the zsh shim: a missing one
+    // there is a broken runner, not a reason to skip.
+    assert!(
+        found.is_some() || !(cfg!(target_os = "macos") && name == "zsh"),
+        "expected zsh in /bin on a macOS host | received none under /usr/bin, /bin, /usr/local/bin, /opt/homebrew/bin"
+    );
+    found
 }
 
 /// Runs `shell` the way a terminal would (interactive, shim args and env), but non-PTY and with
@@ -100,44 +108,26 @@ fn bash_profile_that_rewrites_path_does_not_displace_the_pin() {
 }
 
 #[test]
-fn bash_login_shim_reads_the_first_login_profile_like_bash_l() {
-    let Some(bash) = find_shell("bash") else {
-        eprintln!("skipped: no bash on PATH");
-        return;
-    };
+fn a_login_bash_gets_no_shim_so_it_keeps_login_semantics() {
     let scratch = ScratchDir::created("shell-init-bash-login");
-    let home = scratch.join("home");
-    std::fs::create_dir(&home).unwrap();
-    std::fs::write(
-        home.join(".bash_profile"),
-        format!("export PATH={EVIL}:$PATH\nexport FROM_BASH_PROFILE=1\n"),
-    )
-    .unwrap();
-    // bash -l stops at .bash_profile, so these two must not run.
-    std::fs::write(home.join(".bash_login"), "export FROM_BASH_LOGIN=1\n").unwrap();
-    std::fs::write(home.join(".profile"), "export FROM_PROFILE=1\n").unwrap();
-    // A plain interactive bash reads .bashrc, a login one only if the profile sources it.
-    std::fs::write(home.join(".bashrc"), "export FROM_BASHRC=1\n").unwrap();
     let pins = pinned();
-    let init = plan(&launch(RuntimeShellKind::Bash, true, &pins, &scratch)).expect("a bash shim");
-    let out = run_shell(
-        &bash,
-        &init,
-        &home,
-        &[],
-        "printf '%s|%s|%s|%s|%s' \"$PATH\" \"$FROM_BASH_PROFILE\" \"$FROM_BASH_LOGIN\" \"$FROM_PROFILE\" \"$FROM_BASHRC\"",
+    assert!(
+        plan(&launch(RuntimeShellKind::Bash, true, &pins, &scratch)).is_none(),
+        "expected no shim for a login bash (--rcfile is ignored there and -l must stay)"
     );
-    let fields: Vec<&str> = out.split('|').collect();
-    assert_pinned_first(fields[0], "bash login");
-    assert_eq!(
-        fields[1..],
-        ["1", "", "", ""],
-        "expected only .bash_profile to run for a login launch | received {out:?}"
+    assert!(
+        scratch_children(&scratch).is_empty(),
+        "expected no shim directory for a login bash"
     );
 }
 
+/// Runs the first-prompt hooks the way zsh would before drawing the prompt (`zsh -i -c` never
+/// reaches a prompt), then prints `PATH`, `ZDOTDIR` and the hooks left registered.
+const ZSH_AT_FIRST_PROMPT: &str = "for f in $precmd_functions; do $f; done; \
+     printf '%s|%s|%s' \"$PATH\" \"${ZDOTDIR-unset}\" \"$precmd_functions\"";
+
 #[test]
-fn zsh_profile_that_rewrites_path_does_not_displace_the_pin() {
+fn zsh_profile_that_rewrites_path_loses_to_the_pin_at_the_first_prompt() {
     let Some(zsh) = find_shell("zsh") else {
         eprintln!("skipped: no zsh on PATH");
         return;
@@ -145,26 +135,35 @@ fn zsh_profile_that_rewrites_path_does_not_displace_the_pin() {
     let scratch = ScratchDir::created("shell-init-zsh");
     let home = scratch.join("home");
     std::fs::create_dir(&home).unwrap();
+    std::fs::write(home.join(".zshenv"), "export PATH=/env/bin:$PATH\n").unwrap();
+    std::fs::write(
+        home.join(".zprofile"),
+        format!("export PATH={EVIL}:$PATH\n"),
+    )
+    .unwrap();
     std::fs::write(home.join(".zshrc"), format!("export PATH={EVIL}:$PATH\n")).unwrap();
     let pins = pinned();
     let init = plan(&launch(RuntimeShellKind::Zsh, false, &pins, &scratch)).expect("a zsh shim");
-    let out = run_shell(
-        &zsh,
-        &init,
-        &home,
-        &[],
-        "printf '%s|%s' \"$PATH\" \"${ZDOTDIR-unset}\"",
+    let before = run_shell(&zsh, &init, &home, &[], "printf '%s' \"$PATH\"");
+    assert!(
+        before.starts_with(EVIL),
+        "expected the profile's rewrite to win until the first prompt | received {before:?}"
     );
-    let (path, zdotdir) = out.split_once('|').expect("expected PATH|ZDOTDIR output");
-    assert_pinned_first(path, "zsh interactive");
+    let out = run_shell(&zsh, &init, &home, &[], ZSH_AT_FIRST_PROMPT);
+    let fields: Vec<&str> = out.split('|').collect();
+    assert_pinned_first(fields[0], "zsh interactive");
     assert_eq!(
-        zdotdir, "unset",
-        "expected ZDOTDIR handed back unset to the user's session | received {zdotdir:?}"
+        fields[1], "unset",
+        "expected the user's session to see no ZDOTDIR | received {out:?}"
+    );
+    assert_eq!(
+        fields[2], "",
+        "expected the one-shot hook to remove itself | received {out:?}"
     );
 }
 
 #[test]
-fn zsh_login_shim_runs_every_user_file_in_order_and_pins_after_the_last() {
+fn zsh_login_shim_leaves_every_user_file_to_zsh_in_order() {
     let Some(zsh) = find_shell("zsh") else {
         eprintln!("skipped: no zsh on PATH");
         return;
@@ -191,12 +190,18 @@ fn zsh_login_shim_runs_every_user_file_in_order_and_pins_after_the_last() {
     }
     let pins = pinned();
     let init = plan(&launch(RuntimeShellKind::Zsh, true, &pins, &scratch)).expect("a zsh shim");
+    assert_eq!(
+        init.args,
+        [OsString::from("-l")],
+        "expected a login zsh to keep -l | received {:?}",
+        init.args
+    );
     let out = run_shell(
         &zsh,
         &init,
         &home,
         &[],
-        "printf '%s|%s' \"$PATH\" \"$STEPS\"",
+        "for f in $precmd_functions; do $f; done; printf '%s|%s' \"$PATH\" \"$STEPS\"",
     );
     let (path, steps) = out.split_once('|').expect("expected PATH|STEPS output");
     assert_pinned_first(path, "zsh login");
@@ -225,19 +230,108 @@ fn zsh_shim_follows_a_zdotdir_the_user_zshenv_sets() {
     std::fs::write(config.join(".zshrc"), format!("export PATH={EVIL}:$PATH\n")).unwrap();
     let pins = pinned();
     let init = plan(&launch(RuntimeShellKind::Zsh, false, &pins, &scratch)).expect("a zsh shim");
-    let out = run_shell(
-        &zsh,
-        &init,
-        &home,
-        &[],
-        "printf '%s|%s' \"$PATH\" \"${ZDOTDIR-unset}\"",
-    );
-    let (path, zdotdir) = out.split_once('|').expect("expected PATH|ZDOTDIR output");
-    assert_pinned_first(path, "zsh with user ZDOTDIR");
+    let out = run_shell(&zsh, &init, &home, &[], ZSH_AT_FIRST_PROMPT);
+    let fields: Vec<&str> = out.split('|').collect();
+    assert_pinned_first(fields[0], "zsh with user ZDOTDIR");
     assert_eq!(
-        zdotdir,
+        fields[1],
         config.to_string_lossy(),
-        "expected the user's own ZDOTDIR back after startup | received {zdotdir:?}"
+        "expected the user's own ZDOTDIR after startup | received {out:?}"
+    );
+}
+
+/// What macOS's `/etc/zshrc` does: derive `HISTFILE` from `$ZDOTDIR`. zsh offers no way to
+/// substitute `/etc/zshrc`, so the same expression runs in the first user file zsh reads after
+/// `.zshenv`, which sees the same `ZDOTDIR` the global file would.
+#[test]
+fn startup_files_after_zshenv_see_the_users_zdotdir_not_the_shim() {
+    let Some(zsh) = find_shell("zsh") else {
+        eprintln!("skipped: no zsh on PATH");
+        return;
+    };
+    let scratch = ScratchDir::created("shell-init-zsh-histfile");
+    let home = scratch.join("home");
+    let config = scratch.join("config-zsh");
+    std::fs::create_dir(&home).unwrap();
+    std::fs::create_dir(&config).unwrap();
+    let probe = "HISTFILE=\"${ZDOTDIR:-$HOME}/.zsh_history\"\n";
+    std::fs::write(home.join(".zshrc"), probe).unwrap();
+    std::fs::write(config.join(".zshrc"), probe).unwrap();
+    let pins = pinned();
+
+    // No ZDOTDIR of its own: the history lives under the home directory.
+    let init = plan(&launch(RuntimeShellKind::Zsh, false, &pins, &scratch)).expect("a zsh shim");
+    let histfile = run_shell(&zsh, &init, &home, &[], "printf '%s' \"$HISTFILE\"");
+    assert_eq!(
+        Path::new(&histfile),
+        home.join(".zsh_history"),
+        "expected HISTFILE under the user's home, not the shim | received {histfile:?}"
+    );
+
+    // A ZDOTDIR from the session environment: the history lives there.
+    let mut with_zdotdir = launch(RuntimeShellKind::Zsh, false, &pins, &scratch);
+    let config_text = config.to_string_lossy().into_owned();
+    with_zdotdir.original_zdotdir = Some(&config_text);
+    let init = plan(&with_zdotdir).expect("a zsh shim");
+    let histfile = run_shell(&zsh, &init, &home, &[], "printf '%s' \"$HISTFILE\"");
+    assert_eq!(
+        Path::new(&histfile),
+        config.join(".zsh_history"),
+        "expected HISTFILE under the session's ZDOTDIR, not the shim | received {histfile:?}"
+    );
+}
+
+#[test]
+fn zsh_shim_directory_holds_only_zshenv_and_nothing_refers_to_it_afterwards() {
+    let scratch = ScratchDir::created("shell-init-zsh-files");
+    let pins = pinned();
+    let init = plan(&launch(RuntimeShellKind::Zsh, false, &pins, &scratch)).expect("a zsh shim");
+    let dir = PathBuf::from(&init.env[0].1);
+    let names: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(
+        names,
+        [OsString::from(".zshenv")],
+        "expected only .zshenv in the shim directory | received {names:?}"
+    );
+    let body = std::fs::read_to_string(dir.join(".zshenv")).unwrap();
+    assert!(
+        !body.contains(dir.to_string_lossy().as_ref()),
+        "expected the shim to never mention its own directory | received {body:?}"
+    );
+}
+
+#[test]
+fn a_global_zshenv_that_mentions_zdotdir_keeps_the_plain_zsh_launch() {
+    let scratch = ScratchDir::created("shell-init-zsh-global");
+    let global_dir = ScratchDir::created("shell-init-zsh-global-etc");
+    let moves = global_dir.join("zshenv");
+    let quiet = global_dir.join("quiet-zshenv");
+    let missing = global_dir.join("absent-zshenv");
+    std::fs::write(&moves, "export ZDOTDIR=/etc/zsh-config\n").unwrap();
+    std::fs::write(&quiet, "export EDITOR=vi\n").unwrap();
+    let pins = pinned();
+
+    let global = [missing.clone(), moves];
+    let mut launch_moved = launch(RuntimeShellKind::Zsh, false, &pins, &scratch);
+    launch_moved.global_zshenv_files = &global;
+    assert!(
+        plan(&launch_moved).is_none(),
+        "expected no shim when a global zshenv mentions ZDOTDIR"
+    );
+    assert!(
+        scratch_children(&scratch).is_empty(),
+        "expected no shim directory for the plain launch"
+    );
+
+    let global = [missing, quiet];
+    let mut launch_quiet = launch(RuntimeShellKind::Zsh, false, &pins, &scratch);
+    launch_quiet.global_zshenv_files = &global;
+    assert!(
+        plan(&launch_quiet).is_some(),
+        "expected the shim when no global zshenv mentions ZDOTDIR"
     );
 }
 
