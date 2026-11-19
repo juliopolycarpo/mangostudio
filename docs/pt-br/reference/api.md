@@ -58,13 +58,18 @@ Para automação fora do navegador, use chaves de API com escopo (`x-api-key`). 
 
 `q` mantém só os chats cujo título, nome da pasta do workdir (o último segmento do caminho) ou
 rótulo do runner (`mango` para o runner embutido, o id do alvo para um fornecedor) o contenha. A
-comparação é por substring literal (`%` e `_` são caracteres comuns), ignora maiúsculas ASCII, aparas
-de espaço nas pontas são removidas, e um `q` em branco lista tudo. `q` tem no máximo 100 caracteres
-(`CHAT_SEARCH_MAX_LENGTH`), senão 422. Os resultados paginam com o mesmo `limit` e `cursor`. Uma
-busca por substring não usa índice: o SQLite percorre os chats da conta do mais novo ao mais antigo e
-testa cada um até encher a página. Um termo comum volta após as primeiras linhas; um termo raro ou
-ausente lê todos os chats da conta (cerca de 5 ms com 2.000 chats e 21 ms com 10.000 na máquina de
-desenvolvimento).
+comparação é por substring literal (`%` e `_` são caracteres comuns), ignora maiúsculas e acentos,
+aparas de espaço nas pontas são removidas, e um `q` em branco lista tudo. Os dois lados passam por
+case folding Unicode e perdem as marcas de combinação, então `CONFIGURAÇÃO`, `configuração` e
+`configuracao` encontram `Configuração`, `STRASSE` encontra `Straße` e `ISTANBUL` encontra
+`İstanbul`. `q` tem no máximo 100 caracteres (`CHAT_SEARCH_MAX_LENGTH`), senão 422. Os resultados
+paginam com o mesmo `limit` e `cursor`. O texto normalizado de cada chat fica em `chats.searchText`,
+gravado junto com o título, o workdir e o runner. Uma busca por substring não usa índice: o SQLite
+percorre os chats da conta do mais novo ao mais antigo e testa cada um até encher a página. Um termo
+comum volta após as primeiras linhas; um termo raro ou ausente lê todos os chats da conta (cerca de
+1 ms com 2.000 chats e 8 ms com 10.000 na máquina de desenvolvimento). Um índice FTS5 trigram foi
+medido e não adotado: ganhou cerca de 7 ms nesse pior caso com 10.000 chats, perdeu para termos
+comuns e não responde a uma busca com menos de três caracteres.
 
 `GET /api/chats/:id` devolve o chat como a lista o mostra, para um cliente que guarda só algumas
 páginas da lista. Um chat inexistente e um chat de outra conta respondem igualmente 404 com

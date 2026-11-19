@@ -17,6 +17,7 @@ import { type Kysely, type RawBuilder, type Selectable, sql, type Updateable } f
 import type { Database } from '../../../db/types';
 import { generateId } from '../../../utils/id';
 import type { ChatListCursor } from '../domain/chat-list-cursor';
+import { chatSearchKey, foldForSearch } from '../domain/chat-search-key';
 
 class ChatRunnerCorruptionError extends Error {
   constructor(chatId: string, reason: string) {
@@ -232,22 +233,17 @@ export interface ChatRecordWithState extends ChatRecord {
 }
 
 /**
- * Whether `needle` occurs in what the sidebar's search box reads from a chat:
- * its title, its workdir's last path segment and its runner label (`mango` for
- * the built-in runner, the target id for a vendor), the same three fields as
- * `chatSearchText` on the client. They are joined by a newline, which a search
- * box cannot type, so no match straddles two fields.
+ * Whether the already folded `needle` occurs in what the sidebar's search box
+ * reads from a chat: its title, its workdir's last path segment and its runner
+ * label, the same three fields as `chatSearchText` on the client. They sit in
+ * `chats.searchText`, folded when the chat is written (see `chatSearchKey`), so
+ * the needle must come from the same `foldForSearch`.
  *
  * `instr` rather than `LIKE`: the needle is taken literally, so `%` and `_`
- * need no escaping. `lower()` folds ASCII only, so a non-ASCII letter matches
- * only in the case it was stored in. The last segment tolerates trailing and
- * Windows separators like `workdirBasename`.
+ * need no escaping.
  */
-function chatSearchMatch(needle: string): RawBuilder<boolean> {
-  const normalized = sql`rtrim(replace(coalesce(workdir, ''), char(92), '/'), '/')`;
-  const basename = sql`replace(${normalized}, rtrim(${normalized}, replace(${normalized}, '/', '')), '')`;
-  const runnerLabel = sql`CASE runnerKind WHEN 'mangostudio' THEN 'mango' ELSE coalesce(runnerTargetId, '') END`;
-  return sql<boolean>`instr(lower(title || char(10) || ${basename} || char(10) || ${runnerLabel}), lower(${needle})) > 0`;
+function chatSearchMatch(foldedNeedle: string): RawBuilder<boolean> {
+  return sql<boolean>`instr(searchText, ${foldedNeedle}) > 0`;
 }
 
 /** A listed chat with the `rowid` that places it inside a tie of `updatedAt`. */
@@ -276,9 +272,11 @@ export interface ChatListSlice {
  * then drops only the chats of the tied millisecond that precede the cursor.
  * One extra row is read to learn whether another page exists.
  *
- * `search` keeps only the chats it matches (see {@link chatSearchMatch}). The
- * match cannot use an index, so SQLite still walks the user's chats in index
- * order and tests each one, stopping at the first `limit + 1` that match.
+ * `search` keeps only the chats it matches, ignoring case and accents (see
+ * {@link chatSearchMatch}); it is folded here, the one place that reads the
+ * column. The match cannot use an index, so SQLite still walks the user's chats
+ * in index order and tests each one, stopping at the first `limit + 1` that
+ * match. A search that folds to nothing (marks alone) filters nothing.
  */
 export async function listPageByUserId(
   userId: string,
@@ -289,7 +287,8 @@ export async function listPageByUserId(
     .selectFrom('chats')
     .select([...CHAT_COLUMNS, ...CHAT_STATE_COLUMNS, sql<number>`rowid`.as('rowid')])
     .where('userId', '=', userId);
-  if (page.search) query = query.where(chatSearchMatch(page.search));
+  const foldedSearch = page.search ? foldForSearch(page.search) : '';
+  if (foldedSearch) query = query.where(chatSearchMatch(foldedSearch));
   const { after } = page;
   if (after) {
     query = query
@@ -470,6 +469,12 @@ export async function createChat(data: CreateChatData, db: Kysely<Database>): Pr
       runnerEffort: null,
       runnerApprovalRouting: null,
       workdir: chat.workdir,
+      searchText: chatSearchKey({
+        title: chat.title,
+        workdir: chat.workdir,
+        runnerKind: chat.runner.kind,
+        runnerTargetId: chat.runner.kind === 'external' ? chat.runner.targetId : null,
+      }),
       environmentId: chat.environmentId,
       restrictToolsToWorkdir: null,
       userId: chat.userId,
@@ -548,7 +553,12 @@ export async function updateChat(
   if (Object.keys(dbUpdates).length === 0) return;
 
   const runner = data.runner;
-  if (runner === undefined) {
+  // The search text folds the title, the workdir folder and the runner label
+  // together, so a change to any one of them needs the other two as they are
+  // stored: they are read and the row written under one transaction below.
+  const changesSearchText =
+    data.title !== undefined || data.workdir !== undefined || runner !== undefined;
+  if (runner === undefined && !changesSearchText) {
     await db
       .updateTable('chats')
       .set(dbUpdates)
@@ -559,7 +569,24 @@ export async function updateChat(
   }
 
   const guardedWrite = async (trx: Kysely<Database>): Promise<void> => {
-    await assertRunnerKindChangeAllowed(id, userId, runner.kind, trx);
+    if (runner !== undefined) await assertRunnerKindChangeAllowed(id, userId, runner.kind, trx);
+    if (changesSearchText) {
+      const current = await trx
+        .selectFrom('chats')
+        .select(['title', 'workdir', 'runnerKind', 'runnerTargetId'])
+        .where('id', '=', id)
+        .where('userId', '=', userId)
+        .executeTakeFirst();
+      // Not this user's chat: the write below would touch no row either.
+      if (!current) return;
+      dbUpdates.searchText = chatSearchKey({
+        title: data.title ?? current.title,
+        workdir: data.workdir !== undefined ? data.workdir : current.workdir,
+        runnerKind: dbUpdates.runnerKind ?? current.runnerKind,
+        runnerTargetId:
+          runner !== undefined ? (dbUpdates.runnerTargetId ?? null) : current.runnerTargetId,
+      });
+    }
     await trx
       .updateTable('chats')
       .set(dbUpdates)

@@ -63,6 +63,7 @@ import { environmentToolchainRevision } from './062_environment_toolchain_revisi
 import { messagesOrderedReadIndexes } from './063_messages_ordered_read_indexes';
 import { chatsUserUpdatedIndex } from './064_chats_user_updated_index';
 import { messageCheckpointDeltas } from './065_message_checkpoint_deltas';
+import { chatSearchText } from './066_chat_search_text';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -130,4 +131,5 @@ export const allMigrations = {
   '063_messages_ordered_read_indexes': messagesOrderedReadIndexes,
   '064_chats_user_updated_index': chatsUserUpdatedIndex,
   '065_message_checkpoint_deltas': messageCheckpointDeltas,
+  '066_chat_search_text': chatSearchText,
 };

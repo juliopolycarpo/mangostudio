@@ -24,6 +24,12 @@ interface ChatsTable {
   runnerModel: string | null;
   runnerEffort: string | null;
   workdir: string | null;
+  /**
+   * Folded title, workdir folder and runner label the chat list's `?q=` looks in
+   * (`chatSearchKey`). Rewritten by `createChat` and `updateChat` whenever one of
+   * those three changes; never set it from anywhere else.
+   */
+  searchText: Generated<string>;
   environmentId: Generated<string>;
   /** null = inherit workspace default; 0/1 stored as boolean override */
   restrictToolsToWorkdir: number | null;

@@ -53,12 +53,18 @@ page. A malformed `cursor` answers 400 with `code: "VALIDATION"`.
 
 `q` keeps only the chats whose title, workdir folder name (the last path segment) or runner label
 (`mango` for the built-in runner, the target id for a vendor) contains it. Matching is a literal
-substring (`%` and `_` are ordinary characters) that ignores ASCII case, surrounding whitespace is
-trimmed, and a blank `q` lists everything. `q` is at most 100 characters (`CHAT_SEARCH_MAX_LENGTH`),
-else 422. The matches page with the same `limit` and `cursor`. A substring match cannot use an
-index, so SQLite walks the account's chats newest first and tests each until the page is full: a
-common term returns after the first page's worth of rows, while a rare or absent term reads every
-chat the account has (about 5 ms at 2,000 chats and 21 ms at 10,000 on the development machine).
+substring (`%` and `_` are ordinary characters) that ignores case and accents, surrounding
+whitespace is trimmed, and a blank `q` lists everything. Both sides are Unicode case-folded and
+stripped of combining marks, so `CONFIGURAÇÃO`, `configuração` and `configuracao` all find
+`Configuração`, `STRASSE` finds `Straße`, and `ISTANBUL` finds `İstanbul`. `q` is at most 100
+characters (`CHAT_SEARCH_MAX_LENGTH`), else 422. The matches page with the same `limit` and `cursor`.
+The folded text of each chat is stored in `chats.searchText`, written with the title, workdir and
+runner. A substring match cannot use an index, so SQLite walks the account's chats newest first and
+tests each until the page is full: a common term returns after the first page's worth of rows,
+while a rare or absent term reads every chat the account has (about 1 ms at 2,000 chats and 8 ms
+at 10,000 on the development machine). An FTS5 trigram index was measured and not adopted: it
+saved about 7 ms on that worst case at 10,000 chats, was slower for common terms, and cannot answer
+a query shorter than three characters.
 
 `GET /api/chats/:id` returns the chat as the list shows it, for a client that holds only some pages
 of the list. A chat that does not exist and one another account owns both answer 404 with

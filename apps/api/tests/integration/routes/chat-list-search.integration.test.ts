@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { CHAT_SEARCH_MAX_LENGTH } from '@mangostudio/shared/chat';
 
 import { getDb } from '../../../src/db/database';
+import { chatSearchKey } from '../../../src/modules/chats/domain/chat-search-key';
 import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
 import { errorHandler } from '../../../src/plugins/error-handler';
 import { insertTestChat, insertTestUser, type UserFixture } from '../../support/factories';
@@ -13,7 +14,7 @@ import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-
  * server instead of loading every page. A chat matches when the query is a
  * substring of its title, its workdir's last path segment or its runner label,
  * the three things the client-side filter read, compared without regard to
- * ASCII case. Every test seeds explicit `updatedAt` values so the order is fixed.
+ * case or accents. Every test seeds explicit `updatedAt` values so the order is fixed.
  */
 
 const BASE_TIME = 1_750_000_000_000;
@@ -61,7 +62,9 @@ function liveApp() {
 /** Seeds newest-last, so the list order is the reverse of the argument order. */
 async function seed(owner: UserFixture, chats: SeededChat[]) {
   for (const [index, chat] of chats.entries()) {
-    await insertTestChat(owner.id, { id: uid(chat.name), title: chat.title ?? chat.name });
+    const title = chat.title ?? chat.name;
+    await insertTestChat(owner.id, { id: uid(chat.name), title });
+    // A raw write, to pin `updatedAt`, so it stores the search text itself.
     await getDb()
       .updateTable('chats')
       .set({
@@ -70,6 +73,12 @@ async function seed(owner: UserFixture, chats: SeededChat[]) {
         ...(chat.runner
           ? { runnerKind: 'external', runnerAgentId: null, runnerTargetId: chat.runner.targetId }
           : {}),
+        searchText: chatSearchKey({
+          title,
+          workdir: chat.workdir ?? null,
+          runnerKind: chat.runner ? 'external' : 'mangostudio',
+          runnerTargetId: chat.runner?.targetId ?? null,
+        }),
       })
       .where('id', '=', uid(chat.name))
       .execute();
@@ -134,6 +143,64 @@ describe('GET /chats?q= matching', () => {
 
     expect(names(await search('codex'))).toEqual(['vendor']);
     expect(names(await search('MANGO'))).toEqual(['native']);
+  });
+
+  it('finds an accented title by its upper-case form and by the accent-free spelling', async () => {
+    await seed(user, [
+      { name: 'pt', title: 'Configuração' },
+      { name: 'other', title: 'Revisão do plano' },
+    ]);
+
+    for (const query of ['CONFIGURAÇÃO', 'configuracao', 'configuração', 'CONFIGURACAO', 'çã']) {
+      expect(
+        names(await search(query)),
+        `(q=${JSON.stringify(query)}): expected chats matching "Configuração": ["pt"]`
+      ).toEqual(['pt']);
+    }
+  });
+
+  it('finds an accent-free title by an accented query', async () => {
+    await seed(user, [{ name: 'plain', title: 'configuracao do servidor' }]);
+
+    expect(names(await search('Configuração'))).toEqual(['plain']);
+  });
+
+  it('treats a decomposed accent and a precomposed one as the same letter', async () => {
+    await seed(user, [{ name: 'nfd', title: 'Configuração' }]);
+
+    expect(names(await search('configuração'))).toEqual(['nfd']);
+    expect(names(await search('CONFIGURAÇÃO'))).toEqual(['nfd']);
+  });
+
+  it('matches the workdir folder through accents and case', async () => {
+    await seed(user, [{ name: 'dir', workdir: '/srv/Projétos/Relatório' }]);
+
+    expect(names(await search('RELATORIO'))).toEqual(['dir']);
+    expect(names(await search('projetos')), 'a parent folder must not match').toEqual([]);
+  });
+
+  it('folds Turkish dotted and dotless i onto i', async () => {
+    await seed(user, [
+      { name: 'dotted', title: 'İstanbul trip' },
+      { name: 'dotless', title: 'ıspanak recipe' },
+      { name: 'ascii', title: 'ISTANBUL guide' },
+    ]);
+
+    expect(names(await search('istanbul'))).toEqual(['ascii', 'dotted']);
+    expect(names(await search('İSTANBUL'))).toEqual(['ascii', 'dotted']);
+    expect(names(await search('ISPANAK'))).toEqual(['dotless']);
+  });
+
+  it('folds German sharp s onto ss, and umlauts onto their base letter', async () => {
+    await seed(user, [
+      { name: 'strasse', title: 'Straße' },
+      { name: 'upper', title: 'MÜLLER' },
+      { name: 'ascii', title: 'strasse map' },
+    ]);
+
+    expect(names(await search('STRASSE'))).toEqual(['ascii', 'strasse']);
+    expect(names(await search('straße'))).toEqual(['ascii', 'strasse']);
+    expect(names(await search('muller'))).toEqual(['upper']);
   });
 
   it('treats % and _ as the characters they are', async () => {
