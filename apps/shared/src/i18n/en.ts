@@ -1923,6 +1923,21 @@ export const messages: CoreMessages = {
       lineNumbersUnobserved:
         'Line numbers for "{path}" were never observed: the last read was a byte view (hex or base64), which does not assign line numbers. Re-read the file as text with read_file first, then retry replacing this range.',
     },
+    retry: {
+      action: 'Retry',
+      retrying: 'Retrying…',
+      confirmTitle: 'Run {tool} again?',
+      confirmDescription:
+        'The call runs again with the same arguments and may change what the first run already changed.',
+      confirmDescriptionOutcomeUnknown:
+        'The first run may have taken effect before it stopped. Running it again can repeat that.',
+      argumentsLabel: 'Arguments',
+      noArguments: 'No arguments',
+      confirmAction: 'Run again',
+      cancel: 'Cancel',
+      failed: 'Could not retry the tool call.',
+      byYou: 'Re-run by you',
+    },
   },
 
   errors: {

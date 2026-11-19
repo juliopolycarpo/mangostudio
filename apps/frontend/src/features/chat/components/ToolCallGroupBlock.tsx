@@ -151,6 +151,8 @@ export function ToolCallGroupBlock({
         {calls.map((call) => (
           <ToolCallBlock
             key={call.toolCallId}
+            toolCallId={call.toolCallId}
+            initiatedByUser={call.initiatedBy === 'user'}
             name={call.name}
             args={call.args}
             result={call.result}

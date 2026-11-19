@@ -34,6 +34,8 @@ export interface ToolCallEntry {
   status: ToolExecutionStatus;
   /** Lifecycle snapshot, when the part was written by the unified pipeline. */
   execution?: ToolExecutionSnapshot;
+  /** The reader, not the model, asked for this call (a retry). */
+  initiatedBy?: 'user';
   isPending: boolean;
 }
 
@@ -121,6 +123,7 @@ export function toToolCallEntry(
     isError: result?.isError ?? (status === 'failed' || status === 'timed_out' || undefined),
     status,
     execution: call.execution,
+    ...(call.initiatedBy === 'user' ? { initiatedBy: 'user' as const } : {}),
     isPending: isActiveToolExecutionStatus(status),
   };
 }
