@@ -701,31 +701,29 @@ const SKILLS_CASES: readonly SectionCase[] = [
       },
     ],
   },
-  // A symlink to nowhere stands for a higher-priority source that could not be scanned.
-  ...(process.platform === 'win32'
-    ? []
-    : [
-        {
-          name: 'a skill whose higher-priority location could not be scanned',
-          rows: () => {
-            writeSkill(WITHHELD_DIRS.claude, 'fallback', 'name: fallback\ndescription: Claude');
-            // Each group reads its cases more than once, so the setup must be repeatable.
-            rmSync(WITHHELD_DIRS.agents, { recursive: true, force: true });
-            symlinkSync(join(WITHHELD_DIRS.mango, 'missing'), WITHHELD_DIRS.agents, 'dir');
-            return skillsRows(WITHHELD_DIRS, {
-              origin: 'default',
-              toggles: { agents: true, claude: true },
-            }).filter((row) => row.label === 'Skill claude:fallback');
-          },
-          expected: [
-            {
-              label: 'Skill claude:fallback',
-              status: 'warn',
-              detail: 'higher-priority skill location could not be scanned',
-            },
-          ],
-        } satisfies SectionCase,
-      ]),
+  {
+    // A link to nowhere stands for a higher-priority source that could not be scanned.
+    name: 'a skill whose higher-priority location could not be scanned',
+    rows: () => {
+      writeSkill(WITHHELD_DIRS.claude, 'fallback', 'name: fallback\ndescription: Claude');
+      // Each group reads its cases more than once, so the setup must be repeatable.
+      rmSync(WITHHELD_DIRS.agents, { recursive: true, force: true });
+      // A junction, not a 'dir' symlink: Windows creates one without the symlink privilege,
+      // and the type is ignored elsewhere, so every platform builds the same dangling link.
+      symlinkSync(join(WITHHELD_DIRS.mango, 'missing'), WITHHELD_DIRS.agents, 'junction');
+      return skillsRows(WITHHELD_DIRS, {
+        origin: 'default',
+        toggles: { agents: true, claude: true },
+      }).filter((row) => row.label === 'Skill claude:fallback');
+    },
+    expected: [
+      {
+        label: 'Skill claude:fallback',
+        status: 'warn',
+        detail: 'higher-priority skill location could not be scanned',
+      },
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------------------
