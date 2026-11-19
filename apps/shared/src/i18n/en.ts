@@ -1157,6 +1157,8 @@ export const messages: CoreMessages = {
       winget: 'winget',
       git: 'Git',
       volta: 'Volta',
+      scoop: 'Scoop',
+      mise: 'mise',
       mangostudio: 'MangoStudio',
       claude: 'Claude Code',
       codex: 'Codex',
@@ -1248,6 +1250,8 @@ export const messages: CoreMessages = {
       winget: 'from winget',
       bun: "from Bun's installer",
       'mangostudio-managed': 'managed by MangoStudio',
+      scoop: 'from Scoop',
+      mise: 'from mise',
     },
     lts: {
       'current-lts': 'current LTS',

@@ -577,7 +577,29 @@ fn resolve_path_source(
     if is_bun_managed_path(raw_path, path_env) || is_bun_managed_path(resolved_path, path_env) {
         return PathSource::Bun;
     }
+    // Managers MangoStudio detects but does not drive: they carry no
+    // `VersionManagerId`, so the card reads them as managed elsewhere instead
+    // of offering the winget install on top of them.
+    for path in [raw_path, resolved_path] {
+        if let Some(source) = detect_unmanaged_source(&normalized_path(path)) {
+            return source;
+        }
+    }
     PathSource::System
+}
+
+/// Scoop and mise installs, by their fixed layouts: Scoop's
+/// `scoop\shims` and `scoop\apps\nodejs*`, mise's `mise/shims` and
+/// `mise/installs`. `normalized_path` has already lowercased the path and
+/// turned backslashes into `/`, so one pattern covers both platforms.
+fn detect_unmanaged_source(normalized: &str) -> Option<PathSource> {
+    if normalized.contains("/scoop/shims/") || normalized.contains("/scoop/apps/nodejs") {
+        return Some(PathSource::Scoop);
+    }
+    if normalized.contains("/mise/shims/") || normalized.contains("/mise/installs/") {
+        return Some(PathSource::Mise);
+    }
+    None
 }
 
 /// Probes one candidate, honoring both the per-candidate and the total
@@ -1442,6 +1464,70 @@ mod tests {
             Some(VersionManagerId::Fnm)
         );
         assert_eq!(result.installations[0].path_source, Some(PathSource::Fnm));
+    }
+
+    /// Scans one Node binary at `node_path`, found by walking `path_env`'s
+    /// `PATH`, and returns its attributed source.
+    async fn path_source_of(path_env: PathEnv, node_path: &str) -> Option<PathSource> {
+        let deps = Arc::new(FakeBinaryScanDeps {
+            path_env,
+            existing: HashSet::from([node_path.to_string()]),
+            responses: HashMap::from([(node_path.to_string(), "v22.13.0".to_string())]),
+            ..Default::default()
+        });
+        let result = scan_runtime(&node_definition(), deps, BinaryScanOptions::default()).await;
+        result.installations[0].path_source
+    }
+
+    fn win32_env(path: &str) -> PathEnv {
+        PathEnv {
+            platform: "win32".to_string(),
+            home_dir: "C:\\Users\\x".to_string(),
+            env: env(&[("PATH", path)]),
+        }
+    }
+
+    #[tokio::test]
+    async fn attributes_scoop_shims_and_apps_on_windows_to_scoop() {
+        let shim = "C:\\Users\\x\\scoop\\shims\\node.exe";
+        let app = "C:\\Users\\x\\scoop\\apps\\nodejs-lts\\current\\node.exe";
+
+        assert_eq!(
+            path_source_of(win32_env("C:\\Users\\x\\scoop\\shims"), shim).await,
+            Some(PathSource::Scoop),
+            "expected a Scoop shim to read as scoop, not an unattributed system install"
+        );
+        assert_eq!(
+            path_source_of(
+                win32_env("C:\\Users\\x\\scoop\\apps\\nodejs-lts\\current"),
+                app
+            )
+            .await,
+            Some(PathSource::Scoop),
+            "expected scoop\\apps\\nodejs* to read as scoop"
+        );
+    }
+
+    #[tokio::test]
+    async fn attributes_mise_shims_on_each_platform_to_mise() {
+        assert_eq!(
+            path_source_of(
+                linux_env("/home/tester/.local/share/mise/shims"),
+                "/home/tester/.local/share/mise/shims/node"
+            )
+            .await,
+            Some(PathSource::Mise),
+            "expected a POSIX mise shim to read as mise"
+        );
+        assert_eq!(
+            path_source_of(
+                win32_env("C:\\Users\\x\\AppData\\Local\\mise\\shims"),
+                "C:\\Users\\x\\AppData\\Local\\mise\\shims\\node.exe"
+            )
+            .await,
+            Some(PathSource::Mise),
+            "expected a Windows mise shim to read as mise"
+        );
     }
 
     #[tokio::test]
