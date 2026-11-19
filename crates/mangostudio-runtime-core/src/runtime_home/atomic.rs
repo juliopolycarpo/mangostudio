@@ -41,20 +41,40 @@ impl Rename for StdRename {
 /// process cannot write into) is awkward to arrange portably and safely in
 /// a test — a fake makes that failure branch as directly testable as the
 /// rename failure branch already is.
+///
+/// Creating and filling are separate steps so the caller can restrict the
+/// file while it is still empty: on Windows the file starts with the
+/// directory's inherited ACL, and no secret byte may land before it is
+/// replaced.
 pub trait Create {
-    /// Creates `path` fresh (never overwriting one) and writes `bytes` to it.
+    /// Creates `path` fresh (never overwriting one), empty.
     ///
     /// # Errors
-    /// Whatever the underlying create or write failed with.
-    fn create(&self, path: &Path, bytes: &[u8], mode: Option<u32>) -> io::Result<()>;
+    /// Whatever the underlying create failed with.
+    fn create_empty(&self, path: &Path, mode: Option<u32>) -> io::Result<()>;
+
+    /// Writes `bytes` to the file [`Create::create_empty`] made and flushes it
+    /// to disk.
+    ///
+    /// # Errors
+    /// Whatever the underlying open, write or sync failed with.
+    fn fill(&self, path: &Path, bytes: &[u8]) -> io::Result<()>;
 }
 
-/// The real `write_temp_file`.
+/// The real create and fill.
 pub struct StdCreate;
 
 impl Create for StdCreate {
-    fn create(&self, path: &Path, bytes: &[u8], mode: Option<u32>) -> io::Result<()> {
-        write_temp_file(path, bytes, mode)
+    fn create_empty(&self, path: &Path, mode: Option<u32>) -> io::Result<()> {
+        create_empty_temp_file(path, mode)
+    }
+
+    fn fill(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+        use std::io::Write as _;
+
+        let mut file = std::fs::OpenOptions::new().write(true).open(path)?;
+        file.write_all(bytes)?;
+        file.sync_all()
     }
 }
 
@@ -167,17 +187,20 @@ pub fn write_new_file(path: &Path, bytes: &[u8], mode: Option<u32>) -> io::Resul
 /// [`write_new_file`] with an injectable [`Rename`], [`Create`], and
 /// [`RenameRetryPolicy`], for the retry and failure-cleanup tests.
 ///
-/// `restrict` runs on the *temp* file, right after `create` and before the
-/// rename that publishes it — only when `mode` is `Some`, the same signal
-/// this crate already uses for "this document is owner-only". On Unix that
-/// makes it a harmless re-assertion of what `Create::create` already set
-/// via `OpenOptions`; on Windows, which has no mode bits, it is the only
-/// place the restriction happens at all, and it has to happen here: `mode`
-/// threaded into `Create::create` is a no-op there (see `write_temp_file`'s
-/// own doc comment), so restricting only the *published* path afterward —
-/// which every caller still does, belt-and-braces, matching
-/// `runtime-home.ts` — would leave the file world-readable under its real
-/// name for however long the gap between rename and that later call lasts.
+/// The order is create empty, `restrict`, fill, rename. `restrict` runs on
+/// the *temp* file, before any byte is written and before the rename that
+/// publishes it — only when `mode` is `Some`, the same signal this crate
+/// already uses for "this document is owner-only". On Unix that makes it a
+/// harmless re-assertion of what `Create::create_empty` already set via
+/// `OpenOptions`; on Windows, which has no mode bits, it is the only place
+/// the restriction happens at all, and it has to happen before the write:
+/// `mode` threaded into `Create::create_empty` is a no-op there (see
+/// `create_empty_temp_file`'s own doc comment), so writing first would leave
+/// the bytes readable under the directory's inherited ACL until `restrict`
+/// caught up. Restricting only the *published* path afterward — which every
+/// caller still does, belt-and-braces, matching `runtime-home.ts` — would
+/// leave the file world-readable under its real name for however long the
+/// gap between rename and that later call lasts.
 pub fn write_new_file_with(
     rename: &impl Rename,
     create: &impl Create,
@@ -198,7 +221,7 @@ pub fn write_new_file_with(
         temp_suffix()
     ));
 
-    if let Err(error) = create.create(&temp_path, bytes, mode) {
+    if let Err(error) = create.create_empty(&temp_path, mode) {
         let _ = std::fs::remove_file(&temp_path);
         return Err(error);
     }
@@ -206,9 +229,14 @@ pub fn write_new_file_with(
     if mode.is_some() && !restrict(&temp_path) {
         let _ = std::fs::remove_file(&temp_path);
         return Err(io::Error::other(format!(
-            "could not restrict {} to its owner before publishing it",
+            "could not restrict {} to its owner before writing it",
             temp_path.display()
         )));
+    }
+
+    if let Err(error) = create.fill(&temp_path, bytes) {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(error);
     }
 
     match rename_with_retry(rename, &temp_path, path, retry) {
@@ -220,9 +248,9 @@ pub fn write_new_file_with(
     }
 }
 
-/// Creates `temp_path` fresh (never overwriting one, mirroring `writeFile`'s
-/// own new-file semantics for a name that carries a random suffix) and
-/// writes `bytes` to it.
+/// Creates `temp_path` fresh and empty (never overwriting one, mirroring
+/// `writeFile`'s own new-file semantics for a name that carries a random
+/// suffix).
 ///
 /// On Unix, `mode` is applied to the `OpenOptions` used to create the file
 /// — never `chmod`ed on afterwards. `mode` on an *existing* file is
@@ -230,10 +258,9 @@ pub fn write_new_file_with(
 /// loosely-permissioned file exactly as loose the next time this path is
 /// reused; opening fresh with the mode already set has no such window, and
 /// every write here creates a fresh inode via the temp-then-rename shape
-/// specifically so that trap can never apply.
-fn write_temp_file(temp_path: &Path, bytes: &[u8], mode: Option<u32>) -> io::Result<()> {
-    use std::io::Write as _;
-
+/// specifically so that trap can never apply. On Windows `mode` is ignored
+/// and the caller restricts the file before filling it.
+fn create_empty_temp_file(temp_path: &Path, mode: Option<u32>) -> io::Result<()> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -244,9 +271,7 @@ fn write_temp_file(temp_path: &Path, bytes: &[u8], mode: Option<u32>) -> io::Res
     #[cfg(not(unix))]
     let _ = mode;
 
-    let mut file = options.open(temp_path)?;
-    file.write_all(bytes)?;
-    file.sync_all()
+    options.open(temp_path).map(drop)
 }
 
 /// A per-call unique suffix, so two writers racing inside one process never
@@ -396,7 +421,7 @@ mod tests {
     #[test]
     fn an_owner_only_write_restricts_the_temp_file_before_the_rename_publishes_it() {
         // The regression this guards: a Windows temp file has no mode bits
-        // set at `create` time (`write_temp_file`'s own doc comment), so if
+        // set at `create` time (`create_empty_temp_file`'s own doc comment), so if
         // `restrict` ran on the *published* path instead of the temp one —
         // or ran after the rename — the file would sit under its real name,
         // readable by whatever the directory's ACL already allowed, for the
@@ -442,6 +467,41 @@ mod tests {
             !published_path_existed_yet,
             "must restrict before the rename publishes the final path"
         );
+    }
+
+    #[test]
+    fn an_owner_only_write_restricts_the_temp_file_while_it_is_still_empty() {
+        // Windows has no mode bits at create time, so the temp file starts
+        // with whatever the directory's ACL grants. Bytes written before
+        // `restrict` runs would sit readable under that ACL in the gap. The
+        // observable guarantee, portable to every platform: when `restrict`
+        // is called the temp file holds no secret bytes yet.
+        let dir = scratch_dir("restrict-before-write");
+        let path = dir.join("host-secret");
+        let length_when_restricted = std::cell::Cell::new(None);
+        let restrict = |candidate: &Path| {
+            length_when_restricted.set(Some(std::fs::metadata(candidate).unwrap().len()));
+            true
+        };
+
+        write_new_file_with(
+            &StdRename,
+            &StdCreate,
+            &restrict,
+            &path,
+            b"secret",
+            Some(0o600),
+            &RenameRetryPolicy::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            length_when_restricted.get(),
+            Some(0),
+            "expected an empty temp file when restrict ran | received length: {:?}",
+            length_when_restricted.get()
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"secret");
     }
 
     #[test]
@@ -491,9 +551,50 @@ mod tests {
     /// compared to a fake at this seam.
     struct AlwaysFailsToCreate;
     impl Create for AlwaysFailsToCreate {
-        fn create(&self, _path: &Path, _bytes: &[u8], _mode: Option<u32>) -> io::Result<()> {
+        fn create_empty(&self, _path: &Path, _mode: Option<u32>) -> io::Result<()> {
             Err(io::Error::from_raw_os_error(5))
         }
+
+        fn fill(&self, _path: &Path, _bytes: &[u8]) -> io::Result<()> {
+            unreachable!("fill must not run after create_empty failed")
+        }
+    }
+
+    /// Creates the temp file for real, then fails to write into it —
+    /// a full disk or an I/O error after the file already exists.
+    struct AlwaysFailsToFill;
+    impl Create for AlwaysFailsToFill {
+        fn create_empty(&self, path: &Path, mode: Option<u32>) -> io::Result<()> {
+            StdCreate.create_empty(path, mode)
+        }
+
+        fn fill(&self, _path: &Path, _bytes: &[u8]) -> io::Result<()> {
+            Err(io::Error::from_raw_os_error(5))
+        }
+    }
+
+    #[test]
+    fn a_fill_failure_leaves_no_temp_file_behind_and_publishes_nothing() {
+        let dir = scratch_dir("fill-failure");
+        let path = dir.join("runtime.json");
+
+        let result = write_new_file_with(
+            &StdRename,
+            &AlwaysFailsToFill,
+            &|_: &Path| true,
+            &path,
+            b"data",
+            Some(0o600),
+            &RenameRetryPolicy::default(),
+        );
+
+        assert!(result.is_err(), "expected the fill failure to surface");
+        assert!(!path.exists(), "a file that was never filled is published");
+        let leftovers = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .count();
+        assert_eq!(leftovers, 0, "the created temp file must be cleaned up");
     }
 
     #[test]

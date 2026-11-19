@@ -727,9 +727,9 @@ pub struct WriteOutcome {
 ///
 /// `mode` is threaded straight through to [`atomic::write_new_file`] so a
 /// secret-bearing document (`credentials.json`) is opened owner-only at
-/// *creation* rather than tightened after the fact: `write_temp_file`'s own
-/// doc comment explains why a post-publish `chmod` would leave a window a
-/// pre-set `mode` does not.
+/// *creation* rather than tightened after the fact:
+/// `create_empty_temp_file`'s own doc comment explains why a post-publish
+/// `chmod` would leave a window a pre-set `mode` does not.
 ///
 /// `pub(crate)`, not private: [`crate::consent::invocation`] needs to read,
 /// decide, and write `runtime.json` inside the *same* [`lock::with_slot_lock`]
