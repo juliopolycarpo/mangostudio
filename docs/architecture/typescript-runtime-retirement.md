@@ -143,8 +143,10 @@ machines. Their generators were deleted with it, so they are frozen rather than 
 
 `cargo-shim.yml`'s Ubuntu `workspace` job pins each directory's git tree
 (`ts-home` at `814a421cef442f2dd6c24b13a70fcea00e45576b`, `ts-library` at
-`5ecbf15d46a87ac2c2e8c24dc9d14a47a76b209e`) and fails when either changes, so an edit has to
-update the pin on purpose. After its other checks, the same job regenerates `rust-home` with
+`8552f4eb67b2485327cc65fa915a76d43c1679c5`) and fails when either changes, so an edit has to
+update the pin on purpose. `ts-library` has had one by-hand edit: scan 9's `valid` verdicts for
+malformed dates and leap seconds follow the hub's `Bun.TOML.parse` now, as recorded in
+`tests/fixtures/library-toml/validity-cases.json`. After its other checks, the same job regenerates `rust-home` with
 `cargo test -p mangostudio-runtime --test generate_rust_fixture --locked -- --ignored` and stages
 the fixture before checking the cached diff, detecting changed and newly generated files. The hub reads that fixture through `probeRuntimeSlots` in
 `apps/api/tests/unit/cli/runtime-slot-probe-rust-home.test.ts`.

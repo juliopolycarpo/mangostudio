@@ -139,12 +139,12 @@ tokio = { version = "1.53.3", default-features = false, features = [
 # task it spawns before its shutdown returns.
 tokio-util = { workspace = true, features = ["rt"] }
 # `library.scan` validates `toml-agent`/`toml-settings` instances and reads a
-# Codex subagent's `name`/`description`, mirroring `smol-toml`'s parse in
+# Codex subagent's `name`/`description`, matching the hub's `Bun.TOML.parse` in
 # `apps/shared/src/library/machine/instance-reader.ts`.
 toml = { version = "1.1", default-features = false, features = ["std", "parse", "serde"] }
 # The event parser the `toml` crate itself builds on (same version, already
-# locked): `src/library/smol_toml.rs` walks its events to judge each bare
-# scalar the way `smol-toml` does before the `toml` crate parses the document.
+# locked): `src/library/toml_document.rs` walks its events to bound each bare
+# scalar the way Bun does before the `toml` crate parses the document.
 toml_parser = { version = "1.1", default-features = false, features = ["std"] }
 
 [dev-dependencies]
