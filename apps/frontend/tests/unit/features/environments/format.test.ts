@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import type {
+  InstallRecipeId,
   InstallRecipePreview,
   RuntimeFinding,
   RuntimeInstallation,
@@ -24,6 +25,7 @@ import {
   installStep,
   isQuietFinding,
   keyedFindings,
+  nodeInstallFollowUp,
   nodeInstallStep,
   nodeUpdateAffordance,
   pathPosition,
@@ -782,6 +784,55 @@ describe('nodeInstallStep', () => {
 
   it('is undefined when nothing here installs a fresh Node', () => {
     expect(nodeInstallStep([])).toBeUndefined();
+  });
+});
+
+describe('nodeInstallFollowUp', () => {
+  const nodeRecipe = (id: InstallRecipeId, supported = true) =>
+    installRecipe({
+      id,
+      runtimeId: 'node',
+      action: 'use-version',
+      inputKind: 'node-version',
+      supported,
+    });
+
+  it.each([
+    ['nvm.node.install', 'nvm.node.set-default'],
+    ['fnm.node.install', 'fnm.node.set-default'],
+  ] as const)('pairs %s with %s so the installed Node becomes the default', (installId, setId) => {
+    const recipes = [nodeRecipe(installId), nodeRecipe(setId)];
+    const step = nodeInstallStep(recipes);
+
+    const followUp = nodeInstallFollowUp(recipes, step);
+
+    expect(followUp.map((entry) => entry.recipe.id)).toEqual([setId]);
+    expect(followUp[0]?.input).toEqual({ kind: 'node-version', version: 'lts' });
+  });
+
+  it('adds nothing for winget, whose install is already the default', () => {
+    const recipes = [
+      installRecipe({
+        id: 'winget.node.install',
+        runtimeId: 'node',
+        action: 'install',
+        inputKind: 'none',
+        platforms: ['win32'],
+        supported: true,
+      }),
+    ];
+
+    expect(nodeInstallFollowUp(recipes, nodeInstallStep(recipes))).toEqual([]);
+  });
+
+  it('adds nothing when the catalog lacks a runnable set-default for the chosen manager', () => {
+    const recipes = [nodeRecipe('fnm.node.install'), nodeRecipe('fnm.node.set-default', false)];
+
+    expect(nodeInstallFollowUp(recipes, nodeInstallStep(recipes))).toEqual([]);
+  });
+
+  it('is empty without an install step', () => {
+    expect(nodeInstallFollowUp([], undefined)).toEqual([]);
   });
 });
 
