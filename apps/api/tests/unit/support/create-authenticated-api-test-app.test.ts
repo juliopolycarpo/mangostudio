@@ -43,6 +43,26 @@ describe('createAuthenticatedApiTestApp', () => {
     restore();
   });
 
+  describe('restore() after more than one mount in a test', () => {
+    // A test that mounts twice and keeps only the last restore (a single `restoreAuth`
+    // variable) used to reinstate the first mount's mock, which then answered every later
+    // file in the unisolated lane as a signed-in user: unauthenticated routes returned 200.
+    it('puts back the real getSession when only the last of two mounts is restored', () => {
+      loadConfigForTest({ auth: { ...BASE_TEST_AUTH } });
+      const auth = getAuth();
+      const realGetSession = auth.api.getSession;
+
+      createAuthenticatedApiTestApp(USER);
+      const { restore } = createAuthenticatedApiTestApp(USER);
+      restore();
+
+      expect(
+        auth.api.getSession === realGetSession,
+        '(createAuthenticatedApiTestApp restore): expected auth.api.getSession to be the real one | received: a mock session from an earlier mount that was never restored'
+      ).toBe(true);
+    });
+  });
+
   describe('with getDb faked before the first getAuth() call', () => {
     it('drops the auth instance built over the fake when the test restores', () => {
       loadConfigForTest({ auth: { ...BASE_TEST_AUTH } });

@@ -1,18 +1,23 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
   ExternalAgentCapabilities,
   ExternalAgentCommandCatalogResponse,
   ExternalAgentDescriptor,
   ExternalAgentDescriptorListResponse,
   ExternalSupportedConfiguration,
+  ExternalWorkspaceTrustListResponse,
 } from '@mangostudio/shared/external-agents';
 import {
+  EXTERNAL_WORKSPACE_TRUST_VERSION,
   ExternalAgentDescriptorListResponseSchema,
+  ExternalWorkspaceTrustListResponseSchema,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
 import Value from 'typebox/value';
 
+import { getDb } from '../../../src/db/database';
 import type { ProbeScope } from '../../../src/modules/environments/application/probing-service';
 import type {
   DescribeExternalAgentsOptions,
@@ -20,6 +25,10 @@ import type {
   ExternalAgentDiscoveryService,
 } from '../../../src/modules/external-agents/application/external-agent-discovery';
 import { createExternalCommandCatalogCache } from '../../../src/modules/external-agents/application/external-command-catalog-cache';
+import {
+  grantWorkspaceTrust,
+  requiresWorkspaceTrust,
+} from '../../../src/modules/external-agents/application/external-workspace-trust';
 import { createExternalAgentRoutes } from '../../../src/modules/external-agents/http/external-agent-routes';
 import { insertTestUser } from '../../support/factories';
 import {
@@ -394,5 +403,152 @@ describe('external agent command catalog route', () => {
     );
 
     expect(response.status).toBe(401);
+  });
+});
+
+/**
+ * Withdrawing a workspace-trust grant.
+ *
+ * Grants live in each user's own settings row, so the cases that matter are the
+ * ones that could reach past it: another user's grant for the same folder, a
+ * spelling of the path that was never stored, and the next turn's gate.
+ */
+describe('external agent workspace-trust routes', () => {
+  const CURSOR_REPO = {
+    targetId: 'cursor',
+    environmentId: 'local',
+    workspacePath: '/canonical/work/repo',
+  } as const;
+
+  async function userApp() {
+    const user = await insertTestUser();
+    const { routes } = createTestRoutes();
+    const { app, restore } = createAuthenticatedApiTestApp(
+      { id: user.id, name: user.name, email: user.email },
+      routes
+    );
+    restoreAuth = restore;
+    return { app, userId: user.id };
+  }
+
+  function revoke(
+    app: { handle: (request: Request) => Promise<Response> },
+    body: unknown
+  ): Promise<Response> {
+    return app.handle(
+      new Request('http://localhost/external-agents/workspace-trust', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    );
+  }
+
+  async function listGrants(app: { handle: (request: Request) => Promise<Response> }) {
+    const response = await app.handle(
+      new Request('http://localhost/external-agents/workspace-trust')
+    );
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as ExternalWorkspaceTrustListResponse;
+    expect(Value.Check(ExternalWorkspaceTrustListResponseSchema, payload)).toBe(true);
+    return payload.grants;
+  }
+
+  it('lists the caller’s grants and nobody else’s', async () => {
+    const { app, userId } = await userApp();
+    const other = await insertTestUser();
+    await grantWorkspaceTrust({ userId, ...CURSOR_REPO }, getDb(), () => 1_000);
+    await grantWorkspaceTrust(
+      { userId: other.id, ...CURSOR_REPO, workspacePath: '/canonical/other/secret' },
+      getDb(),
+      () => 2_000
+    );
+
+    expect(await listGrants(app)).toEqual([
+      {
+        ...CURSOR_REPO,
+        version: EXTERNAL_WORKSPACE_TRUST_VERSION,
+        acceptedAt: 1_000,
+      },
+    ]);
+  });
+
+  it('revokes the grant, so the next turn asks for trust again', async () => {
+    const { app, userId } = await userApp();
+    const scope = { userId, ...CURSOR_REPO };
+    await grantWorkspaceTrust(scope, getDb());
+    expect(await requiresWorkspaceTrust(scope, getDb())).toBe(false);
+
+    const response = await revoke(app, CURSOR_REPO);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ revoked: true });
+    expect(await requiresWorkspaceTrust(scope, getDb())).toBe(true);
+    expect(await listGrants(app)).toEqual([]);
+  });
+
+  it('leaves the caller’s other grants and every other user’s grant untouched', async () => {
+    const { app, userId } = await userApp();
+    const other = await insertTestUser();
+    const sibling = { userId, ...CURSOR_REPO, workspacePath: '/canonical/work/repo/packages' };
+    const otherEnvironment = { userId, ...CURSOR_REPO, environmentId: 'build-server' };
+    const othersGrant = { userId: other.id, ...CURSOR_REPO };
+    for (const scope of [{ userId, ...CURSOR_REPO }, sibling, otherEnvironment, othersGrant]) {
+      await grantWorkspaceTrust(scope, getDb());
+    }
+
+    expect((await revoke(app, CURSOR_REPO)).status).toBe(200);
+
+    // A parent folder's key never matches a child's, nor one machine's another's.
+    expect(await requiresWorkspaceTrust(sibling, getDb())).toBe(false);
+    expect(await requiresWorkspaceTrust(otherEnvironment, getDb())).toBe(false);
+    expect(await requiresWorkspaceTrust(othersGrant, getDb())).toBe(false);
+    expect(await requiresWorkspaceTrust({ userId, ...CURSOR_REPO }, getDb())).toBe(true);
+  });
+
+  it('answers 404 for a grant the caller never gave, even when another user did', async () => {
+    const { app, userId } = await userApp();
+    const other = await insertTestUser();
+    const othersGrant = { userId: other.id, ...CURSOR_REPO };
+    await grantWorkspaceTrust(othersGrant, getDb());
+
+    const response = await revoke(app, CURSOR_REPO);
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ code: ERROR_CODES.NOT_FOUND });
+    expect(await requiresWorkspaceTrust(othersGrant, getDb())).toBe(false);
+    expect(await requiresWorkspaceTrust({ userId, ...CURSOR_REPO }, getDb())).toBe(true);
+  });
+
+  it('matches the stored path literally instead of re-spelling it', async () => {
+    const { app, userId } = await userApp();
+    const scope = { userId, ...CURSOR_REPO };
+    await grantWorkspaceTrust(scope, getDb());
+
+    const response = await revoke(app, {
+      ...CURSOR_REPO,
+      workspacePath: `${CURSOR_REPO.workspacePath}/`,
+    });
+
+    expect(response.status).toBe(404);
+    expect(await requiresWorkspaceTrust(scope, getDb())).toBe(false);
+  });
+
+  it('rejects a body that does not name the whole key', async () => {
+    const { app } = await userApp();
+
+    const response = await revoke(app, { targetId: 'cursor', environmentId: 'local' });
+
+    expect(response.status).toBe(422);
+  });
+
+  it('tells an unauthenticated caller nothing', async () => {
+    const { routes } = createTestRoutes();
+    const app = createApiTestApp(routes);
+
+    expect((await revoke(app, CURSOR_REPO)).status).toBe(401);
+    expect(
+      (await app.handle(new Request('http://localhost/external-agents/workspace-trust'))).status
+    ).toBe(401);
   });
 });

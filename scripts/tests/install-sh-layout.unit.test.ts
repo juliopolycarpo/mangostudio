@@ -134,17 +134,22 @@ interface RunResult {
   readonly stderr: string;
 }
 
-/** Execute the real POSIX shell with real symlinks, e.g. shell(['-c', 'uname -s']). */
-function shell(args: string[], env: Record<string, string | undefined> = {}): RunResult {
+/** The environment the shell runs in: the process's, plus `env`, with install paths made POSIX. */
+function shellEnvironment(env: Record<string, string | undefined>): Record<string, string> {
   const shellEnv = { ...process.env, ...env };
   if (IS_WINDOWS) shellEnv.MSYS = 'winsymlinks:nativestrict';
   for (const key of ['MANGOSTUDIO_INSTALL_DIR', 'MANGOSTUDIO_BIN_DIR', 'TMPDIR']) {
     const value = shellEnv[key];
     if (value) shellEnv[key] = shellPath(value);
   }
+  return shellEnv as Record<string, string>;
+}
+
+/** Execute the real POSIX shell with real symlinks, e.g. shell(['-c', 'uname -s']). */
+function shell(args: string[], env: Record<string, string | undefined> = {}): RunResult {
   const result = Bun.spawnSync({
     cmd: [BASH, ...args],
-    env: shellEnv as Record<string, string>,
+    env: shellEnvironment(env),
   });
   return {
     exitCode: result.exitCode ?? 1,
@@ -153,13 +158,33 @@ function shell(args: string[], env: Record<string, string | undefined> = {}): Ru
   };
 }
 
-function run(args: string[], env: Record<string, string | undefined>): RunResult {
+/** The bash arguments that run install.sh with `args`, under the Linux layout fixture on Windows. */
+function installerCommand(args: string[]): string[] {
   const command = [shellPath(INSTALL_SH), ...args.map(shellPath)];
-  if (!IS_WINDOWS) return shell(command, env);
-  return shell(
-    ['-c', `${FIXTURE_LINUX_UNAME}\nexec "$BASH" "$@"`, 'linux-layout-fixture', ...command],
-    env
-  );
+  if (!IS_WINDOWS) return command;
+  return ['-c', `${FIXTURE_LINUX_UNAME}\nexec "$BASH" "$@"`, 'linux-layout-fixture', ...command];
+}
+
+function run(args: string[], env: Record<string, string | undefined>): RunResult {
+  return shell(installerCommand(args), env);
+}
+
+/**
+ * Start install.sh without waiting for it, e.g. to run it while a lock is held. `detached` makes
+ * it a process group leader, so a test can signal the whole group as a terminal's Ctrl-C does.
+ */
+function runInBackground(
+  args: string[],
+  env: Record<string, string | undefined>,
+  detached = false
+) {
+  return Bun.spawn({
+    cmd: [BASH, ...installerCommand(args)],
+    env: shellEnvironment(env),
+    stdout: 'pipe',
+    stderr: 'pipe',
+    detached,
+  });
 }
 
 /** Call an internal function, e.g. sourceAndCall('swap_current "$1" 0.2.0', [root]). */
@@ -686,6 +711,398 @@ describe('install.sh layout', () => {
     run(['--uninstall'], env);
 
     expect(existsSync(join(bin, 'mangostudio'))).toBe(true);
+  });
+});
+
+// The Cargo launcher serializes installs of one version on an exclusive advisory lock on
+// `<install root>/.launcher-<version>.lock`. install.sh has to take the same lock around the
+// version directory swap, or the two replace each other's tree. The holder below is a launcher
+// stand-in that shares nothing with install.sh but the lock file: perl's flock(2), as the
+// launcher's std::fs::File::try_lock on Unix.
+const PERL = Bun.which('perl');
+
+/** The lock file of `version` in `root`, named as the launcher names it. */
+function launcherLockPath(root: string, version: string): string {
+  return join(root, `.launcher-${version}.lock`);
+}
+
+/** Hold the launcher's lock for `version` in `root` until `release()`. */
+async function holdLauncherLock(root: string, version: string) {
+  mkdirSync(root, { recursive: true });
+  const holder = Bun.spawn({
+    cmd: [
+      PERL as string,
+      '-MFcntl=:flock',
+      '-e',
+      '$| = 1; open(my $file, ">>", $ARGV[0]) or die "open: $!"; flock($file, LOCK_EX) or die "flock: $!"; print "locked\\n"; <STDIN>;',
+      launcherLockPath(root, version),
+    ],
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const reader = holder.stdout.getReader();
+  const { value } = await reader.read();
+  const announced = new TextDecoder().decode(value);
+  if (!announced.includes('locked')) {
+    throw new Error(
+      `lock holder for ${launcherLockPath(root, version)} | expected: locked | received: ${JSON.stringify(announced)} ${await new Response(holder.stderr).text()}`
+    );
+  }
+  return {
+    async release() {
+      // One line unblocks the holder's read; it exits and drops the lock.
+      await holder.stdin.write('release\n');
+      await holder.stdin.end();
+      await holder.exited;
+    },
+  };
+}
+
+/**
+ * The spellings of `path` a Windows shell may print it in: native (`C:\a\b`), with forward
+ * slashes (`C:/a/b`), and as the MSYS path Git Bash uses (`/c/a/b`). Elsewhere only `path` itself.
+ */
+function pathSpellings(path: string): string[] {
+  if (!IS_WINDOWS) return [path];
+  const forward = path.replaceAll('\\', '/');
+  return [
+    path,
+    forward,
+    forward.replace(/^([A-Za-z]):/, (_, drive: string) => `/${drive.toLowerCase()}`),
+  ];
+}
+
+/** Assert `output` names `path`, in any spelling a shell on this platform prints it in. */
+function expectNamesPath(output: string, path: string): void {
+  const spellings = pathSpellings(path);
+  expect(
+    spellings.some((spelling) => output.includes(spelling)),
+    `expected output to name ${JSON.stringify(path)} (or ${JSON.stringify(spellings.slice(1))}) | received: ${JSON.stringify(output)}`
+  ).toBe(true);
+}
+
+/** Resolve once `process` has exited, or after `milliseconds`, whichever comes first. */
+async function waitForExit(
+  process: ReturnType<typeof runInBackground>,
+  milliseconds: number
+): Promise<void> {
+  await Promise.race([process.exited, Bun.sleep(milliseconds)]);
+}
+
+/** The `.install-*` scratch trees in `root`. */
+function scratchTrees(root: string): string[] {
+  return readdirSync(root).filter((entry) => entry.startsWith('.install-'));
+}
+
+/** Resolve once `process` has printed `needle` on stdout; fail with what it printed after `milliseconds`. */
+async function waitForOutput(
+  process: ReturnType<typeof runInBackground>,
+  needle: string,
+  milliseconds: number
+): Promise<void> {
+  const reader = process.stdout.getReader();
+  const decoder = new TextDecoder();
+  const deadline = Date.now() + milliseconds;
+  let seen = '';
+  try {
+    while (!seen.includes(needle)) {
+      const chunk = await Promise.race([
+        reader.read(),
+        Bun.sleep(Math.max(0, deadline - Date.now())).then(() => null),
+      ]);
+      if (chunk === null || chunk.done) {
+        throw new Error(
+          `install.sh stdout | expected to contain: ${JSON.stringify(needle)} | received: ${JSON.stringify(seen)}`
+        );
+      }
+      seen += decoder.decode(chunk.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+describe.skipIf(!PERL)('install.sh version lock', () => {
+  /** A root holding 0.1.0 with a marker the next install of 0.1.0 must replace. */
+  function installedWithMarker() {
+    const l = layout();
+    const archive = buildReleaseArchive(l.workDir, `mangostudio-0.1.0-${PLATFORM}.tar.gz`, '0.1.0');
+    const first = run(['--local', archive], l.env);
+    expect(first.exitCode, JSON.stringify(first)).toBe(0);
+    const marker = join(l.root, '0.1.0', 'old-install-marker');
+    writeFileSync(marker, 'laid down by the first install');
+    return { ...l, archive, marker };
+  }
+
+  test('an install waits for the version lock and replaces the tree only once it is released', async () => {
+    const { root, env, archive, marker } = installedWithMarker();
+    const lock = await holdLauncherLock(root, '0.1.0');
+    const installer = runInBackground(['--local', archive], env);
+    try {
+      await waitForExit(installer, 1500);
+
+      expect(
+        installer.exitCode,
+        `expected install.sh to wait on ${launcherLockPath(root, '0.1.0')} | received exit code: ${installer.exitCode}`
+      ).toBeNull();
+      expect(existsSync(marker), `expected ${marker} untouched while the lock is held`).toBe(true);
+    } finally {
+      await lock.release();
+    }
+
+    expect(await installer.exited, await new Response(installer.stderr).text()).toBe(0);
+    expect(existsSync(marker), `expected ${marker} replaced after the lock was released`).toBe(
+      false
+    );
+    expect(readlinkSync(join(root, 'current'))).toBe('0.1.0');
+  }, 30000);
+
+  test('an install gives up at the lock timeout, names the lock and leaves the tree and no scratch', async () => {
+    const { root, env, archive, marker } = installedWithMarker();
+    const lock = await holdLauncherLock(root, '0.1.0');
+    try {
+      const result = run(['--local', archive], { ...env, MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '2' });
+
+      expect(result.exitCode, JSON.stringify(result)).toBe(1);
+      expectNamesPath(result.stderr, launcherLockPath(root, '0.1.0'));
+      expect(result.stderr).toContain('still');
+      expect(existsSync(marker), `expected ${marker} untouched`).toBe(true);
+      expect(readdirSync(root).filter((entry) => entry.startsWith('.install-'))).toEqual([]);
+    } finally {
+      await lock.release();
+    }
+  }, 30000);
+
+  // Ctrl-C during the wait (up to an hour) must not leave `.install-<version>.<pid>` behind.
+  // SIGINT goes to the whole process group, as a terminal sends it, so the `sleep` child that
+  // bash is waiting on dies of it too; a SIGINT sent to bash alone is deferred by bash.
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    test.skipIf(IS_WINDOWS)(
+      `${signal} during the lock wait removes the scratch tree and keeps the installed one`,
+      async () => {
+        const { root, env, archive, marker } = installedWithMarker();
+        const lock = await holdLauncherLock(root, '0.1.0');
+        const installer = runInBackground(['--local', archive], env, true);
+        try {
+          await waitForOutput(installer, 'Waiting for another installer', 10000);
+          const scratchWhileWaiting = scratchTrees(root);
+          expect(
+            scratchWhileWaiting.length,
+            `expected one .install-0.1.0.<pid> tree while waiting on the lock | received: ${JSON.stringify(scratchWhileWaiting)}`
+          ).toBe(1);
+
+          process.kill(signal === 'SIGINT' ? -installer.pid : installer.pid, signal);
+          const exited = await Promise.race([installer.exited, Bun.sleep(10000).then(() => null)]);
+
+          expect(
+            exited,
+            `expected install.sh to exit ${signal === 'SIGINT' ? 130 : 143} after ${signal} | received: ${exited ?? 'still running'}`
+          ).toBe(signal === 'SIGINT' ? 130 : 143);
+          expect(
+            scratchTrees(root),
+            `expected no .install-* tree in ${root} after ${signal}`
+          ).toEqual([]);
+          expect(existsSync(marker), `expected ${marker} untouched`).toBe(true);
+        } finally {
+          installer.kill('SIGKILL');
+          await lock.release();
+        }
+      },
+      60000
+    );
+  }
+
+  test('the lock is per version: another version installs while one is held', async () => {
+    const { workDir, root, env } = layout();
+    const archive = buildReleaseArchive(workDir, `mangostudio-0.2.0-${PLATFORM}.tar.gz`, '0.2.0');
+    const lock = await holdLauncherLock(root, '0.1.0');
+    try {
+      const result = run(['--local', archive], { ...env, MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '2' });
+
+      expect(result.exitCode, JSON.stringify(result)).toBe(0);
+      expect(readlinkSync(join(root, 'current'))).toBe('0.2.0');
+    } finally {
+      await lock.release();
+    }
+  }, 30000);
+
+  test('--prune leaves a version whose lock is held and removes it on the next run', async () => {
+    const { workDir, root, env } = installedWithMarker();
+    const second = buildReleaseArchive(workDir, `mangostudio-0.2.0-${PLATFORM}.tar.gz`, '0.2.0');
+    expect(run(['--local', second], env).exitCode).toBe(0);
+    mkdirSync(join(root, '0.0.9'));
+    const lock = await holdLauncherLock(root, '0.0.9');
+    try {
+      const held = run(['--prune'], { ...env, MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '1' });
+
+      expect(held.exitCode, JSON.stringify(held)).toBe(0);
+      expect(held.stdout).toContain('Could not remove 0.0.9');
+      expect(existsSync(join(root, '0.0.9'))).toBe(true);
+    } finally {
+      await lock.release();
+    }
+
+    const free = run(['--prune'], env);
+
+    expect(free.exitCode, JSON.stringify(free)).toBe(0);
+    expect(existsSync(join(root, '0.0.9'))).toBe(false);
+  }, 30000);
+
+  test('the lock file is named like the launcher names it, in the shell and PowerShell installers', () => {
+    const launcher = readFileSync(
+      join(import.meta.dir, '..', '..', 'crates', 'mangostudio-launcher', 'src', 'main.rs'),
+      'utf8'
+    );
+    const powershell = readFileSync(join(import.meta.dir, '..', 'install', 'install.ps1'), 'utf8');
+    const shellInstaller = readFileSync(INSTALL_SH, 'utf8');
+
+    // A boolean, not `toContain`: a failed toContain would print a whole source file.
+    const names: ReadonlyArray<readonly [string, string, RegExp]> = [
+      ['crates/mangostudio-launcher/src/main.rs', launcher, /"\.launcher-\{version\}\.lock"/],
+      ['scripts/install/install.sh', shellInstaller, /\.launcher-\$\{version\}\.lock/],
+      ['scripts/install/install.ps1', powershell, /\.launcher-\$Version\.lock/],
+    ];
+    for (const [file, source, lockName] of names) {
+      expect(
+        lockName.test(source),
+        `${file} | expected the lock file name matching: ${lockName} | received: no such text`
+      ).toBe(true);
+    }
+  });
+});
+
+describe('install.sh lock primitive', () => {
+  const lockTools = ['flock', 'perl'] as const;
+
+  for (const tool of lockTools) {
+    const available = shell(['-c', `command -v ${tool}`]).exitCode === 0;
+
+    test.skipIf(!available || !PERL)(
+      `try_lock_fd with only ${tool} takes a free lock and reports a held one`,
+      async () => {
+        const root = tempDir('mango-lock-');
+        const lockFile = launcherLockPath(root, '0.1.0');
+        const onlyTool = `have_command() { [ "$1" = ${tool} ] && command -v "$1" >/dev/null 2>&1; }`;
+        const attempt = () =>
+          sourceAndCall(`${onlyTool}; exec 200>>"$1"; rc=0; try_lock_fd || rc=$?; echo "rc=$rc"`, [
+            lockFile,
+          ]);
+        writeFileSync(lockFile, '');
+
+        const free = attempt();
+        const lock = await holdLauncherLock(root, '0.1.0');
+        let held: RunResult;
+        try {
+          held = attempt();
+        } finally {
+          await lock.release();
+        }
+
+        expect(free.stdout.trim(), JSON.stringify(free)).toBe('rc=0');
+        expect(held.stdout.trim(), JSON.stringify(held)).toBe('rc=1');
+      },
+      30000
+    );
+  }
+
+  // Git Bash holds C:\Users\me as /c/Users/me; a path in a message is for the user to paste into
+  // Explorer or PowerShell. A fake cygpath, named for what it does, stands in for the MSYS tool.
+  const FAKE_CYGPATH = 'have_command() { [ "$1" = cygpath ]; };';
+
+  // The fake marks its output instead of printing backslashes: a backslash in a script passed as
+  // an argument is rewritten on its way through the Windows process boundary.
+  test('display_path prints what cygpath -w returns when it converts the path', () => {
+    const result = sourceAndCall(
+      `${FAKE_CYGPATH} cygpath() { [ "$1" = -w ] && [ "$2" = -- ] && printf 'native(%s)\\n' "$3"; }; display_path /c/Users/me/root`
+    );
+
+    expect(result.stdout.trim(), JSON.stringify(result)).toBe('native(/c/Users/me/root)');
+  });
+
+  test('display_path prints the path as given when cygpath fails or is absent', () => {
+    const failing = sourceAndCall(
+      `${FAKE_CYGPATH} cygpath() { return 1; }; display_path /c/Users/me/root`
+    );
+    const absent = sourceAndCall('have_command() { return 1; }; display_path /c/Users/me/root');
+
+    expect(failing.stdout.trim(), JSON.stringify(failing)).toBe('/c/Users/me/root');
+    expect(absent.stdout.trim(), JSON.stringify(absent)).toBe('/c/Users/me/root');
+  });
+
+  test('without flock or perl the installer warns that it runs without the lock and goes on', () => {
+    const root = tempDir('mango-lock-none-');
+
+    const result = sourceAndCall(
+      'have_command() { return 1; }; acquire_version_lock "$1" 0.1.0; echo "rc=$?"',
+      [root]
+    );
+
+    expect(result.stdout.trim(), JSON.stringify(result)).toBe('rc=0');
+    expect(result.stderr).toContain('without the install lock');
+  });
+
+  // flock(1) comes in two flavours that disagree about errors. A fake of each, named for what
+  // it reports, drives try_lock_fd without either tool installed.
+  const FLOCK_FAKES: ReadonlyArray<readonly [string, string, number]> = [
+    ['takes a free lock', 'fake_flock() { return 0; }', 0],
+    [
+      'reports a held lock as exit 1 with no output (util-linux and busybox)',
+      'fake_flock() { return 1; }',
+      1,
+    ],
+    [
+      'treats exit 1 with a message as unsupported (busybox on a file system without locking)',
+      'fake_flock() { echo "flock: Function not implemented" >&2; return 1; }',
+      2,
+    ],
+    [
+      'treats another exit code with a message as unsupported (util-linux)',
+      'fake_flock() { echo "flock: 200: Bad file descriptor" >&2; return 65; }',
+      2,
+    ],
+  ];
+  test.each(FLOCK_FAKES)('try_lock_fd %s', (_name, fake, expected) => {
+    const result = sourceAndCall(
+      `${fake}; flock() { fake_flock "$@"; }; have_command() { [ "$1" = flock ]; }; rc=0; try_lock_fd || rc=$?; echo "rc=$rc"`
+    );
+
+    expect(result.stdout.trim(), JSON.stringify(result)).toBe(`rc=${expected}`);
+  });
+
+  test.each([
+    { value: '0', kept: true },
+    { value: '7', kept: true },
+    { value: '123456789', kept: true },
+    { value: '10s', kept: false },
+    { value: '-1', kept: false },
+    { value: '1.5', kept: false },
+    { value: '+5', kept: false },
+    { value: ' 5', kept: false },
+    { value: '1234567890', kept: false },
+  ])('MANGOSTUDIO_INSTALL_LOCK_TIMEOUT=$value is kept: $kept', ({ value, kept }) => {
+    const result = sourceAndCall(
+      `INSTALL_LOCK_TIMEOUT='${value}'; validate_install_lock_timeout; echo "timeout=$INSTALL_LOCK_TIMEOUT"`
+    );
+
+    expect(
+      result.stdout.trim(),
+      `expected ${JSON.stringify(value)} to ${kept ? 'be kept' : 'fall back to 3600'} | received: ${JSON.stringify(result)}`
+    ).toBe(`timeout=${kept ? value : '3600'}`);
+    expect(result.stderr.includes('not a whole number of seconds'), JSON.stringify(result)).toBe(
+      !kept
+    );
+  });
+
+  test('an install with a non-numeric lock timeout warns and installs instead of looping', () => {
+    const { workDir, root, env } = layout();
+    const archive = buildReleaseArchive(workDir, `mangostudio-0.1.0-${PLATFORM}.tar.gz`, '0.1.0');
+
+    const result = run(['--local', archive], { ...env, MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '10s' });
+
+    expect(result.exitCode, JSON.stringify(result)).toBe(0);
+    expect(result.stderr).toContain('MANGOSTUDIO_INSTALL_LOCK_TIMEOUT=10s is not a whole number');
+    expect(readlinkSync(join(root, 'current'))).toBe('0.1.0');
   });
 });
 

@@ -16,6 +16,7 @@ import { useId, useState } from 'react';
 
 import { Button, buttonClassName } from '@/components/ui/Button';
 import { MicroLabel } from '@/components/ui/MicroLabel';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
@@ -36,7 +37,7 @@ import { FindingIcon } from './FindingList';
 import { TOOL_CARD_SURFACE } from './ToolCard';
 
 export function HealthPage() {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const e = t.environments;
   const scope = useEnvironmentScope();
   const { entries, isPending, error, refetch } = useEnvironmentHealth(
@@ -140,7 +141,7 @@ function HealthGroups({
   readonly entries: readonly HealthEntry[];
   readonly environmentId: string;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const e = t.environments;
   const needsAction = entries.filter((entry) => entry.severity === 'fail');
   const canWait = entries.filter((entry) => entry.severity === 'warn' && !entry.quiet);
@@ -185,7 +186,7 @@ function HealthGroup({
   readonly entries: readonly HealthEntry[];
   readonly environmentId: string;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const e = t.environments;
   // The health scopes are exactly the static identity kinds, so an entry names
   // its subject the same way that subject's own card does.

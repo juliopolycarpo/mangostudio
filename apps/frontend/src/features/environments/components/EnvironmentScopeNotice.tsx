@@ -15,6 +15,7 @@ import { PlugZap, ShieldOff } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG } from '@/lib/icon-sizes';
@@ -34,7 +35,7 @@ export function EnvironmentScopeNotice({
   reason,
   surface = 'probing',
 }: EnvironmentScopeNoticeProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const e = t.environments;
   const connect = useConnectEnvironmentMutation();
   const notPermitted = reason === 'not-permitted';

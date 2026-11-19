@@ -67,7 +67,12 @@ When an install is needed:
   record, and otherwise fails so the command can be run again. Nothing is installed without the lock: if it cannot be opened or
   taken (a read-only directory, a file system without locking), the launcher
   starts a build whose binaries match the record, and otherwise fails naming
-  the lock file.
+  the lock file. The install scripts (`install.sh`, `install.ps1`) take the
+  same lock around their version-directory swap and before a `--prune` removes
+  a version. A prune therefore creates `.launcher-<version>.lock` for each
+  version it removes and leaves the empty file in the install root; it is not
+  deleted, because unlinking a lock file while another process holds it would
+  let two installers lock different files of the same name.
 - Requests are bounded by silence rather than total time: 30 seconds each to
   resolve and to connect, and 60 seconds for any single read of the response, so
   a slow link that keeps sending finishes and a stalled one ends. Downloads make

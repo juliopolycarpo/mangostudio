@@ -17,6 +17,7 @@ import type {
 import { Badge } from '@/components/ui/Badge';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
@@ -52,7 +53,7 @@ const UPGRADABLE: ReadonlySet<LtsStatus> = new Set<LtsStatus>([
 ]);
 
 export function NodeVersionTable({ status, recipes, environmentId }: NodeVersionTableProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const e = t.environments;
   const probe = useProbeVersionManager(environmentId);
   const { resolve } = useToolIdentities();

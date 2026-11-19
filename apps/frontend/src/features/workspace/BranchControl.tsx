@@ -10,6 +10,7 @@ import { Menu, MenuItem } from '@/components/ui/Menu';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useToast } from '@/components/ui/Toast';
 import { BranchPrTag, useBranchPrAnnotations } from '@/features/github/components/BranchPrTag';
+import { gitMessages } from '@/features/workspace/git-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { ApiError, cn, resolveApiErrorMessage } from '@/lib/utils';
@@ -35,7 +36,7 @@ export function BranchControl({
   readonly branch: GitBranchInfo;
   readonly detachedLabel: string;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(gitMessages);
   const { toast } = useToast();
   const labels = t.git.branch;
   const branches = useGitBranches(chatId);

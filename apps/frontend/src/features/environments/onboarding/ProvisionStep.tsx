@@ -18,6 +18,7 @@ import { useState } from 'react';
 
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
 
@@ -49,7 +50,7 @@ export function ProvisionStep({
   consent,
   onContinue,
 }: ProvisionStepProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.onboarding;
   const install = useStartRuntimeInstallMutation(environment.id);
   const bootstrap = useStartPairedBootstrapMutation(environment.id);

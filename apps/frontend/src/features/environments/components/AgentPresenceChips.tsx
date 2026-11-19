@@ -16,6 +16,7 @@ import { useQueries } from '@tanstack/react-query';
 import { Check, X } from 'lucide-react';
 
 import { Badge } from '@/components/ui/Badge';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
@@ -28,7 +29,7 @@ interface AgentPresenceChipsProps {
 }
 
 export function AgentPresenceChips({ targetId, environments }: AgentPresenceChipsProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const reporting = environments.filter(
     (environment) => environment.status.manifest?.features.probing !== false
   );

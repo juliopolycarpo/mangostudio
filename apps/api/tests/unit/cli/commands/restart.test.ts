@@ -208,6 +208,114 @@ describe('runRestart', () => {
     ]);
   });
 
+  describe('when the stale unit cannot be moved onto the launcher', () => {
+    const STALE = '/home/linuxbrew/.linuxbrew/Cellar/mangostudio/0.1.1/libexec/mangostudio';
+    const LAUNCHER = '/home/linuxbrew/.linuxbrew/bin/mangostudio';
+
+    /** Deps for a unit that records `STALE` and a supervisor that refuses only the rewrite. */
+    function staleUnitDeps(overrides: Partial<RestartDeps>) {
+      const made = baseDeps({
+        launcherPath: () => LAUNCHER,
+        pathExists: () => true,
+        ...overrides,
+      });
+      made.manager.setStatus({ ...installedAndRunning(), execPath: STALE });
+      made.manager.restartRetargetedFailWith = new Error('Permission denied writing the unit');
+      return made;
+    }
+
+    // A retarget is an upgrade nicety. Letting its failure end the command left
+    // the operator with a stopped hub and no way to restart it from the CLI.
+    it('still restarts a running service as installed and names the repair', async () => {
+      const controller = new FakeProcessController([42, 77]);
+      let reads = 0;
+      const { deps, lines, manager } = staleUnitDeps({
+        controller,
+        readState: () => {
+          reads += 1;
+          return Promise.resolve(reads < 3 ? SERVICE : { ...SERVICE, pid: 77 });
+        },
+      });
+
+      await runRestart(deps);
+
+      expect(manager.calls).toEqual(['status', 'restartRetargeted', 'restart']);
+      const warning = lines.find((line) => line.includes('mangostudio service install'));
+      expect(warning).toContain(STALE);
+      expect(warning).toContain('Permission denied writing the unit');
+      expect(lines.at(-1)).toBe('MangoStudio restarted (PID 77, http://localhost:3001).');
+    });
+
+    it('still starts a stopped service as installed and names the repair', async () => {
+      let first = true;
+      const { deps, lines, manager } = staleUnitDeps({
+        controller: new FakeProcessController([77]),
+        readState: () => {
+          if (!first) return Promise.resolve({ ...SERVICE, pid: 77 });
+          first = false;
+          return Promise.resolve(null);
+        },
+      });
+      manager.setStatus({ running: false });
+
+      await runRestart(deps);
+
+      expect(manager.calls).toEqual(['status', 'status', 'restartRetargeted', 'start']);
+      expect(lines.find((line) => line.includes('mangostudio service install'))).toContain(STALE);
+      expect(lines.at(-1)).toContain('started through mangostudio.service (PID 77');
+    });
+  });
+
+  // On launchd this command is what a one-shot helper agent runs. Its last act
+  // removes that agent, since a plist left in LaunchAgents would run it again.
+  describe('cleaning up the launchd retarget helper', () => {
+    it('removes the helper once the service is back', async () => {
+      const { deps, manager } = baseDeps({
+        controller: new FakeProcessController([42, 77]),
+        readState: (() => {
+          let reads = 0;
+          return () => {
+            reads += 1;
+            return Promise.resolve(reads < 3 ? SERVICE : { ...SERVICE, pid: 77 });
+          };
+        })(),
+      });
+
+      await runRestart(deps);
+
+      expect(manager.retargetHelperRemovals).toBe(1);
+    });
+
+    it('removes it when the service does not come back, so the failure is not run again at login', async () => {
+      const { deps, manager } = baseDeps({
+        controller: new FakeProcessController([42]),
+        readState: () => Promise.resolve(SERVICE),
+      });
+
+      await expect(runRestart(deps)).rejects.toThrow(/did not come back/);
+
+      expect(manager.retargetHelperRemovals).toBe(1);
+    });
+
+    it('does not let a failed removal hide the restart result', async () => {
+      const { deps, manager, lines } = baseDeps({
+        controller: new FakeProcessController([42, 77]),
+        readState: (() => {
+          let reads = 0;
+          return () => {
+            reads += 1;
+            return Promise.resolve(reads < 3 ? SERVICE : { ...SERVICE, pid: 77 });
+          };
+        })(),
+      });
+      manager.removeRetargetHelper = () => Promise.reject(new Error('bootout refused'));
+
+      await runRestart(deps);
+
+      expect(lines.at(-1)).toBe('MangoStudio restarted (PID 77, http://localhost:3001).');
+    });
+  });
+
   it('refuses a foreground instance and says where to restart it', async () => {
     const { deps } = baseDeps({
       controller: new FakeProcessController([42]),

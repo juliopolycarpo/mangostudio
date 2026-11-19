@@ -3,6 +3,7 @@ import { Inbox } from 'lucide-react';
 import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Spinner } from '@/components/ui/Spinner';
+import { githubMessages } from '@/features/github/github-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG } from '@/lib/icon-sizes';
@@ -42,7 +43,7 @@ export function GithubInboxSection({
   collapsed,
   onToggle,
 }: GithubInboxSectionProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
   const { query, refresh } = inbox;
   const data = query.data;
 
@@ -78,7 +79,7 @@ function InboxBody({
   readonly chatId: string;
   readonly query: GithubInbox['query'];
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
 
   if (query.isPending) {
     return <EmptyState icon={<Spinner />} title={t.github.loading} className="min-h-24 py-4" />;

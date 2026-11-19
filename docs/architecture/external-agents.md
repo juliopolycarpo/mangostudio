@@ -406,6 +406,18 @@ in an untrusted workspace is refused before the stream opens, with the canonical
 machine spells, and the client turns that refusal into one dialog and one retry. The grant covers
 exactly that directory: a parent's grant does not cover a child.
 
+A grant can be withdrawn: `GET /api/external-agents/workspace-trust` lists the signed-in user's
+current grants and `DELETE` on the same path removes one, named by the stored
+`(targetId, environmentId, workspacePath)`. The path is matched literally and never canonicalized
+again, so a grant stays revocable while its machine is offline. A key the user never granted
+answers 404, whoever else granted it. Settings > External agents lists the grants and wires the
+button. Both the grant and the revoke write a `workspace_trust_*` diagnostic log entry.
+
+Withdrawing does not reap sessions, unlike withdrawing a vendor disclosure. The gate runs on every
+send, so the next turn in that folder is refused and asks again; a turn already running keeps
+going, because the vendor loaded the folder's configuration when the session opened and stopping
+the turn would not unload it.
+
 Only vendors that have declared what they load are gated. Extending that list is how another
 adapter opts in — a disclosure that cannot name what it covers is a dialog people learn to dismiss.
 
@@ -487,6 +499,15 @@ The **runtime** attests what it can establish about itself, in
 namespace and filesystem both still say "isolated". So the mount table is read and any mount at the
 credential home — or at `~/.claude`, `~/.codex`, `~/.cursor` and their XDG equivalents — withdraws
 the attestation. A container whose mount table cannot be read attests nothing.
+
+A runtime newer than the hub may attest a method this table does not list. `runtime.health` reads
+the method as a bounded, URL-safe string, so the report is still accepted and the rest of the
+manifest still refreshes. The hub reads an unknown method as **unproven isolation**: it drops the
+attestation, so the manifest carries no `identityIsolation` (even when `hello` announced a known
+method — the newest answer wins) and everything gated on it fails closed with
+`EXTERNAL_ISOLATION_UNPROVEN`. It logs `unknown_identity_isolation_method_skipped` once per
+environment. The enum stays closed wherever the hub produces the value: the manifest and the
+`isolation` it sends back never carry a method this build cannot name.
 
 The attestation carries a `credentialHomeFingerprint`: a non-reversible digest of the credential
 home's identity, never its contents and never a path that would leak a username. It exists so the
@@ -689,10 +710,28 @@ without a runtime round trip; only Codex's own turn state needs one.
 A request the hub's own session or the runtime proves never reached the vendor
 (`classifySubmissionFailure` says `not-submitted`) is answered as an ordinary `turn-not-steerable`
 rejection, so the caller may resend under a new id. Any other failure — the hub's deadline passing,
-the connection closing under the call, or an error the runtime answered — leaves delivery unknown:
-the original failure is rethrown, the id stays cached so it is never dispatched twice, and the
-record is left as it was written. How an unknown delivery is recorded is an open owner decision, as
-is how a late acknowledgement is corrected once the turn's final write has passed.
+the connection closing under the call, or an error the runtime answered — leaves delivery unknown,
+and that is its own outcome rather than a rejection or a rethrown error:
+
+- The part is corrected in place to `status: 'delivery-unknown'` (no `reasonCode`), the live stream
+  sends the same `external_steer` chunk with that status, and the route answers `200` with
+  `{ accepted: false, deliveryUnknown: true }`. The 200 declares `ExternalSteerSuccessResponseSchema`
+  (accepted or delivery-unknown) and the 409 declares `ExternalSteerRejectedResultSchema`, so Eden's
+  `data` never types as a refusal. The runtime contract is untouched: the runtime never says "unknown", so `ExternalAgentSteerResultSchema` and the
+  rejection reasons stay refusals only. Parts stored before the status existed read unchanged.
+- It is not `rejected` because the agent may have taken the steer. A durable rejection cannot later
+  be corrected to accepted, and it invites a resend under a fresh id after a reload, which can
+  deliver the steer twice.
+- The id keeps that answer for the life of the turn and is never dispatched again. The runtime
+  drops its steer receipt when the vendor call fails (`turns.rs`), so a same-id redispatch would
+  reach the vendor a second time; the hub's cached attempt is what makes a retry safe.
+- The composer never resends it. The part shows a warning (not the danger tone of a refusal) telling
+  the user to check the agent's reply before sending again, and the composer's next steer is the
+  user's own action under a fresh id.
+- The state is final. The hub's `clientMessageId` never reaches the vendor, and the user-message
+  items Codex emits are dropped by the adapter (the SDK renders nothing for `userMessage`), so no
+  later signal can be matched to the steer to upgrade it to `accepted`. A steer whose runtime call has not answered when the turn's
+  final write passes keeps the status it had then.
 
 That same durable write is charged against the turn's byte and event budget, exactly like a vendor
 event — a steer is up to 1 MiB and the caller may attempt as many as it likes, so without a charge

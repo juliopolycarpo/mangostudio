@@ -14,6 +14,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Callout } from '@/components/ui/Callout';
 import { Chip } from '@/components/ui/Chip';
 import { Spinner } from '@/components/ui/Spinner';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
@@ -28,7 +29,7 @@ interface ToolsStepProps {
 }
 
 export function ToolsStep({ environment, onContinue }: ToolsStepProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.onboarding;
   const connected = environment.status.state === 'connected';
   const runtimes = useQuery({

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   type AdapterStrategy,
+  CUSTOM_INSTRUCTION_LOCATION_ID,
   directoryHashDomainVersion,
   type LibraryInstance,
   type LibraryLocationId,
@@ -568,6 +569,16 @@ describe('previewLibraryPropagation — request validation', () => {
       resources: [ghSkill],
     });
     await expect(failure).rejects.toMatchObject({ status: 422 });
+  });
+
+  it('refuses the custom-instruction kind as a write destination', async () => {
+    const failure = preview(['instruction:custom'], [CUSTOM_INSTRUCTION_LOCATION_ID], {
+      resources: [],
+    });
+    await expect(failure).rejects.toMatchObject({
+      status: 422,
+      message: `Unknown library location: "${CUSTOM_INSTRUCTION_LOCATION_ID}".`,
+    });
   });
 
   it('reports a resource that the rescan did not find', async () => {

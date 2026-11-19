@@ -19,6 +19,7 @@ import { Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { Select } from '@/components/ui/Select';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
@@ -130,7 +131,7 @@ export function CapabilityDiff({
   onSelect,
   onClose,
 }: CapabilityDiffProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const e = t.environments;
   const { resolve } = useToolIdentities();
   const left = useColumn(environments, leftId);
@@ -273,7 +274,7 @@ function ColumnHeader({
 }
 
 function DiffCell({ cell }: { readonly cell: Cell }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const scope = t.environments.scope;
   const label = {
     present: scope.cellPresent,

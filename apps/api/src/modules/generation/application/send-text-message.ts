@@ -20,6 +20,7 @@ import {
   persistUserMessage,
   updateChatAfterTurn,
 } from '../infrastructure/conversation-persistence';
+import { persistFailedTextTurn } from './persist-failed-text-turn';
 import { resolveModel } from './resolve-model';
 import { assertTextTurnHasContent, normalizeTextTurnAttachmentIds } from './text-turn-content';
 
@@ -118,33 +119,53 @@ export async function sendTextMessage(
     db
   );
 
-  const history = await loadHistory(input.chatId, { excludeId: userMsgId }, db);
-  const runtimeAttachments = await resolveProviderRuntimeAttachments(
-    {
-      attachmentIds,
-      userId: input.userId,
-      chatId: input.chatId,
-      messageId: userMsgId,
-    },
-    db
-  );
+  // The prompt is saved, so a failure from here on must leave a reply the
+  // transcript can show; the original error still reaches the caller.
+  let startTime: number;
+  let result: Awaited<ReturnType<typeof generateTextWithIdleDeadline>>;
+  try {
+    const history = await loadHistory(input.chatId, { excludeId: userMsgId }, db);
+    const runtimeAttachments = await resolveProviderRuntimeAttachments(
+      {
+        attachmentIds,
+        userId: input.userId,
+        chatId: input.chatId,
+        messageId: userMsgId,
+      },
+      db
+    );
 
-  const startTime = Date.now();
-  await warmupPromise;
-  // A reply may run for minutes, so it is bounded by its silence rather than by
-  // a whole-response deadline, and a client that hangs up cancels the vendor call.
-  const result = await generateTextWithIdleDeadline(provider, {
-    userId: input.userId,
-    environmentId: chat.environmentId,
-    chatId: input.chatId,
-    history,
-    prompt: input.prompt,
-    systemPrompt: input.systemPrompt,
-    modelName: modelId,
-    signal: input.signal,
-    attachments: runtimeAttachments,
-    modelCapabilities: capabilities,
-  });
+    startTime = Date.now();
+    await warmupPromise;
+    // A reply may run for minutes, so it is bounded by its silence rather than by
+    // a whole-response deadline, and a client that hangs up cancels the vendor call.
+    result = await generateTextWithIdleDeadline(provider, {
+      userId: input.userId,
+      environmentId: chat.environmentId,
+      chatId: input.chatId,
+      history,
+      prompt: input.prompt,
+      systemPrompt: input.systemPrompt,
+      modelName: modelId,
+      signal: input.signal,
+      attachments: runtimeAttachments,
+      modelCapabilities: capabilities,
+    });
+  } catch (error) {
+    await persistFailedTextTurn(
+      {
+        chatId: input.chatId,
+        userId: input.userId,
+        provider: provider.providerType,
+        modelId,
+        startTime: now,
+        error,
+        signal: input.signal,
+      },
+      db
+    );
+    throw error;
+  }
 
   const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
   const aiTimestamp = Date.now();

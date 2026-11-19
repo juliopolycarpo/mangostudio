@@ -1,14 +1,14 @@
-import { afterAll, expect, test } from 'bun:test';
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { expect, test } from 'bun:test';
+import { readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { readText } from './support/read-text';
+import { useScratchDirs } from './support/scratch-dirs';
 
-const root = mkdtempSync(join(tmpdir(), 'mango-bun-typecheck-'));
-afterAll(() => rmSync(root, { recursive: true, force: true }));
+const makeDir = useScratchDirs();
 
 test('workspace typecheck bypasses check scripts, checks imports and emits no files', () => {
+  const root = makeDir('mango-bun-typecheck-');
   const manifest = JSON.parse(readText('apps/api/package.json'));
   writeFileSync(
     join(root, 'package.json'),

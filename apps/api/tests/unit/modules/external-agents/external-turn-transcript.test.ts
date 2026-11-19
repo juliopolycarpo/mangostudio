@@ -6,7 +6,11 @@ import {
   MAX_EXTERNAL_NOTICES_PER_TURN,
 } from '@mangostudio/shared/external-agents';
 import { mergeMessageParts } from '@mangostudio/shared/generation';
-import type { ExternalActivityPart, ExternalApprovalPart } from '@mangostudio/shared/types';
+import type {
+  ExternalActivityPart,
+  ExternalApprovalPart,
+  ExternalSteerPart,
+} from '@mangostudio/shared/types';
 
 import { ExternalTurnTranscript } from '../../../../src/modules/external-agents/domain/external-turn-transcript';
 
@@ -624,6 +628,58 @@ describe('ExternalTurnTranscript', () => {
     expect(result.terminal).toBeUndefined();
     expect(target.turnPart.status).toBe('active');
     expect(target.turnPart.persistedBytes).toBe(5);
+  });
+
+  describe('resolveSteerDeliveryUnknown', () => {
+    const steerStatus = (target: ReturnType<typeof transcript>, id: string) =>
+      target.parts.find((part) => part.type === 'external_steer' && part.clientMessageId === id) as
+        ExternalSteerPart | undefined;
+
+    it('marks an accepted steer delivery-unknown and keeps its text and no reason', () => {
+      const target = transcript();
+      target.recordSteerAttempt({ clientMessageId: 'steer-1', text: 'redirect' }, 2_000);
+
+      target.resolveSteerDeliveryUnknown('steer-1');
+
+      expect(steerStatus(target, 'steer-1')).toMatchObject({
+        text: 'redirect',
+        status: 'delivery-unknown',
+      });
+      expect(steerStatus(target, 'steer-1')?.reasonCode).toBeUndefined();
+    });
+
+    it('never overwrites a rejection, which is the stronger statement', () => {
+      const target = transcript();
+      target.recordSteerAttempt({ clientMessageId: 'steer-1', text: 'redirect' }, 2_000);
+      target.resolveSteerRejected('steer-1', 'turn-already-completed');
+
+      target.resolveSteerDeliveryUnknown('steer-1');
+
+      expect(steerStatus(target, 'steer-1')).toMatchObject({
+        status: 'rejected',
+        reasonCode: 'turn-already-completed',
+      });
+    });
+
+    it('is not undone by a later rejection correction for the same id', () => {
+      const target = transcript();
+      target.recordSteerAttempt({ clientMessageId: 'steer-1', text: 'redirect' }, 2_000);
+      target.resolveSteerDeliveryUnknown('steer-1');
+
+      // The pre-dispatch write-failure correction runs before the vendor call,
+      // so it cannot legitimately follow; if one did, the record still must
+      // not claim a refusal the hub never saw.
+      target.resolveSteerRejected('steer-1', 'turn-not-steerable');
+
+      expect(steerStatus(target, 'steer-1')?.status).toBe('delivery-unknown');
+    });
+
+    it('ignores an id that was never recorded', () => {
+      const target = transcript();
+
+      expect(() => target.resolveSteerDeliveryUnknown('never-recorded')).not.toThrow();
+      expect(target.parts.filter((part) => part.type === 'external_steer')).toHaveLength(0);
+    });
   });
 
   it('lets the first terminal writer win', () => {

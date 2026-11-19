@@ -131,7 +131,13 @@ export function InputBar({
   const [prompt, setPrompt] = useComposerDraft(chatId);
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
   const [steering, setSteering] = useState(false);
-  const [steerError, setSteerError] = useState<string | null>(null);
+  // `warning` is a steer whose delivery the hub could not confirm; `danger` is a
+  // refusal or a send that failed. They differ because the first may have landed.
+  const [steerError, setSteerError] = useState<{
+    readonly tone: 'danger' | 'warning';
+    readonly title: string;
+    readonly detail?: string;
+  } | null>(null);
   const [dragging, setDragging] = useState(false);
   const pendingSteerId = useRef<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -309,13 +315,27 @@ export function InputBar({
         clientMessageId,
         text,
       });
+      // An answer, even "unknown", settles this id: the hub keeps it for good, so
+      // the next send is the user's own choice and takes a fresh one. Resending
+      // the unknown one here, or after a reload, would never reach the agent
+      // again and must not be done on the user's behalf.
       pendingSteerId.current = null;
       setPrompt('');
       // The outcome itself renders inline in the turn once the live stream
       // reports it; this is only for a rejection nobody else will surface.
-      if (!result.accepted) setSteerError(t.externalAgents.steer.reason[result.reasonCode]);
+      if (!result.accepted) {
+        setSteerError(
+          'deliveryUnknown' in result
+            ? {
+                tone: 'warning',
+                title: t.externalAgents.steer.deliveryUnknownLabel,
+                detail: t.externalAgents.steer.deliveryUnknownHint,
+              }
+            : { tone: 'danger', title: t.externalAgents.steer.reason[result.reasonCode] }
+        );
+      }
     } catch {
-      setSteerError(t.externalAgents.steer.submitError);
+      setSteerError({ tone: 'danger', title: t.externalAgents.steer.submitError });
     } finally {
       setSteering(false);
     }
@@ -439,12 +459,14 @@ export function InputBar({
 
         {steerError && (
           <Callout
-            tone="danger"
+            tone={steerError.tone}
             // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
             role="status"
             className="mb-2"
-            title={steerError}
-          />
+            title={steerError.title}
+          >
+            {steerError.detail}
+          </Callout>
         )}
 
         {uploads.error && (

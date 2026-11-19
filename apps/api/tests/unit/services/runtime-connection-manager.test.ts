@@ -1444,6 +1444,69 @@ describe('RuntimeConnectionManager', () => {
     }
   });
 
+  // Regression for #2570: a newer runtime attesting a method this hub has no enum member for
+  // refused the whole health report and froze the manifest, with nothing logged.
+  it('refreshes the manifest from a health report with an unknown isolation method, withholds the attestation, and logs it once', async () => {
+    const hello: RuntimeCapabilityManifest = {
+      ...TEST_MANIFEST,
+      features: { ...TEST_MANIFEST.features, externalAgents: true },
+      identityIsolation: { method: 'os-account', credentialHomeFingerprint: 'home-v1' },
+    };
+    let targets = ['codex'];
+    const runtime = await connectTestRuntime({
+      manifest: hello,
+      handlers: {
+        'runtime.health': () => ({
+          ...HEALTH_REPORT,
+          allow: { ...HEALTH_REPORT.allow, externalAgents: true },
+          externalAgents: {
+            targets,
+            identityIsolation: { method: 'micro-vm', credentialHomeFingerprint: 'home-v1' },
+            liveSessionCount: 0,
+            liveSessions: [],
+          },
+        }),
+      },
+    });
+    const healthLogger = new RecordingDiagnosticLogger();
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: { stdio: () => Promise.resolve(runtime) },
+      healthLogger,
+    });
+    try {
+      await manager.getClient('user-1', 'devbox');
+
+      targets = ['codex', 'cursor'];
+      const refreshed = await manager.refreshManifest('user-1', 'devbox');
+      expect(
+        refreshed.manifest?.externalAgents,
+        'expected the refreshed targets: a rejected report keeps the handshake manifest'
+      ).toEqual(['codex', 'cursor']);
+      expect(
+        refreshed.manifest?.identityIsolation,
+        'expected no attestation: an unknown method is unproven isolation'
+      ).toBeUndefined();
+      expect(
+        manager.getCachedHealth('user-1', 'devbox')?.health.externalAgents?.identityIsolation
+      ).toBeUndefined();
+
+      expect(
+        healthLogger.entries,
+        'expected one warning for micro-vm across every health read'
+      ).toEqual([
+        {
+          level: 'warn',
+          event: 'unknown_identity_isolation_method_skipped',
+          metadata: { environmentId: 'devbox', method: 'micro-vm' },
+        },
+      ]);
+    } finally {
+      manager.disconnect('user-1', 'devbox');
+      await runtime.close();
+    }
+  });
+
   describe('the read of which agents a runtime hosts at connect', () => {
     const HELLO: RuntimeCapabilityManifest = {
       ...TEST_MANIFEST,

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { MenuItem, MenuSeparator } from '@/components/ui/Menu';
 import { SplitButton } from '@/components/ui/SplitButton';
 import { useToast } from '@/components/ui/Toast';
+import { gitMessages } from '@/features/workspace/git-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -46,7 +47,7 @@ export function useCommitActions({
   onEnterAmend,
   onRemoteFailure,
 }: CommitActionsInput): CommitActionsController {
-  const { t } = useI18n();
+  const { t } = useI18n(gitMessages);
   const { toast } = useToast();
   const labels = t.git.commitActions;
   const commitLabels = t.git.commit;
@@ -147,7 +148,7 @@ export function CommitActions({
   readonly canGenerate: boolean;
   readonly onGenerate: () => void;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(gitMessages);
   const labels = t.git.commitActions;
   const commitLabels = t.git.commit;
   const [menuOpen, setMenuOpen] = useState(false);

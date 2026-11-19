@@ -37,6 +37,7 @@ import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { formatBytes } from '@/features/environments/format';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
 import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
@@ -78,7 +79,7 @@ function groupByEnvironment(
 }
 
 export function BackupList() {
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n(libraryMessages);
   const l = t.library;
   const queryClient = useQueryClient();
   const query = useQuery(backupUsageQueryOptions());
@@ -270,7 +271,7 @@ function BackupRow({
   restoreFailed,
   result,
 }: BackupRowProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   // Stated up front rather than discovered on click. A restore reads the
   // manifest on the machine that holds the bytes, so a machine that is away and

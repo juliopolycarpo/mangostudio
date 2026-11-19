@@ -50,6 +50,8 @@ export interface UserServiceExecDeps {
   readonly pathExists: (path: string) => Promise<boolean>;
   /** Where non-fatal advice goes; defaults to stderr prefixed with the CLI name. */
   readonly warn?: (message: string) => void;
+  /** Waits between `launchctl bootstrap` retries; defaults to a timer. */
+  readonly sleep?: (ms: number) => Promise<void>;
 }
 
 /** What a unit is called under each supervisor, and who to blame in messages. */
@@ -76,6 +78,53 @@ export interface UserServiceDefinition {
   readonly logFile?: string;
 }
 
+/**
+ * Which half of {@link UserServiceManager.restartRetargeted} failed. `rewrite`
+ * is everything up to the supervisor reading the new definition: the unit is
+ * as it was. `restart` is the bounce after it: the unit already names the new
+ * program.
+ */
+export type RestartRetargetedPhase = 'rewrite' | 'restart';
+
+/**
+ * A failed {@link UserServiceManager.restartRetargeted}, naming the phase. A
+ * caller that wants the unit up as installed after a failed rewrite must not do
+ * the same after a failed restart: the unit is already moved, and a second
+ * restart would run into whatever the first one hit.
+ * // Usage: if (error instanceof RestartRetargetedError && error.phase === 'restart') throw error
+ */
+export class RestartRetargetedError extends RuntimeServiceManagementError {
+  readonly phase: RestartRetargetedPhase;
+  /** Whether the unit on disk (or in Task Scheduler) was repointed before the failure. */
+  readonly unitMoved: boolean;
+  /** The underlying message, without the phase wording around it. */
+  readonly reason: string;
+  override readonly cause: unknown;
+
+  constructor(input: {
+    readonly phase: RestartRetargetedPhase;
+    readonly program: string;
+    readonly unitMoved: boolean;
+    readonly cause: unknown;
+  }) {
+    const reason = input.cause instanceof Error ? input.cause.message : String(input.cause);
+    super(
+      'runtime_service_unsupported',
+      input.phase === 'rewrite'
+        ? `Could not move the service unit onto ${input.program}: ${reason}`
+        : input.unitMoved
+          ? `The service unit was updated to run ${input.program}, but restarting it failed: ${reason}`
+          : `Restarting the service unit failed: ${reason}`,
+      { phase: input.phase, program: input.program }
+    );
+    this.name = 'RestartRetargetedError';
+    this.phase = input.phase;
+    this.unitMoved = input.unitMoved;
+    this.reason = reason;
+    this.cause = input.cause;
+  }
+}
+
 export interface UserServiceManager {
   install(definition: UserServiceDefinition): Promise<void>;
   uninstall(): Promise<void>;
@@ -88,6 +137,44 @@ export interface UserServiceManager {
    * with the old process when the caller is the service itself.
    */
   restart(): Promise<void>;
+  /**
+   * Restart the unit onto `program`: point an installed unit at it, keeping its
+   * arguments, environment, working directory and log file as they are, and
+   * bring it up from that definition. Returns whether the unit was repointed;
+   * false when nothing is installed or it already runs `program`, in which
+   * case this is a plain `restart()`.
+   *
+   * One operation rather than a retarget followed by `restart()` because on
+   * launchd the loaded job only rereads its plist across a bootout and a
+   * bootstrap, and a bootstrap that is allowed to fail there leaves the job
+   * unloaded. A failure is a {@link RestartRetargetedError} naming the phase:
+   * a failed `rewrite` leaves the unit as it was, a failed `restart` leaves the
+   * rewritten definition in place (`start()` still brings the unit up from it).
+   * Like `restart()`, a caller that is the service itself is stopped partway on
+   * launchd, so it must run this from a process outside the unit.
+   */
+  restartRetargeted(program: string): Promise<boolean>;
+  /**
+   * macOS only: run `<launcher> restart` from a one-shot LaunchAgent labelled
+   * `<unit label>.retarget`, bootstrapped into the user domain with the unit's
+   * environment and its output appended to `logFile`. The hub cannot move its
+   * own launchd job (the bootout that loads the rewritten plist ends the
+   * process that would run the bootstrap after it), and a child it spawns
+   * belongs to the job's coalition, which launchd may reap on that bootout. A
+   * job of its own is outside the hub's job, so it survives. Returns once the
+   * helper is loaded (RunAtLoad starts it); rejects when it cannot be, and the
+   * caller should restart the unit in place instead. Any leftover helper is
+   * removed first.
+   */
+  startRetargetHelper(launcherPath: string, logFile: string): Promise<void>;
+  /**
+   * Remove the helper {@link startRetargetHelper} loaded: its plist, then its
+   * job. Does nothing when there is no helper, and everywhere but macOS. The
+   * helper's own `restart` calls this as its last step, and the next hub start
+   * calls it for one that never got there; the plist goes first because the
+   * bootout ends the process when the helper removes itself.
+   */
+  removeRetargetHelper(): Promise<void>;
   /** The installed unit body, or null when nothing is installed. */
   readUnit(): Promise<string | null>;
   /** Where the unit file lives on this platform; null for Windows. */
@@ -212,12 +299,101 @@ ${optional.map((entry) => `${entry}\n`).join('')}  <key>RunAtLoad</key>
 }
 
 /**
+ * A one-shot LaunchAgent: runs `argv` once at load, is never restarted, and
+ * lets whatever it started outlive it (`AbandonProcessGroup`), so a `bootout` of
+ * the helper itself cannot take its children along.
+ * // Usage: renderLaunchdRetargetHelperPlistFile('com.example.hub.retarget', { argv: [launcher, 'restart'], env, logFile })
+ */
+export function renderLaunchdRetargetHelperPlistFile(
+  label: string,
+  helper: {
+    readonly argv: readonly string[];
+    readonly env: Readonly<Record<string, string>>;
+    readonly logFile: string;
+  }
+): string {
+  const environment = Object.entries(helper.env);
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${escapeXml(label)}</string>
+  <key>ProgramArguments</key>
+  <array>
+${plistStringArray(helper.argv)}
+  </array>
+${
+  environment.length > 0
+    ? `  <key>EnvironmentVariables</key>\n  <dict>\n${environment
+        .map(
+          ([key, value]) =>
+            `    <key>${escapeXml(key)}</key>\n    <string>${escapeXml(value)}</string>`
+        )
+        .join('\n')}\n  </dict>\n`
+    : ''
+}  <key>StandardOutPath</key>
+  <string>${escapeXml(helper.logFile)}</string>
+  <key>StandardErrorPath</key>
+  <string>${escapeXml(helper.logFile)}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>AbandonProcessGroup</key>
+  <true/>
+</dict>
+</plist>
+`;
+}
+
+/** The `EnvironmentVariables` a plist body declares, or none. */
+function environmentFromPlist(body: string): Record<string, string> {
+  const block = /<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/.exec(body)?.[1] ?? '';
+  const env: Record<string, string> = {};
+  for (const [, key, value] of block.matchAll(/<key>([^<]*)<\/key>\s*<string>([^<]*)<\/string>/g)) {
+    if (key !== undefined && value !== undefined) env[unescapeXml(key)] = unescapeXml(value);
+  }
+  return env;
+}
+
+/**
  * What Task Scheduler accepts in an action's argument string. The whole runner
  * script lives in there base64-encoded, and the encoding is not free: UTF-16
  * doubles the script and base64 adds a third again, so roughly 2.7 bytes of
  * argument per character of script.
  */
 const SCHEDULED_TASK_ARGUMENT_MAX = 8_192;
+
+/** Waits between `launchctl bootstrap` attempts: five tries over about four seconds. */
+const LAUNCHD_BOOTSTRAP_RETRY_DELAYS_MS: readonly number[] = [250, 500, 1_000, 2_000];
+
+/** launchctl exit codes for a job that is exiting: 5 is EIO, 37 is "operation already in progress". */
+const LAUNCHD_TRANSIENT_EXIT_CODES: readonly number[] = [5, 37];
+
+/** The encoded runner script inside a task's action arguments. */
+const TASK_ENCODED_COMMAND = /-EncodedCommand\s+(\S+)/;
+/**
+ * The runner script's program line: the first one that opens with `& '`. The
+ * environment and working directory lines before it start with `$env:` and
+ * `Set-Location`.
+ */
+const RUNNER_PROGRAM_LINE = /^& '(?:[^']|'')*'/m;
+
+/**
+ * Task Scheduler cuts an over-long argument rather than refusing it, and a
+ * cut base64 blob decodes to a truncated script — a task that registers, is
+ * reported installed, and starts a hub with half its environment or none of
+ * its program. Say so here instead.
+ */
+function assertTaskArgumentFits(taskName: string, runnerArgument: string): void {
+  if (runnerArgument.length <= SCHEDULED_TASK_ARGUMENT_MAX) return;
+  // The same refusal shape every other backend raises, so `withServiceErrors`
+  // prints it as one line and the machine route answers 409 — a bare `Error`
+  // reached the user as a stack trace and the page as a 500.
+  throw new RuntimeServiceManagementError(
+    'runtime_service_unsupported',
+    `The Scheduled Task command for ${taskName} is ${runnerArgument.length} characters, over the ${SCHEDULED_TASK_ARGUMENT_MAX} Task Scheduler accepts. Move configuration out of the environment into config.toml so the unit does not have to carry it.`
+  );
+}
 
 /**
  * The PowerShell that registers the Scheduled Task. The task runs a hidden
@@ -231,19 +407,7 @@ export function renderScheduledTaskInstallScript(
 ): string {
   const runner = renderScheduledTaskRunnerScript(definition);
   const runnerArgument = `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ${encodePowerShell(runner)}`;
-  // Task Scheduler cuts an over-long argument rather than refusing it, and a
-  // cut base64 blob decodes to a truncated script — a task that registers, is
-  // reported installed, and starts a hub with half its environment or none of
-  // its program. Say so here instead.
-  if (runnerArgument.length > SCHEDULED_TASK_ARGUMENT_MAX) {
-    // The same refusal shape every other backend raises, so `withServiceErrors`
-    // prints it as one line and the machine route answers 409 — a bare `Error`
-    // reached the user as a stack trace and the page as a 500.
-    throw new RuntimeServiceManagementError(
-      'runtime_service_unsupported',
-      `The Scheduled Task command for ${taskName} is ${runnerArgument.length} characters, over the ${SCHEDULED_TASK_ARGUMENT_MAX} Task Scheduler accepts. Move configuration out of the environment into config.toml so the unit does not have to carry it.`
-    );
-  }
+  assertTaskArgumentFits(taskName, runnerArgument);
   const action = [
     'New-ScheduledTaskAction',
     "-Execute 'powershell.exe'",
@@ -344,6 +508,52 @@ function renderScheduledTaskRestartScript(taskName: string): string {
   ].join('\n');
 }
 
+/**
+ * The task's action arguments with the program inside the encoded runner
+ * script swapped for `program`; null when it already runs it. The decode,
+ * rewrite and re-encode happen here rather than in PowerShell so the transform
+ * is ordinary code under test, and the script that follows only stores the
+ * result. Throws when the task does not carry an encoded runner script (not
+ * ours to rewrite) or when the new argument would exceed what Task Scheduler
+ * keeps.
+ * // Usage: retargetScheduledTaskArguments(taskName, status.arguments, launcherPath)
+ */
+export function retargetScheduledTaskArguments(
+  taskName: string,
+  taskArguments: string,
+  program: string
+): string | null {
+  const encoded = TASK_ENCODED_COMMAND.exec(taskArguments)?.[1];
+  if (!encoded) {
+    throw new RuntimeServiceManagementError(
+      'runtime_service_unsupported',
+      `The Scheduled Task ${taskName} does not run an encoded runner script; install it again.`
+    );
+  }
+  const runner = Buffer.from(encoded, 'base64').toString('utf16le');
+  // The callback form: a string replacement would read `$&` or `$1` in the path.
+  // Without the `g` flag only the first program line is replaced.
+  const updatedRunner = runner.replace(RUNNER_PROGRAM_LINE, () => `& ${psQuote(program)}`);
+  if (updatedRunner === runner) return null;
+  const updated = taskArguments.replace(
+    TASK_ENCODED_COMMAND,
+    () => `-EncodedCommand ${encodePowerShell(updatedRunner)}`
+  );
+  assertTaskArgumentFits(taskName, updated);
+  return updated;
+}
+
+/** Stores `taskArguments` as the task's action arguments, leaving trigger, settings and the rest of the action as they are. */
+function renderScheduledTaskSetArgumentsScript(taskName: string, taskArguments: string): string {
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    `$task = Get-ScheduledTask -TaskName ${psQuote(taskName)}`,
+    '$action = @($task.Actions)[0]',
+    `$action.Arguments = ${psQuote(taskArguments)}`,
+    `Set-ScheduledTask -TaskName ${psQuote(taskName)} -Action $action | Out-Null`,
+  ].join('\n');
+}
+
 /** Argv that runs a script through Windows PowerShell without shell quoting. */
 function powershellArgv(script: string): string[] {
   return [
@@ -421,19 +631,61 @@ export function execPathFromUnitBody(body: string): string | null {
 }
 
 function firstSystemdArg(execStart: string): string {
-  if (!execStart.startsWith('"')) return execStart.split(/\s+/)[0] ?? execStart;
+  return splitSystemdProgram(execStart).program;
+}
+
+/**
+ * What an `ExecStart` value starts. `prefix` is the run of execution modifiers
+ * systemd reads before the path (`-` ignore failure, `@` argv[0] override, `:`
+ * no expansion, `+` and `!` privileges); they are not part of the program.
+ * `rest` is the text after the program, arguments included.
+ */
+function splitSystemdProgram(execStart: string): {
+  prefix: string;
+  program: string;
+  rest: string;
+} {
+  const prefix = /^[-@:+!]*/.exec(execStart)?.[0] ?? '';
+  const command = execStart.slice(prefix.length);
+  if (!command.startsWith('"')) {
+    const program = command.split(/\s+/)[0] ?? command;
+    return { prefix, program, rest: command.slice(program.length) };
+  }
   let out = '';
-  for (let index = 1; index < execStart.length; index += 1) {
-    const char = execStart[index];
-    if (char === '\\' && index + 1 < execStart.length) {
-      out += execStart[index + 1];
+  let index = 1;
+  for (; index < command.length; index += 1) {
+    const char = command[index];
+    if (char === '\\' && index + 1 < command.length) {
+      out += command[index + 1];
       index += 1;
       continue;
     }
     if (char === '"') break;
     out += char;
   }
-  return out;
+  return { prefix, program: out, rest: command.slice(index + 1) };
+}
+
+/**
+ * The unit body with the program it starts replaced and everything else kept
+ * byte for byte, or null when the body names no program this can find.
+ * // Usage: replaceUnitProgram(body, '/opt/homebrew/bin/mangostudio')
+ */
+export function replaceUnitProgram(body: string, program: string): string | null {
+  const execStart = /^ExecStart=(.+)$/m.exec(body);
+  if (execStart?.[1]) {
+    const { prefix, rest } = splitSystemdProgram(execStart[1].trim());
+    const line = `ExecStart=${prefix}${escapeSystemdArg(program, { execStart: true })}${rest}`;
+    return (
+      body.slice(0, execStart.index) + line + body.slice(execStart.index + execStart[0].length)
+    );
+  }
+  const plist = /(<key>ProgramArguments<\/key>\s*<array>\s*<string>)[^<]*(<\/string>)/.exec(body);
+  if (plist?.[1] && plist[2]) {
+    const replacement = `${plist[1]}${escapeXml(program)}${plist[2]}`;
+    return body.slice(0, plist.index) + replacement + body.slice(plist.index + plist[0].length);
+  }
+  return null;
 }
 
 function unescapeXml(value: string): string {
@@ -542,10 +794,22 @@ async function sessionBusEnv(deps: UserServiceExecDeps): Promise<NodeJS.ProcessE
   return { ...deps.env, XDG_RUNTIME_DIR: runtimeDir, DBUS_SESSION_BUS_ADDRESS: dbus };
 }
 
+export interface UserServiceManagerOptions {
+  /**
+   * Where the launchd retarget helper's plist lives: the owner's own state
+   * directory, never `~/Library/LaunchAgents`. launchd loads every plist in that
+   * directory at login, so a helper left there would run `restart` again then;
+   * `launchctl bootstrap` accepts a plist from any path, and one outside it is
+   * inert if a cleanup is missed. Without it the helper cannot be started.
+   */
+  readonly retargetHelperDir?: string;
+}
+
 /** Creates the manager for one unit identity. // Usage: createUserServiceManager(identity).status() */
 export function createUserServiceManager(
   identity: UserServiceIdentity,
-  deps: UserServiceExecDeps = defaultUserServiceExecDeps()
+  deps: UserServiceExecDeps = defaultUserServiceExecDeps(),
+  options: UserServiceManagerOptions = {}
 ): UserServiceManager {
   const warn =
     deps.warn ?? ((message: string) => process.stderr.write(`${identity.cliName}: ${message}\n`));
@@ -618,6 +882,28 @@ export function createUserServiceManager(
     }
   };
 
+  /** The unit body pointed at `program`, or null when nothing is installed or it already runs it. */
+  const retargetedUnitBody = async (program: string): Promise<string | null> => {
+    const body = await readUnit();
+    if (body === null) return null;
+    const updated = replaceUnitProgram(body, program);
+    if (updated === null) {
+      throw new RuntimeServiceManagementError(
+        'runtime_service_unsupported',
+        `The unit at ${unitPath} names no program to retarget; install it again.`
+      );
+    }
+    return updated === body ? null : updated;
+  };
+
+  const restartSystemd = (): Promise<void> =>
+    requireSystemd().then(() =>
+      requireCommand(
+        ['systemctl', '--user', '--no-block', 'restart', identity.unitName],
+        'systemctl restart'
+      )
+    );
+
   const linux = {
     async install(definition: UserServiceDefinition) {
       await requireSystemd();
@@ -688,23 +974,83 @@ export function createUserServiceManager(
       requireSystemd().then(() =>
         requireCommand(['systemctl', '--user', 'stop', identity.unitName], 'systemctl stop')
       ),
-    restart: () =>
-      requireSystemd().then(() =>
-        requireCommand(
-          ['systemctl', '--user', '--no-block', 'restart', identity.unitName],
-          'systemctl restart'
-        )
-      ),
+    restart: restartSystemd,
+    async restartRetargeted(program: string) {
+      await requireSystemd();
+      const moved = await retargetPhase('rewrite', program, false, async () => {
+        const updated = await retargetedUnitBody(program);
+        if (updated === null) return false;
+        await deps.writeFile(unitPath as string, updated);
+        // The running process keeps the old program until the restart; systemd
+        // must reread the file first or that restart reuses the old one.
+        await requireCommand(['systemctl', '--user', 'daemon-reload'], 'systemctl daemon-reload');
+        return true;
+      });
+      await retargetPhase('restart', program, moved, restartSystemd);
+      return moved;
+    },
   };
 
   const darwinTarget = `gui/${deps.uid}/${identity.launchdLabel}`;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
+  /** Whether launchd still has the job in its domain, running or on its way out. */
+  const darwinJobLoaded = async (): Promise<boolean> =>
+    (await run(['launchctl', 'print', darwinTarget])).exitCode === 0;
   /**
-   * Load the job into the domain, then kick it. `bootstrap` is tolerated
-   * failing: the job is already in the domain whenever it was never stopped,
-   * and it treats that as an error. `force` bounces one that is running.
+   * Take the job out of the domain. A failure is only a failure while the job
+   * is still there: `bootout` also fails when there is nothing to remove, which
+   * is the state asked for. Error 5 and 37 mean the job is already on its way
+   * out, so that one is waited for (bounded) instead of raced.
+   */
+  const darwinBootout = async (): Promise<void> => {
+    const result = await run(['launchctl', 'bootout', darwinTarget]);
+    if (result.exitCode === 0 || !(await darwinJobLoaded())) return;
+    if (!LAUNCHD_TRANSIENT_EXIT_CODES.includes(result.exitCode)) {
+      throw commandFailure('launchctl bootout', result);
+    }
+    for (const delay of LAUNCHD_BOOTSTRAP_RETRY_DELAYS_MS) {
+      await sleep(delay);
+      if (!(await darwinJobLoaded())) return;
+    }
+    throw commandFailure('launchctl bootout', result);
+  };
+  /**
+   * Load the plist, which must not fail: a job that is not in the domain after
+   * this is not running and will not come back. Right after a `bootout` the
+   * bootstrap answers error 5 (EIO) or 37 while the old job is still exiting,
+   * so those are retried with a growing, bounded wait — but only while
+   * `launchctl print` still lists the job. The same codes answer a bootstrap
+   * that failed for another reason, and waiting does not help that one.
+   */
+  const darwinBootstrapRequired = async (): Promise<void> => {
+    for (let attempt = 0; ; attempt += 1) {
+      const result = await run(['launchctl', 'bootstrap', `gui/${deps.uid}`, unitPath as string]);
+      if (result.exitCode === 0) return;
+      const delay = LAUNCHD_BOOTSTRAP_RETRY_DELAYS_MS[attempt];
+      const retry =
+        delay !== undefined &&
+        LAUNCHD_TRANSIENT_EXIT_CODES.includes(result.exitCode) &&
+        (await darwinJobLoaded());
+      if (!retry) throw commandFailure('launchctl bootstrap', result);
+      await sleep(delay);
+    }
+  };
+  /** Replace the loaded job with the plist on disk and start it. */
+  const darwinReload = async (): Promise<void> => {
+    await darwinBootout();
+    await darwinBootstrapRequired();
+    await requireCommand(['launchctl', 'kickstart', '-k', darwinTarget], 'launchctl kickstart');
+  };
+  /**
+   * Kick the job, loading it into the domain first when it is not there (after
+   * a `stop`, or a bootout whose bootstrap never landed). That load is the
+   * required one: it used to be a single tolerated attempt, so a job that
+   * failed to load reported a kickstart error for a job that never existed
+   * instead of the refusal that explains it. A loaded job is not bootstrapped
+   * again, which only fails. `force` bounces one that is running.
    */
   const darwinBounce = async (force: boolean): Promise<void> => {
-    await run(['launchctl', 'bootstrap', `gui/${deps.uid}`, unitPath as string]);
+    if (!(await darwinJobLoaded())) await darwinBootstrapRequired();
     await requireCommand(
       ['launchctl', 'kickstart', ...(force ? ['-k'] : []), darwinTarget],
       'launchctl kickstart'
@@ -717,12 +1063,7 @@ export function createUserServiceManager(
         unitPath as string,
         renderLaunchdPlistFile(identity.launchdLabel, definition)
       );
-      await run(['launchctl', 'bootout', darwinTarget]);
-      await requireCommand(
-        ['launchctl', 'bootstrap', `gui/${deps.uid}`, unitPath as string],
-        'launchctl bootstrap'
-      );
-      await requireCommand(['launchctl', 'kickstart', '-k', darwinTarget], 'launchctl kickstart');
+      await darwinReload();
     },
     async uninstall() {
       await deps.unlink(unitPath as string).catch(() => undefined);
@@ -772,6 +1113,19 @@ export function createUserServiceManager(
     // of the domain — and every other backend restarts a stopped unit into a
     // running one.
     restart: () => darwinBounce(true),
+    async restartRetargeted(program: string) {
+      const updated = await retargetPhase('rewrite', program, false, async () => {
+        const body = await retargetedUnitBody(program);
+        if (body !== null) await deps.writeFile(unitPath as string, body);
+        return body !== null;
+      });
+      // launchd keeps the plist it loaded: only a bootout and a bootstrap make
+      // the job read the rewritten file, so both belong to this one operation.
+      await retargetPhase('restart', program, updated, () =>
+        updated ? darwinReload() : darwinBounce(true)
+      );
+      return updated;
+    },
   };
 
   /** Run a PowerShell script, naming the cmdlet it stands for in any refusal. */
@@ -819,12 +1173,37 @@ export function createUserServiceManager(
       ),
     stop: () =>
       runPowerShell(renderScheduledTaskVerbScript('stop', identity.taskName), 'Stop-ScheduledTask'),
-    restart: () =>
-      runPowerShell(
-        renderScheduledTaskRestartScript(identity.taskName),
-        'Stop-ScheduledTask/Start-ScheduledTask'
-      ),
+    restart: restartTask,
+    async restartRetargeted(program: string) {
+      const retargeted = await retargetPhase('rewrite', program, false, () =>
+        retargetTask(program)
+      );
+      await retargetPhase('restart', program, retargeted, restartTask);
+      return retargeted;
+    },
   };
+
+  /** Store the task's new action arguments; false when nothing was installed or it already runs `program`. */
+  async function retargetTask(program: string): Promise<boolean> {
+    const read = await run(powershellArgv(renderScheduledTaskStatusScript(identity.taskName)));
+    if (read.exitCode !== 0) throw commandFailure('Get-ScheduledTask', read);
+    const task = parseScheduledTaskJson(read.stdout);
+    if (!task?.installed || !task.arguments) return false;
+    const updated = retargetScheduledTaskArguments(identity.taskName, task.arguments, program);
+    if (updated === null) return false;
+    await runPowerShell(
+      renderScheduledTaskSetArgumentsScript(identity.taskName, updated),
+      'Set-ScheduledTask'
+    );
+    return true;
+  }
+
+  function restartTask(): Promise<void> {
+    return runPowerShell(
+      renderScheduledTaskRestartScript(identity.taskName),
+      'Stop-ScheduledTask/Start-ScheduledTask'
+    );
+  }
 
   const backend = () => {
     if (deps.platform === 'linux') return linux;
@@ -839,19 +1218,81 @@ export function createUserServiceManager(
     return refuseUnsupported('No user-level service manager is supported on this platform.');
   };
 
+  const retargetHelperLabel = `${identity.launchdLabel}.retarget`;
+  const retargetHelperPlist =
+    options.retargetHelperDir === undefined
+      ? null
+      : posix.join(options.retargetHelperDir, `${retargetHelperLabel}.plist`);
+
+  async function removeRetargetHelper(): Promise<void> {
+    if (deps.platform !== 'darwin' || retargetHelperPlist === null) return;
+    // The plist is the helper's record: without it there is nothing loaded
+    // worth a launchctl call, which keeps every hub start from spawning one.
+    try {
+      await deps.readFile(retargetHelperPlist);
+    } catch {
+      return;
+    }
+    await deps.unlink(retargetHelperPlist).catch(() => undefined);
+    await run(['launchctl', 'bootout', `gui/${deps.uid}/${retargetHelperLabel}`]);
+  }
+
+  async function startRetargetHelper(launcherPath: string, logFile: string): Promise<void> {
+    if (deps.platform !== 'darwin') {
+      refuseUnsupported('The launchd retarget helper runs only on macOS.');
+    }
+    if (retargetHelperPlist === null || options.retargetHelperDir === undefined) {
+      return refuseUnsupported('No state directory was given to keep the retarget helper in.');
+    }
+    // A leftover would make the bootstrap fail as already loaded.
+    await removeRetargetHelper();
+    const unit = await readUnit();
+    await deps.mkdir(options.retargetHelperDir);
+    await deps.writeFile(
+      retargetHelperPlist,
+      renderLaunchdRetargetHelperPlistFile(retargetHelperLabel, {
+        argv: [launcherPath, 'restart'],
+        env: unit === null ? {} : environmentFromPlist(unit),
+        logFile,
+      })
+    );
+    const result = await run(['launchctl', 'bootstrap', `gui/${deps.uid}`, retargetHelperPlist]);
+    if (result.exitCode !== 0) {
+      await deps.unlink(retargetHelperPlist).catch(() => undefined);
+      throw commandFailure('launchctl bootstrap (retarget helper)', result);
+    }
+  }
+
+  /** Runs one half of `restartRetargeted`, so a failure names the half it came from. */
+  async function retargetPhase<T>(
+    phase: RestartRetargetedPhase,
+    program: string,
+    unitMoved: boolean,
+    work: () => Promise<T>
+  ): Promise<T> {
+    try {
+      return await work();
+    } catch (cause) {
+      throw new RestartRetargetedError({ phase, program, unitMoved, cause });
+    }
+  }
+
   async function run(argv: readonly string[]): Promise<UserServiceExecResult> {
     const env = argv[0] === 'systemctl' ? ((await sessionBus()) ?? deps.env) : deps.env;
     return await deps.exec(argv, { env });
   }
 
-  async function requireCommand(argv: readonly string[], label: string): Promise<void> {
-    const result = await run(argv);
-    if (result.exitCode === 0) return;
+  function commandFailure(label: string, result: UserServiceExecResult): Error {
     const detail = result.stderr.trim() || result.stdout.trim();
-    throw new RuntimeServiceManagementError(
+    return new RuntimeServiceManagementError(
       'runtime_service_unsupported',
       `${label} failed (exit ${result.exitCode})${detail ? `: ${detail}` : ''}`
     );
+  }
+
+  async function requireCommand(argv: readonly string[], label: string): Promise<void> {
+    const result = await run(argv);
+    if (result.exitCode !== 0) throw commandFailure(label, result);
   }
 
   return {
@@ -869,6 +1310,9 @@ export function createUserServiceManager(
     start: async () => await require().start(),
     stop: async () => await require().stop(),
     restart: async () => await require().restart(),
+    restartRetargeted: async (program) => await require().restartRetargeted(program),
+    startRetargetHelper,
+    removeRetargetHelper,
   };
 }
 
@@ -901,11 +1345,12 @@ interface ScheduledTaskJson {
  * the encoded runner script; the wrapper itself when the task is not ours.
  */
 export function programFromTaskAction(execute: string, args: string | null): string {
-  const encoded = args?.match(/-EncodedCommand\s+(\S+)/)?.[1];
+  const encoded = args ? TASK_ENCODED_COMMAND.exec(args)?.[1] : undefined;
   if (!encoded) return execute;
   const script = Buffer.from(encoded, 'base64').toString('utf16le');
-  const program = script.match(/^& '((?:[^']|'')*)'/m)?.[1];
-  return program ? program.replaceAll("''", "'") : execute;
+  const quoted = RUNNER_PROGRAM_LINE.exec(script)?.[0];
+  // Drop the `& '` opener and the closing quote, then undo the doubling.
+  return quoted ? quoted.slice(3, -1).replaceAll("''", "'") : execute;
 }
 
 /** Windows PowerShell 5.1 serialises the state enum as a number; PowerShell 7 as a name. */

@@ -1,13 +1,18 @@
-import { afterAll, expect, test } from 'bun:test';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { beforeAll, expect, test } from 'bun:test';
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
+import { useScratchDirs } from './support/scratch-dirs';
 
-const root = mkdtempSync(join(tmpdir(), 'mango-bun-fmt-'));
-copyFileSync(join(ROOT_DIR, 'bunfig.toml'), join(root, 'bunfig.toml'));
-afterAll(() => rmSync(root, { recursive: true, force: true }));
+let root = '';
+const makeDir = useScratchDirs('all');
+// Built in beforeAll, not at collection: afterAll does not run for a file whose
+// tests are all filtered out, which would leave the directory behind.
+beforeAll(() => {
+  root = makeDir('mango-bun-fmt-');
+  copyFileSync(join(ROOT_DIR, 'bunfig.toml'), join(root, 'bunfig.toml'));
+});
 
 const fixtures: Record<string, string> = {
   'source.ts': 'export const value={answer:42};\n',

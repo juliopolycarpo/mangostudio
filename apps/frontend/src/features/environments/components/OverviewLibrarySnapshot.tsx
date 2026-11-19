@@ -10,6 +10,7 @@
 import { useQueries } from '@tanstack/react-query';
 
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { summarizeCoverageByTarget } from '@/features/library/format';
 import {
   libraryResourcesQueryOptions,
@@ -24,7 +25,7 @@ import { OverviewSection } from './OverviewSection';
 import { TOOL_CARD_SURFACE } from './ToolCard';
 
 export function OverviewLibrarySnapshot() {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const e = t.environments;
   const { resolve } = useToolIdentities();
 

@@ -21,7 +21,10 @@
  * handshake needs a reconnect before the hub offers it.
  */
 
-import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents';
+import {
+  isExternalAgentTargetId,
+  isExternalIdentityIsolationMethod,
+} from '@mangostudio/shared/external-agents';
 import {
   acceptedRuntimeImplementation,
   effectiveTools,
@@ -33,27 +36,40 @@ import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 
 const SHELL_KINDS = new Set<string>(['bash', 'zsh', 'powershell']);
 
-/** A health report with the target ids this build cannot name removed, and which ids those were. */
+/** A health report with the values this build cannot interpret removed, and which those were. */
 export interface PrunedHealthReport {
   readonly report: RuntimeHealthReport;
   /** Distinct, in the order first seen; empty when the report named only known targets. */
   readonly skippedTargetIds: readonly string[];
+  /** The isolation method this build has no enum member for; absent when it knew it or none was attested. */
+  readonly skippedIsolationMethod?: string;
 }
 
 /**
- * Drops the `externalAgents` entries that name a target this build does not know.
+ * Drops the `externalAgents` values that name something this build does not know:
+ * a target id, or the identity-isolation method.
  *
- * Health accepts any well-formed target id so that a newer runtime hosting one
- * more vendor does not get its whole report refused (and the manifest frozen).
- * What such an id *means* is the hub's call: it cannot be offered, routed to, or
- * put in the closed manifest enum, so it is skipped here and reported to the
- * caller to log. `liveSessionCount` stays the runtime's true total — a skipped
- * session is still a live one on that machine.
+ * Health accepts any well-formed token there so that a newer runtime hosting one
+ * more vendor, or attesting one more isolation method, does not get its whole
+ * report refused (and the manifest frozen). What such a value *means* is the
+ * hub's call, and it is always the closed reading:
+ *
+ * - An unknown target id cannot be offered, routed to, or put in the closed
+ *   manifest enum, so it is skipped. `liveSessionCount` stays the runtime's true
+ *   total: a skipped session is still a live one on that machine.
+ * - An unknown isolation method is unproven isolation. The attestation is
+ *   dropped rather than guessed at, so the manifest carries no
+ *   `identityIsolation` and everything gated on it (discovery, native sessions,
+ *   turns) answers `EXTERNAL_ISOLATION_UNPROVEN`, even when `hello` announced a
+ *   method this build knows: the newest answer from the peer wins.
+ *
+ * Both are reported to the caller to log.
  *
  * @example
- * pruneUnknownExternalAgentTargets(report).skippedTargetIds; // ['gemini']
+ * pruneUnknownExternalAgentHealth(report).skippedTargetIds; // ['gemini']
+ * pruneUnknownExternalAgentHealth(report).skippedIsolationMethod; // 'micro-vm'
  */
-export function pruneUnknownExternalAgentTargets(report: RuntimeHealthReport): PrunedHealthReport {
+export function pruneUnknownExternalAgentHealth(report: RuntimeHealthReport): PrunedHealthReport {
   const externalAgents = report.externalAgents;
   if (!externalAgents) return { report, skippedTargetIds: [] };
 
@@ -65,11 +81,20 @@ export function pruneUnknownExternalAgentTargets(report: RuntimeHealthReport): P
   };
   const targets = externalAgents.targets.filter(known);
   const liveSessions = externalAgents.liveSessions.filter((session) => known(session.targetId));
-  if (skipped.size === 0) return { report, skippedTargetIds: [] };
+  const { identityIsolation, ...withoutAttestation } = externalAgents;
+  const skippedIsolationMethod =
+    identityIsolation && !isExternalIdentityIsolationMethod(identityIsolation.method)
+      ? identityIsolation.method
+      : undefined;
+  if (skipped.size === 0 && skippedIsolationMethod === undefined) {
+    return { report, skippedTargetIds: [] };
+  }
 
+  const retained = skippedIsolationMethod === undefined ? externalAgents : withoutAttestation;
   return {
-    report: { ...report, externalAgents: { ...externalAgents, targets, liveSessions } },
+    report: { ...report, externalAgents: { ...retained, targets, liveSessions } },
     skippedTargetIds: [...skipped],
+    ...(skippedIsolationMethod === undefined ? {} : { skippedIsolationMethod }),
   };
 }
 
@@ -82,6 +107,16 @@ export function capabilityManifestFromHealth(
   // is a closed enum, so an id outside it is left out here even when the caller
   // did not prune the report first.
   const hostedTargets = report.externalAgents?.targets.filter(isExternalAgentTargetId) ?? [];
+  // Two named members, not the object: health tolerates fields this build has
+  // never heard of, and the manifest (and the `isolation` sent back on every
+  // external-agent call) is a closed shape that would refuse them. A method
+  // this build has no enum member for is unproven isolation, not a claim to
+  // forward; reading it as any known one would invent an attestation.
+  const reported = report.externalAgents?.identityIsolation;
+  const attestation =
+    reported && isExternalIdentityIsolationMethod(reported.method)
+      ? { method: reported.method, credentialHomeFingerprint: reported.credentialHomeFingerprint }
+      : undefined;
   // Judged once: a descriptor this build cannot interpret is not announced.
   const implementation = acceptedRuntimeImplementation(handshake?.implementation);
   const shells = allow.shell
@@ -128,18 +163,7 @@ export function capabilityManifestFromHealth(
       implementationCeiling(handshake, implementation)
     ),
     ...(hostedTargets.length ? { externalAgents: hostedTargets } : {}),
-    // Two named members, not the object: health tolerates fields this build has
-    // never heard of, and the manifest (and the `isolation` sent back on every
-    // external-agent call) is a closed shape that would refuse them.
-    ...(report.externalAgents?.identityIsolation
-      ? {
-          identityIsolation: {
-            method: report.externalAgents.identityIsolation.method,
-            credentialHomeFingerprint:
-              report.externalAgents.identityIsolation.credentialHomeFingerprint,
-          },
-        }
-      : {}),
+    ...(attestation ? { identityIsolation: attestation } : {}),
     ...(handshake?.enforcesPathPolicy === undefined
       ? {}
       : { enforcesPathPolicy: handshake.enforcesPathPolicy }),

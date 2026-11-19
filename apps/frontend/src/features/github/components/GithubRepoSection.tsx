@@ -14,6 +14,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Spinner } from '@/components/ui/Spinner';
 import { Tabs } from '@/components/ui/Tabs';
 import { useToast } from '@/components/ui/Toast';
+import { githubMessages } from '@/features/github/github-i18n';
 import { gitWriteScopes, invalidateGitScopes } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
@@ -76,7 +77,7 @@ export function GithubRepoSection({
   prefs,
   onPrefsChange,
 }: GithubRepoSectionProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
   const [tab, setTab] = useState<RepoTab>('prs');
   const [selectedPr, setSelectedPr] = useState<number | null>(null);
   // Owned here rather than by `PrsPane`, which owns `creating` itself: a
@@ -240,7 +241,7 @@ function PrsPane({
   readonly openCreateForm: boolean;
   readonly onCreateFormOpened: () => void;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   // Owned here rather than by the section above, so leaving the tab closes the
@@ -369,7 +370,7 @@ function CreatePrControl({
   readonly needsPush: boolean;
   readonly branchName: string | null;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
 
   if (writeAccess === 'pending') return null;
   if (writeAccess === 'refused') {
@@ -419,7 +420,7 @@ function IssuesPane({
   readonly onPrefsChange: (prefs: GithubPanelPrefs) => void;
   readonly query: UseQueryResult<GithubIssuesResponse, Error>;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
   const startChat = useIssueToNewChat(chatId, workdir);
 
   return (
@@ -479,7 +480,7 @@ function ListGate<TOk extends { state: 'ok' }>({
   readonly emptyIcon: ReactNode;
   readonly children: (payload: TOk) => ReactNode[];
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
 
   if (query.isPending) {
     return <EmptyState icon={<Spinner />} title={t.github.loading} className="min-h-24 py-4" />;

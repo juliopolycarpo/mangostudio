@@ -117,12 +117,12 @@ describe('tool identity across surfaces', () => {
     });
   });
 
-  it('renames an MCP server on screen without touching its slug or command', async () => {
+  it('gives an MCP server its stored monogram but keeps its configured name', async () => {
     scenario.respondWithJson('GET', '/api/tool-identities', {
       body: identities({
         'mcp:weather': {
           subjectKey: 'mcp:weather',
-          displayName: 'Forecast',
+          displayName: null,
           monogram: 'FC',
           image: null,
           updatedAt: 1,
@@ -134,8 +134,8 @@ describe('tool identity across surfaces', () => {
       <McpServerCard server={mcpServer()} onEdit={() => undefined} onDelete={() => undefined} />
     );
 
-    expect(await screen.findByText('Forecast')).toBeInTheDocument();
-    expect(screen.getByTitle('Forecast')).toHaveTextContent('FC');
+    expect(await screen.findByText('Weather')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTitle('Weather')).toHaveTextContent('FC'));
     // The configured server is untouched: the command line still renders from
     // the server row, not from anything the registry stores.
     expect(screen.getByText('bunx weather-mcp')).toBeInTheDocument();

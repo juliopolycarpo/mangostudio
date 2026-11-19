@@ -21,7 +21,9 @@ import {
   ExternalTurnTerminalReasonSchema,
   ExternalUsageSchema,
   ExternalVendorIdSchema,
+  VendorText,
 } from '../external-agents/schemas';
+import { EXTERNAL_APPROVAL_MAX_OPTIONS } from '../external-agents/vendor-text';
 import { ImageGenerationErrorCodeSchema } from '../generation/schemas';
 import {
   McpElicitationFieldSchema,
@@ -354,37 +356,53 @@ export type SSEContinuationTransitionEvent = Static<typeof SSEContinuationTransi
  * The pair below mirrors `mcp_elicitation_request` / `mcp_elicitation_status`:
  * a mid-turn question asked over the stream and answered on a separate endpoint,
  * with a status chunk so a mounted card goes inert without a refetch.
+ *
+ * Every `external_*` chunk is closed (`additionalProperties: false`) and bounds
+ * its vendor-supplied strings with the same `VendorText` limits as the neutral
+ * event it projects from, so a chunk cannot carry more than its source event
+ * allows. The hub constructs each field of these chunks itself
+ * (`streaming/external-events.ts`), so a key outside the list is a bug, not a
+ * vendor extension. The internal members of the union stay open: closing them
+ * is a separate decision (#821).
  */
-const SSEExternalSessionStartedEventSchema = Type.Object({
-  type: Type.Literal('external_session_started'),
-  /** The hub-minted session id. The vendor's own handle never leaves the server. */
-  sessionId: Type.String(),
-  targetId: ExternalAgentTargetIdSchema,
-  resumed: Type.Boolean(),
-  fallbackReason: Type.Optional(Type.String()),
-  /**
-   * Present when the chat had an earlier conversation and this session did not continue it. Sent
-   * again, for the session that actually ran the turn, when a reopen replaced the first one; an
-   * older client ignores it.
-   */
-  conversationReset: Type.Optional(ExternalConversationResetReasonSchema),
-  /**
-   * The model the hub resolved for this turn, when it resolved one (#816).
-   *
-   * Absent means the vendor's own default is in force — which the hub does not
-   * name either, so the header falls back to the vendor's localized name. The
-   * client cannot derive this: `pickModel` runs server-side over a catalog the
-   * client may not have loaded, and the request often names no model at all.
-   */
-  model: Type.Optional(ExternalVendorIdSchema),
-  done: Type.Literal(false),
-});
+const SSEExternalSessionStartedEventSchema = Type.Object(
+  {
+    type: Type.Literal('external_session_started'),
+    /** The hub-minted session id. The vendor's own handle never leaves the server. */
+    sessionId: VendorText('vendorId', { minLength: 1 }),
+    targetId: ExternalAgentTargetIdSchema,
+    resumed: Type.Boolean(),
+    /** Same bound as `ExternalAgentOpenResult.fallbackReason`, where it originates. */
+    fallbackReason: Type.Optional(VendorText('errorMessage')),
+    /**
+     * Present when the chat had an earlier conversation and this session did not continue it. Sent
+     * again, for the session that actually ran the turn, when a reopen replaced the first one; an
+     * older client ignores it.
+     */
+    conversationReset: Type.Optional(ExternalConversationResetReasonSchema),
+    /**
+     * The model the hub resolved for this turn, when it resolved one (#816).
+     *
+     * Absent means the vendor's own default is in force — which the hub does not
+     * name either, so the header falls back to the vendor's localized name. The
+     * client cannot derive this: `pickModel` runs server-side over a catalog the
+     * client may not have loaded, and the request often names no model at all.
+     */
+    model: Type.Optional(ExternalVendorIdSchema),
+    done: Type.Literal(false),
+  },
+  { additionalProperties: false }
+);
 
-const SSEExternalTextEventSchema = Type.Object({
-  type: Type.Literal('external_text'),
-  text: Type.String(),
-  done: Type.Literal(false),
-});
+// `text` is unbounded on purpose: the `text_delta` event it projects has no bound either.
+const SSEExternalTextEventSchema = Type.Object(
+  {
+    type: Type.Literal('external_text'),
+    text: Type.String(),
+    done: Type.Literal(false),
+  },
+  { additionalProperties: false }
+);
 
 /**
  * A reasoning phase opened, with nothing to show yet.
@@ -395,10 +413,13 @@ const SSEExternalTextEventSchema = Type.Object({
  * vendor keeps the turn open. Internal turns have `thinking_start` for
  * exactly this; external turns had no equivalent until now.
  */
-const SSEExternalReasoningStartedEventSchema = Type.Object({
-  type: Type.Literal('external_reasoning_started'),
-  done: Type.Literal(false),
-});
+const SSEExternalReasoningStartedEventSchema = Type.Object(
+  {
+    type: Type.Literal('external_reasoning_started'),
+    done: Type.Literal(false),
+  },
+  { additionalProperties: false }
+);
 
 /**
  * The reasoning phase opened by `external_reasoning_started` closed.
@@ -407,77 +428,107 @@ const SSEExternalReasoningStartedEventSchema = Type.Object({
  * phase that closed with no text was withheld and is dropped, wherever it sits;
  * one still open when the turn ends is the part the turn stopped inside.
  */
-const SSEExternalReasoningEndedEventSchema = Type.Object({
-  type: Type.Literal('external_reasoning_ended'),
-  done: Type.Literal(false),
-});
+const SSEExternalReasoningEndedEventSchema = Type.Object(
+  {
+    type: Type.Literal('external_reasoning_ended'),
+    done: Type.Literal(false),
+  },
+  { additionalProperties: false }
+);
 
-const SSEExternalReasoningEventSchema = Type.Object({
-  type: Type.Literal('external_reasoning'),
-  text: Type.String(),
-  done: Type.Literal(false),
-});
+const SSEExternalReasoningEventSchema = Type.Object(
+  {
+    type: Type.Literal('external_reasoning'),
+    text: Type.String(),
+    done: Type.Literal(false),
+  },
+  { additionalProperties: false }
+);
 
-const SSEExternalActivityStartedEventSchema = Type.Object({
-  type: Type.Literal('external_activity_started'),
-  callId: Type.String(),
-  /** The vendor's own tool name, verbatim. Rendered as plain text, never markdown. */
-  name: Type.String(),
-  kind: ExternalActivityKindSchema,
-  title: Type.String(),
-  detail: Type.Optional(Type.String()),
-  truncated: Type.Optional(Type.Boolean()),
-  done: Type.Literal(false),
-});
+const SSEExternalActivityStartedEventSchema = Type.Object(
+  {
+    type: Type.Literal('external_activity_started'),
+    callId: VendorText('vendorId', { minLength: 1 }),
+    /** The vendor's own tool name, verbatim. Rendered as plain text, never markdown. */
+    name: VendorText('activityName', { minLength: 1 }),
+    kind: ExternalActivityKindSchema,
+    title: VendorText('title'),
+    detail: Type.Optional(VendorText('detail')),
+    truncated: Type.Optional(Type.Boolean()),
+    done: Type.Literal(false),
+  },
+  { additionalProperties: false }
+);
 
-const SSEExternalActivityUpdatedEventSchema = Type.Object({
-  type: Type.Literal('external_activity_updated'),
-  callId: Type.String(),
-  update: ExternalActivityUpdateSchema,
-  done: Type.Literal(false),
-});
+const SSEExternalActivityUpdatedEventSchema = Type.Object(
+  {
+    type: Type.Literal('external_activity_updated'),
+    callId: VendorText('vendorId', { minLength: 1 }),
+    update: ExternalActivityUpdateSchema,
+    done: Type.Literal(false),
+  },
+  { additionalProperties: false }
+);
 
-const SSEExternalActivityCompletedEventSchema = Type.Object({
-  type: Type.Literal('external_activity_completed'),
-  callId: Type.String(),
-  status: ExternalActivityStatusSchema,
-  detail: Type.Optional(Type.String()),
-  isError: Type.Optional(Type.Boolean()),
-  truncated: Type.Optional(Type.Boolean()),
-  done: Type.Literal(false),
-});
+const SSEExternalActivityCompletedEventSchema = Type.Object(
+  {
+    type: Type.Literal('external_activity_completed'),
+    callId: VendorText('vendorId', { minLength: 1 }),
+    status: ExternalActivityStatusSchema,
+    detail: Type.Optional(VendorText('detail')),
+    isError: Type.Optional(Type.Boolean()),
+    truncated: Type.Optional(Type.Boolean()),
+    done: Type.Literal(false),
+  },
+  { additionalProperties: false }
+);
 
-const SSEExternalApprovalRequestEventSchema = Type.Object({
-  type: Type.Literal('external_approval_request'),
-  requestId: Type.String(),
-  kind: ExternalActivityKindSchema,
-  title: Type.String(),
-  detail: Type.Optional(Type.String()),
-  /** The vendor's option set, in the vendor's order. Never reordered or renamed. */
-  options: Type.Array(ExternalApprovalOptionSchema, { minItems: 1, maxItems: 16 }),
-  expiresAtMs: Type.Integer({ minimum: 0 }),
-  truncated: Type.Optional(Type.Boolean()),
-  done: Type.Literal(false),
-});
+const SSEExternalApprovalRequestEventSchema = Type.Object(
+  {
+    type: Type.Literal('external_approval_request'),
+    requestId: VendorText('vendorId', { minLength: 1 }),
+    kind: ExternalActivityKindSchema,
+    title: VendorText('title'),
+    detail: Type.Optional(VendorText('detail')),
+    /** The vendor's option set, in the vendor's order. Never reordered or renamed. */
+    options: Type.Array(ExternalApprovalOptionSchema, {
+      minItems: 1,
+      maxItems: EXTERNAL_APPROVAL_MAX_OPTIONS,
+    }),
+    expiresAtMs: Type.Integer({ minimum: 0 }),
+    truncated: Type.Optional(Type.Boolean()),
+    done: Type.Literal(false),
+  },
+  { additionalProperties: false }
+);
 
-const SSEExternalApprovalStatusEventSchema = Type.Object({
-  type: Type.Literal('external_approval_status'),
-  requestId: Type.String(),
-  decision: ExternalApprovalDecisionSchema,
-  done: Type.Literal(false),
-});
+const SSEExternalApprovalStatusEventSchema = Type.Object(
+  {
+    type: Type.Literal('external_approval_status'),
+    requestId: VendorText('vendorId', { minLength: 1 }),
+    decision: ExternalApprovalDecisionSchema,
+    done: Type.Literal(false),
+  },
+  { additionalProperties: false }
+);
 
-const SSEExternalUsageEventSchema = Type.Object({
-  type: Type.Literal('external_usage'),
-  usage: ExternalUsageSchema,
-  done: Type.Literal(false),
-});
+const SSEExternalUsageEventSchema = Type.Object(
+  {
+    type: Type.Literal('external_usage'),
+    usage: ExternalUsageSchema,
+    done: Type.Literal(false),
+  },
+  { additionalProperties: false }
+);
 
-const SSEExternalThreadUsageEventSchema = Type.Object({
-  type: Type.Literal('external_thread_usage'),
-  usage: ExternalThreadUsageSchema,
-  done: Type.Literal(false),
-});
+const SSEExternalThreadUsageEventSchema = Type.Object(
+  {
+    type: Type.Literal('external_thread_usage'),
+    usage: ExternalThreadUsageSchema,
+    done: Type.Literal(false),
+  },
+  { additionalProperties: false }
+);
 
 /**
  * The slash commands this session can expand, announced by the vendor.
@@ -488,29 +539,35 @@ const SSEExternalThreadUsageEventSchema = Type.Object({
  * only one that knows about plugin commands and builtin skills, and it only
  * exists once a process has started.
  */
-const SSEExternalCommandsEventSchema = Type.Object({
-  type: Type.Literal('external_commands'),
-  commands: Type.Array(ExternalAgentCommandSchema, {
-    maxItems: EXTERNAL_COMMAND_CATALOG_MAX_ITEMS,
-  }),
-  done: Type.Literal(false),
-});
+const SSEExternalCommandsEventSchema = Type.Object(
+  {
+    type: Type.Literal('external_commands'),
+    commands: Type.Array(ExternalAgentCommandSchema, {
+      maxItems: EXTERNAL_COMMAND_CATALOG_MAX_ITEMS,
+    }),
+    done: Type.Literal(false),
+  },
+  { additionalProperties: false }
+);
 
-const SSEExternalAccountLimitsEventSchema = Type.Object({
-  type: Type.Literal('external_account_limits'),
-  limits: ExternalAccountLimitsSchema,
-  /**
-   * The vendor account the turn was bound to when it started, which is the
-   * account this reading describes — the hub caches it under exactly this value.
-   *
-   * The snapshot itself names only a target, and a client that resolved the
-   * account from its own discovery cache would file a reading from account A
-   * under account B the moment discovery noticed a switch mid-turn. Absent when
-   * the vendor has no account to fingerprint.
-   */
-  vendorAccountFingerprint: Type.Optional(Type.String({ maxLength: 128 })),
-  done: Type.Literal(false),
-});
+const SSEExternalAccountLimitsEventSchema = Type.Object(
+  {
+    type: Type.Literal('external_account_limits'),
+    limits: ExternalAccountLimitsSchema,
+    /**
+     * The vendor account the turn was bound to when it started, which is the
+     * account this reading describes — the hub caches it under exactly this value.
+     *
+     * The snapshot itself names only a target, and a client that resolved the
+     * account from its own discovery cache would file a reading from account A
+     * under account B the moment discovery noticed a switch mid-turn. Absent when
+     * the vendor has no account to fingerprint.
+     */
+    vendorAccountFingerprint: Type.Optional(Type.String({ maxLength: 128 })),
+    done: Type.Literal(false),
+  },
+  { additionalProperties: false }
+);
 
 /**
  * Announces what became of a mid-turn steer, live.
@@ -520,7 +577,7 @@ const SSEExternalAccountLimitsEventSchema = Type.Object({
  * something — so it is built directly by the turn controller, the same way
  * `external_session_started` and `external_turn_completed` are. One chunk per
  * attempt: the durable record starts `accepted` optimistically and is
- * corrected in place on a rejection, but the client only needs the resolved
+ * corrected in place on a rejection or an unknown delivery, but the client only needs the resolved
  * outcome, not the intermediate state nobody could have acted on anyway.
  */
 const SSEExternalSteerEventSchema = Type.Union([
@@ -545,6 +602,17 @@ const SSEExternalSteerEventSchema = Type.Union([
     },
     { additionalProperties: false }
   ),
+  /** The hub cannot tell whether the agent got the steer; see `ExternalSteerPart`. */
+  Type.Object(
+    {
+      type: Type.Literal('external_steer'),
+      clientMessageId: Type.String(),
+      text: Type.String(),
+      status: Type.Literal('delivery-unknown'),
+      done: Type.Literal(false),
+    },
+    { additionalProperties: false }
+  ),
 ]);
 
 /**
@@ -554,24 +622,27 @@ const SSEExternalSteerEventSchema = Type.Union([
  * vendor error has a code, a request id and a retry hint that the turn record
  * keeps, and the turn still ends through its own terminal path afterwards.
  */
-const SSEExternalErrorEventSchema = Type.Object({
-  type: Type.Literal('external_error'),
-  error: ExternalAgentErrorSchema,
-  /**
-   * What the person can do about it, when the hub knows (a signed-out agent: its sign-in command).
-   * Added by the hub, never by the vendor. A client that does not know it shows `error` as before.
-   */
-  remedy: Type.Optional(ExternalAgentRemedySchema),
-  /**
-   * Why the agent could not be reached, when the hub refused the turn's session reopen for a state
-   * of the agent (signed out, gone, outdated, consent withdrawn). The stored turn keeps the same
-   * reason, so a reload says what the stream said. Added by the hub, never by the vendor.
-   */
-  unavailableReason: Type.Optional(ExternalAgentUnavailableReasonSchema),
-  /** The build that would clear `version-unsupported`; present only beside that reason. */
-  requiredVersion: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
-  done: Type.Literal(false),
-});
+const SSEExternalErrorEventSchema = Type.Object(
+  {
+    type: Type.Literal('external_error'),
+    error: ExternalAgentErrorSchema,
+    /**
+     * What the person can do about it, when the hub knows (a signed-out agent: its sign-in command).
+     * Added by the hub, never by the vendor. A client that does not know it shows `error` as before.
+     */
+    remedy: Type.Optional(ExternalAgentRemedySchema),
+    /**
+     * Why the agent could not be reached, when the hub refused the turn's session reopen for a state
+     * of the agent (signed out, gone, outdated, consent withdrawn). The stored turn keeps the same
+     * reason, so a reload says what the stream said. Added by the hub, never by the vendor.
+     */
+    unavailableReason: Type.Optional(ExternalAgentUnavailableReasonSchema),
+    /** The build that would clear `version-unsupported`; present only beside that reason. */
+    requiredVersion: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+    done: Type.Literal(false),
+  },
+  { additionalProperties: false }
+);
 
 /**
  * Something the vendor wants the person to see, outside the answer.
@@ -581,13 +652,16 @@ const SSEExternalErrorEventSchema = Type.Object({
  * text. `severity` is the vendor's hint about prominence, not a verdict on the
  * turn, which ends through its own terminal path whatever a notice says.
  */
-const SSEExternalNoticeEventSchema = Type.Object({
-  type: Type.Literal('external_notice'),
-  severity: ExternalNoticeSeveritySchema,
-  title: Type.String({ minLength: 1 }),
-  description: Type.Optional(Type.String({ minLength: 1 })),
-  done: Type.Literal(false),
-});
+const SSEExternalNoticeEventSchema = Type.Object(
+  {
+    type: Type.Literal('external_notice'),
+    severity: ExternalNoticeSeveritySchema,
+    title: VendorText('title', { minLength: 1 }),
+    description: Type.Optional(VendorText('detail', { minLength: 1 })),
+    done: Type.Literal(false),
+  },
+  { additionalProperties: false }
+);
 
 /**
  * How the turn ended, as data rather than as prose.
@@ -598,11 +672,14 @@ const SSEExternalNoticeEventSchema = Type.Object({
  * `external_turn.terminalReason`, so the live stream has to carry the same value
  * or a reload changes what the user is told about a turn they just watched.
  */
-const SSEExternalTurnCompletedEventSchema = Type.Object({
-  type: Type.Literal('external_turn_completed'),
-  reason: ExternalTurnTerminalReasonSchema,
-  done: Type.Literal(false),
-});
+const SSEExternalTurnCompletedEventSchema = Type.Object(
+  {
+    type: Type.Literal('external_turn_completed'),
+    reason: ExternalTurnTerminalReasonSchema,
+    done: Type.Literal(false),
+  },
+  { additionalProperties: false }
+);
 
 export const SSEDoneEventSchema = Type.Object({
   type: Type.Literal('done'),

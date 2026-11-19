@@ -5,6 +5,7 @@ import { INSTALLED_VIA_PATH_MAX } from '@mangostudio/shared/updates';
 import {
   detectInstallOrigin,
   fitInstalledVia,
+  launcherForVersionedPath,
   npmFamilyFromPath,
   parseInstallOriginRecord,
   restartLauncher,
@@ -379,6 +380,44 @@ describe('restartLauncher', () => {
         )
       ).toBeUndefined();
     }
+  });
+});
+
+describe('launcherForVersionedPath', () => {
+  const BREW = '/opt/homebrew/Cellar/mangostudio/0.1.1/libexec/mangostudio';
+  const PNPM =
+    '/home/j/.local/share/pnpm/global/5/.pnpm/@mangostudio+cli-linux-x64@0.1.1/node_modules/@mangostudio/cli-linux-x64/mangostudio';
+  const SCOOP = 'C:\\Users\\j\\scoop\\apps\\mangostudio\\0.1.1\\mangostudio.exe';
+
+  it('maps each manager layout to its launcher without asking for the versioned file', () => {
+    // Only the launcher exists: the manager already removed the old version.
+    const launchers = new Set([
+      '/opt/homebrew/bin/mangostudio',
+      '/home/j/.local/share/pnpm/mangostudio',
+      'C:\\Users\\j\\scoop\\apps\\mangostudio\\current\\mangostudio.exe',
+    ]);
+    const pathExists = (path: string): boolean => launchers.has(path);
+    expect(launcherForVersionedPath(BREW, { platform: 'darwin', pathExists })).toBe(
+      '/opt/homebrew/bin/mangostudio'
+    );
+    expect(launcherForVersionedPath(PNPM, { platform: 'linux', pathExists })).toBe(
+      '/home/j/.local/share/pnpm/mangostudio'
+    );
+    expect(launcherForVersionedPath(SCOOP, { platform: 'win32', pathExists })).toBe(
+      'C:\\Users\\j\\scoop\\apps\\mangostudio\\current\\mangostudio.exe'
+    );
+  });
+
+  it('names nothing for a path outside those layouts or when the launcher is gone', () => {
+    expect(
+      launcherForVersionedPath('/usr/local/bin/mangostudio', {
+        platform: 'linux',
+        pathExists: () => true,
+      })
+    ).toBeUndefined();
+    expect(
+      launcherForVersionedPath(BREW, { platform: 'darwin', pathExists: () => false })
+    ).toBeUndefined();
   });
 });
 

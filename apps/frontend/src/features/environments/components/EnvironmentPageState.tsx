@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Spinner } from '@/components/ui/Spinner';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG } from '@/lib/icon-sizes';
 
@@ -38,7 +39,7 @@ export function EnvironmentPageState({
   hint,
   onRetry,
 }: EnvironmentPageStateProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const padding = PADDING_CLASS[size];
 
   if (variant === 'loading') {

@@ -379,12 +379,32 @@ export class ExternalTurnTranscript {
     return {};
   }
 
-  /** Corrects an already-recorded steer to `'rejected'`. A no-op once corrected. */
+  /**
+   * Corrects an already-recorded steer to `'rejected'`. A no-op once it has
+   * left `'accepted'`, so neither outcome overwrites the other.
+   */
   resolveSteerRejected(clientMessageId: string, reasonCode: ExternalSteerRejectionReason): void {
     const part = this.#steerByClientMessageId.get(clientMessageId);
-    if (!part || part.status === 'rejected') return;
+    if (part?.status !== 'accepted') return;
     part.status = 'rejected';
     part.reasonCode = reasonCode;
+  }
+
+  /**
+   * Corrects an already-recorded steer to `'delivery-unknown'`: the vendor call
+   * failed in a way that does not say whether the agent got it. Not a
+   * rejection, which is final and invites a resend that would deliver the steer
+   * twice if the agent had taken it.
+   *
+   * Final as well. The vendor stream carries nothing the hub can match to a
+   * steer (the hub's `clientMessageId` never reaches the vendor, and the user
+   * message the vendor echoes is dropped at the adapter), so nothing can later
+   * upgrade it to `'accepted'`. A no-op once the steer has left `'accepted'`.
+   */
+  resolveSteerDeliveryUnknown(clientMessageId: string): void {
+    const part = this.#steerByClientMessageId.get(clientMessageId);
+    if (part?.status !== 'accepted') return;
+    part.status = 'delivery-unknown';
   }
 
   #budgetExceeded(): boolean {

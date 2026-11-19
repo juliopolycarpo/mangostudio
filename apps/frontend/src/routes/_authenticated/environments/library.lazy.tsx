@@ -5,6 +5,7 @@ import { useEnvironmentScope } from '@/features/environments/use-environment-sco
 import { BackupUsage } from '@/features/library/components/BackupUsage';
 import { LibraryTabs } from '@/features/library/components/LibraryTabs';
 import { useLibraryRescan } from '@/features/library/hooks/use-library-rescan';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 
 export const Route = createLazyFileRoute('/_authenticated/environments/library')({
@@ -22,7 +23,7 @@ export const Route = createLazyFileRoute('/_authenticated/environments/library')
  * that every query below then picks up.
  */
 function LibraryLayout() {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const scope = useEnvironmentScope();
   const rescan = useLibraryRescan(scope.environmentId);
   // The strip is a summary and a way in to the manager. On the manager itself

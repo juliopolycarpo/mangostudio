@@ -1,5 +1,7 @@
 import Type, { type Static } from 'typebox';
 
+import { LibraryLocationIdSchema } from '../library/choices';
+
 export const FixedRuleFileKindSchema = Type.Union([Type.Literal('agents'), Type.Literal('claude')]);
 
 export const PromptInjectionRoleSchema = Type.Union([Type.Literal('system'), Type.Literal('user')]);
@@ -28,6 +30,12 @@ export const PromptSettingsSchema = Type.Object({
 
 export const RuleFileDescriptorSchema = Type.Object({
   kind: Type.Optional(FixedRuleFileKindSchema),
+  /**
+   * The library location this file is read through: `mango-instructions` or
+   * `claude-instructions` for a fixed file, `custom-instruction` for a
+   * user-named path. The latter is read-only and never a write destination.
+   */
+  locationId: LibraryLocationIdSchema,
   label: Type.String(),
   path: Type.String(),
   exists: Type.Boolean(),

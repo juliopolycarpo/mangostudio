@@ -14,6 +14,7 @@ import { LibraryBig } from 'lucide-react';
 
 import { buttonClassName } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
@@ -46,7 +47,7 @@ function resolvesLibraryAccess(
 }
 
 export function LibraryStep({ environment, consent, onContinue }: LibraryStepProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.onboarding;
   const permitsLibrary = resolvesLibraryAccess(environment, consent);
 

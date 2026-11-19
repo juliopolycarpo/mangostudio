@@ -13,7 +13,7 @@
  * import, and the import creates the temporary home that `afterAll` removes.
  */
 
-import { afterAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import {
   mkdirSync,
   mkdtempSync,
@@ -38,11 +38,33 @@ const HOME_KEYS = [
   'CHECKPOINTS_DIR',
 ] as const;
 
+type DevelopmentConfig = (typeof import('../../playwright.config'))['default'];
+type ProductionConfig = (typeof import('../../playwright.production.config'))['default'];
+
 // Importing the config creates the temporary home (unless a runner published
 // one). Note whether this process made it, so only that directory is removed.
-const publishedBefore = process.env[SMOKE_HOME_ENV];
-const { default: config } = await import('../../playwright.config');
-const { default: productionConfig } = await import('../../playwright.production.config');
+// The import runs in `beforeAll`, not while the file is collected: `afterAll`
+// does not run for a file whose tests are all filtered out, so a home made at
+// collection time would stay behind in the temp directory.
+let publishedBefore: string | undefined;
+let config!: DevelopmentConfig;
+let productionConfig!: ProductionConfig;
+
+beforeAll(async () => {
+  publishedBefore = process.env[SMOKE_HOME_ENV];
+  config = (await import('../../playwright.config')).default;
+  productionConfig = (await import('../../playwright.production.config')).default;
+});
+
+// Bun's test runner exits without running the 'exit' hook that removes the
+// home a Playwright run creates, so remove the one the import created. A
+// directory somebody exported as MANGO_SMOKE_HOME is theirs and stays.
+afterAll(() => {
+  if (publishedBefore) return;
+  const created = process.env[SMOKE_HOME_ENV];
+  if (created) removeSmokeHome(created);
+  delete process.env[SMOKE_HOME_ENV];
+});
 
 type WebServer = Exclude<NonNullable<typeof config.webServer>, readonly unknown[]>;
 
@@ -65,16 +87,6 @@ function isInside(parent: string, child: string): boolean {
 }
 
 describe('browser smoke lane hermeticity', () => {
-  // Bun's test runner exits without running the 'exit' hook that removes the
-  // home a Playwright run creates, so remove the one this import created. A
-  // directory somebody exported as MANGO_SMOKE_HOME is theirs and stays.
-  afterAll(() => {
-    if (publishedBefore) return;
-    const created = process.env[SMOKE_HOME_ENV];
-    if (created) removeSmokeHome(created);
-    delete process.env[SMOKE_HOME_ENV];
-  });
-
   test('production reuses home, authentication and execution policy with a static root hub', () => {
     const development = webServers();
     const production = webServers(productionConfig.webServer);
@@ -267,7 +279,8 @@ function orderingProblems(
 }
 
 describe('browser smoke project ordering', () => {
-  const developmentProjects = (config.projects ?? []) as readonly OrderedProject[];
+  const developmentProjects = (): readonly OrderedProject[] =>
+    (config.projects ?? []) as readonly OrderedProject[];
 
   test('finds the specs that sign up accounts, including the ones added after the terminal project', () => {
     const names = specsThatSignUp().map((file) => file.slice(SMOKE_SPEC_DIR.length + 1));
@@ -278,7 +291,7 @@ describe('browser smoke project ordering', () => {
   });
 
   test('the development config runs the terminal spec first and every signing-up spec after it', () => {
-    expect(orderingProblems(developmentProjects, specsThatSignUp())).toEqual([]);
+    expect(orderingProblems(developmentProjects(), specsThatSignUp())).toEqual([]);
   });
 
   test('the production config keeps the same ordering for the projects it keeps', () => {
@@ -288,7 +301,7 @@ describe('browser smoke project ordering', () => {
   });
 
   test('reports a project that depends on the terminal project', () => {
-    const failClosed: OrderedProject[] = developmentProjects.map((project) =>
+    const failClosed: OrderedProject[] = developmentProjects().map((project) =>
       project.name === 'chromium' ? { ...project, dependencies: ['terminal'] } : project
     );
     expect(orderingProblems(failClosed, specsThatSignUp())).toContainEqual(
@@ -297,7 +310,7 @@ describe('browser smoke project ordering', () => {
   });
 
   test('reports a terminal project that nothing is ordered after', () => {
-    const unordered: OrderedProject[] = developmentProjects.map((project) => {
+    const unordered: OrderedProject[] = developmentProjects().map((project) => {
       const { teardown: _removed, ...rest } = project;
       return rest;
     });

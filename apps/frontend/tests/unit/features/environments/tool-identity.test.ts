@@ -17,6 +17,7 @@ import {
 } from '../../../../src/components/ui/tool-avatar-palette';
 import {
   deriveMonogram,
+  isIdentityNameEditable,
   resolveToolIdentity,
 } from '../../../../src/features/environments/identity/resolve';
 
@@ -90,6 +91,17 @@ describe('deriveMonogram', () => {
   });
 });
 
+describe('isIdentityNameEditable', () => {
+  it.each([
+    ['agent:claude', true],
+    ['runtime:bun', true],
+    ['version-manager:fnm', true],
+    ['mcp:weather', false],
+  ])('%s -> %p', (subjectKey, expected) => {
+    expect(isIdentityNameEditable(subjectKey)).toBe(expected);
+  });
+});
+
 describe('resolveToolIdentity', () => {
   it('falls back to the product name when nothing is stored', () => {
     const resolved = resolveToolIdentity({}, 'agent:claude', 'Claude Code');
@@ -114,6 +126,23 @@ describe('resolveToolIdentity', () => {
     });
 
     expect(resolveToolIdentity(identities, 'agent:claude', 'Claude Code').monogram).toBe('ZZ');
+  });
+
+  it('ignores a stored display name for an mcp subject and reports none stored', () => {
+    const identities = identityMap({ 'mcp:weather': { displayName: 'Forecast', monogram: 'FC' } });
+    const resolved = resolveToolIdentity(identities, 'mcp:weather', 'Weather');
+
+    expect(resolved.name, 'mcp name: expected the configured "Weather"').toBe('Weather');
+    expect(resolved.storedName).toBeNull();
+    // The avatar half of the entry still applies.
+    expect(resolved.monogram).toBe('FC');
+    expect(resolved.customized).toBe(true);
+  });
+
+  it('derives an mcp monogram from the configured name, not the ignored one', () => {
+    const identities = identityMap({ 'mcp:weather': { displayName: 'Forecast' } });
+
+    expect(resolveToolIdentity(identities, 'mcp:weather', 'Weather').monogram).toBe('WE');
   });
 
   it('keeps an entry for another subject from leaking in', () => {

@@ -27,6 +27,7 @@ import { useMemo, useRef } from 'react';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { cn } from '@/lib/utils';
@@ -96,7 +97,7 @@ export function CoverageMatrix({
   onToggleAll,
   environmentId,
 }: CoverageMatrixProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   // A column is an agent, and it is named here exactly as its environments card
   // names it — the matrix is the same tools seen from a different angle.
@@ -273,7 +274,7 @@ function ResourceRow({
   readonly onToggleSelected: (resourceKey: string) => void;
   readonly environmentId: string;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   const cells = coverageCells(resource);
 
@@ -360,7 +361,7 @@ const LEGEND_ORDER: readonly CoverageCellState[] = [
  * the full sentence for each state is its tooltip.
  */
 export function MatrixLegend() {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
 
   return (

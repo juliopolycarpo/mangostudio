@@ -2665,6 +2665,7 @@ export const messages = {
       parseFailure: {
         'invalid-json': 'JSON inválido',
         'invalid-toml': 'TOML inválido',
+        'invalid-rules': 'Não foi possível interpretar as regras',
         unreadable: 'Não pôde ser lido',
         'not-regular-file': 'Não é um arquivo comum',
         'too-large': 'Grande demais para ler',
@@ -3010,8 +3011,12 @@ export const messages = {
     identity: {
       menu: 'Opções de identidade de {name}',
       rename: 'Renomear…',
+      // Para um item cujo nome não é do registro (o de um servidor MCP é o nome
+      // configurado): o mesmo diálogo, sem o campo de nome.
+      customize: 'Definir avatar…',
       reset: 'Voltar ao padrão',
       dialogTitle: 'Renomear {name}',
+      customizeDialogTitle: 'Definir avatar de {name}',
       nameLabel: 'Nome exibido',
       namePlaceholder: '{name}',
       nameHint: 'Deixe vazio para manter o nome padrão. Só muda o que você lê.',
@@ -3995,13 +4000,26 @@ export const messages = {
       rules:
         'Ele carrega as regras e a configura\u00e7\u00e3o de projeto versionadas nesta pasta e as segue.',
       mcp: 'Ele inicia os servidores MCP definidos nesta pasta, com o acesso que esses servidores t\u00eam.',
-      scope: 'Vale para esta pasta nesta máquina, em todos os chats que a utilizam.',
+      scope:
+        'Vale para esta pasta nesta máquina, em todos os chats que a utilizam, até você retirar em Configurações > Agentes externos.',
       warning:
         'Quem escreveu este reposit\u00f3rio escreveu essas instru\u00e7\u00f5es. S\u00f3 continue se confiar nele.',
       accept: 'Confiar nesta pasta',
       saving: 'Salvando\u2026',
       cancel: 'Agora n\u00e3o',
       saveFailed: 'N\u00e3o foi poss\u00edvel salvar sua escolha, ent\u00e3o nada foi enviado.',
+      manageTitle: 'Pastas confi\u00e1veis',
+      manageDescription:
+        'Pastas em que voc\u00ea permitiu que um agente carregue as regras e os servidores MCP do pr\u00f3prio reposit\u00f3rio.',
+      manageEmpty: 'Nenhuma pasta confi\u00e1vel ainda',
+      manageEmptyHint:
+        'Uma pasta \u00e9 registrada quando voc\u00ea escolhe confiar nela antes de um agente rodar ali pela primeira vez.',
+      manageHint:
+        'Retirar vale para todos os chats que usam a pasta. Um turno em andamento continua; a pr\u00f3xima mensagem pergunta de novo.',
+      grantedAt: '{vendor} \u00b7 {environment} \u00b7 Confiada em {date}',
+      revoke: 'Retirar',
+      revoking: 'Retirando\u2026',
+      revokeFailed: 'N\u00e3o foi poss\u00edvel retirar a confian\u00e7a nesta pasta.',
     },
     unsupported: {
       codexProfileDisallowed: 'A configuração do Codex nesta máquina não permite esse perfil',
@@ -4097,6 +4115,9 @@ export const messages = {
       buttonHint: 'Envie isto para o turno em andamento em vez de esperar ele terminar.',
       sentLabel: 'Você, no meio do turno',
       rejectedLabel: 'Isto não foi entregue',
+      deliveryUnknownLabel: 'Entrega não confirmada',
+      deliveryUnknownHint:
+        'O agente pode ou não ter recebido isto. Confira a resposta dele antes de enviar de novo.',
       submitError: 'Isto não pôde ser enviado.',
       reason: {
         'turn-already-completed': 'O turno já havia terminado.',

@@ -1,20 +1,24 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 import { assertTemporaryHome, type TemporaryHomeHost } from '../lib/temp-home';
 import {
+  describeTempLeak,
   launcherHost,
+  listTempLeftovers,
   REAL_HOME_ENV,
   runWithTestHome,
   shellExitCode,
   TEST_HOME_KIND,
   TEST_HOME_PREFIX,
+  TEST_TMP_PREFIX,
   testChildEnv,
   type TestHomeChild,
   type TestHomeDependencies,
   testHomeEnv,
+  testTempEnv,
 } from '../lib/test-home';
 
 const host: TemporaryHomeHost = { tmpDir: '/tmp', realHome: '/home/dev' };
@@ -256,13 +260,25 @@ describe('runWithTestHome', () => {
 
   test('starts the child with a fresh temporary home that is gone afterwards', async () => {
     const seen = await probe();
-    const expectedShape = join(realpathSync(tmpdir()), `${TEST_HOME_PREFIX}<random>`);
+    const tempRoot = dirname(seen.home);
+    const expectedShape = join(
+      realpathSync(tmpdir()),
+      `${TEST_TMP_PREFIX}<random>`,
+      `${TEST_HOME_PREFIX}<random>`
+    );
 
+    // The home is a direct child of the lane's own temp directory, which is
+    // itself a direct child of the launcher's.
     expect(
-      realpathSync(join(seen.home, '..')) === realpathSync(tmpdir()) &&
-        seen.home.includes(TEST_HOME_PREFIX),
+      basename(tempRoot).startsWith(TEST_TMP_PREFIX) &&
+        basename(seen.home).startsWith(TEST_HOME_PREFIX) &&
+        realpathSync(dirname(tempRoot)) === realpathSync(tmpdir()),
       `expected child HOME: ${expectedShape} | received: ${seen.home}`
     ).toBe(true);
+    expect(
+      existsSync(tempRoot),
+      `expected the lane temp directory removed | still exists: ${tempRoot}`
+    ).toBe(false);
     expect(seen.homedir, `expected homedir() to follow HOME | received: ${seen.homedir}`).toBe(
       seen.home
     );
@@ -424,5 +440,119 @@ describe('runWithTestHome', () => {
     } finally {
       rmSync(decoy, { recursive: true, force: true });
     }
+  });
+});
+
+/** A lane that creates the named entries in the temp directory it was given, then exits. */
+class FakeTempWritingChild implements TestHomeChild, TestHomeDependencies {
+  readonly exited: Promise<number>;
+  readonly signalCode = null;
+  readonly spawn = (_command: readonly string[], env: NodeJS.ProcessEnv) => {
+    this.env = env;
+    for (const name of this.entries) mkdirSync(join(env.TMPDIR ?? '', name));
+    return this;
+  };
+  env: NodeJS.ProcessEnv = {};
+  constructor(
+    private readonly entries: readonly string[],
+    exitCode = 0
+  ) {
+    this.exited = Promise.resolve(exitCode);
+  }
+  kill(): void {}
+}
+
+describe('the test temp directory', () => {
+  /** Runs the lane and returns its code and everything it wrote to stderr. */
+  async function launch(child: FakeTempWritingChild): Promise<{ code: number; stderr: string }> {
+    const written: string[] = [];
+    const write = spyOn(process.stderr, 'write').mockImplementation(
+      (chunk: string | Uint8Array) => {
+        written.push(String(chunk));
+        return true;
+      }
+    );
+    try {
+      const code = await runWithTestHome(['bun', 'fixture.ts'], process.env, child);
+      return { code, stderr: written.join('') };
+    } finally {
+      write.mockRestore();
+    }
+  }
+
+  test('points TMPDIR, TMP and TEMP at one directory that holds the home, not the reverse', async () => {
+    const child = new FakeTempWritingChild([]);
+
+    await launch(child);
+
+    const { TMPDIR, TMP, TEMP, HOME } = child.env;
+    expect([TMP, TEMP]).toEqual([TMPDIR, TMPDIR]);
+    expect(basename(TMPDIR ?? '').startsWith(TEST_TMP_PREFIX)).toBe(true);
+    // The lane's shape check wants the home to be a direct child of its temp directory.
+    expect(dirname(HOME ?? '')).toBe(TMPDIR ?? '');
+  });
+
+  test('removes the directory after the run, leftovers included', async () => {
+    const child = new FakeTempWritingChild(['left-over-abc123']);
+
+    await launch(child);
+
+    expect(existsSync(child.env.TMPDIR ?? '')).toBe(false);
+  });
+
+  test('passes a lane that left nothing behind', async () => {
+    const { code, stderr } = await launch(new FakeTempWritingChild([]));
+
+    expect(`code ${code} stderr ${JSON.stringify(stderr)}`).toBe('code 0 stderr ""');
+  });
+
+  test('fails a green lane that left entries behind, naming each one', async () => {
+    const { code, stderr } = await launch(
+      new FakeTempWritingChild(['skills-doctor-aaa111', 'skill-diag-bbb222'])
+    );
+
+    expect(code, `expected exit code: 1 (a leak) | received: ${code}`).toBe(1);
+    expect(stderr).toContain('tests left 2 entries in their temp directory');
+    expect(stderr).toContain('received: skill-diag-bbb222, skills-doctor-aaa111');
+  });
+
+  test('keeps the exit code of a lane that already failed, and still lists the leftovers', async () => {
+    const { code, stderr } = await launch(new FakeTempWritingChild(['leaked-ccc333'], 7));
+
+    expect(code, `expected exit code: 7 (the lane's own) | received: ${code}`).toBe(7);
+    expect(stderr).toContain('received: leaked-ccc333');
+  });
+
+  test('describeTempLeak counts the entries it does not list', () => {
+    const names = Array.from(
+      { length: 25 },
+      (_, index) => `entry-${String(index).padStart(2, '0')}`
+    );
+
+    const message = describeTempLeak('/tmp/t', names);
+
+    expect(message).toContain('tests left 25 entries');
+    expect(message).toContain('entry-19, … (5 more)');
+    expect(message).not.toContain('entry-20');
+  });
+
+  test('describeTempLeak uses the singular for one entry', () => {
+    expect(describeTempLeak('/tmp/t', ['only-one'])).toContain('tests left 1 entry in');
+  });
+
+  test('listTempLeftovers lists nothing for an empty directory and sorted names otherwise', () => {
+    const root = mkdtempSync(join(tmpdir(), 'with-test-home-leftovers-'));
+    try {
+      expect(listTempLeftovers(root)).toEqual([]);
+      mkdirSync(join(root, 'b'));
+      mkdirSync(join(root, 'a'));
+      expect(listTempLeftovers(root)).toEqual(['a', 'b']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('testTempEnv sets every variable a process reads for its temp directory', () => {
+    expect(testTempEnv('/tmp/x')).toEqual({ TMPDIR: '/tmp/x', TMP: '/tmp/x', TEMP: '/tmp/x' });
   });
 });

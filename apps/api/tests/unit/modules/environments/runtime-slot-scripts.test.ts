@@ -12,17 +12,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readlinkSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readdirSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { useScratchDirs } from '../../../../../../scripts/tests/support/scratch-dirs';
 import { buildSetupCommand } from '../../../../src/modules/environments/application/runtime-lifecycle-service';
 import {
   runtimePushBinaryScript,
@@ -31,6 +24,9 @@ import {
 } from '../../../../src/modules/environments/domain/runtime-push';
 
 const describePosix = process.platform === 'win32' ? describe.skip : describe;
+
+// Every home below is removed after its test.
+const makeHome = useScratchDirs();
 
 interface ShellRun {
   readonly exitCode: number;
@@ -58,7 +54,7 @@ function runScript(
 }
 
 function slotHome(versions: readonly string[], slot = 'wsl'): { home: string; slotDir: string } {
-  const home = mkdtempSync(join(tmpdir(), 'mango-slot-'));
+  const home = makeHome('mango-slot-');
   const slotDir = join(home, '.mango/runtime', slot);
   mkdirSync(slotDir, { recursive: true });
   for (const version of versions) {
@@ -126,7 +122,7 @@ describePosix('runtimeSlotBytesScript against a real shell', () => {
   });
 
   it('reports 0 rather than failing when the slot does not exist', () => {
-    const home = mkdtempSync(join(tmpdir(), 'mango-slot-empty-'));
+    const home = makeHome('mango-slot-empty-');
 
     const run = runScript(runtimeSlotBytesScript('remote'), home);
 
@@ -143,7 +139,7 @@ describePosix('buildSetupCommand path resolution against a real shell', () => {
   const echoResolved = (script: string) => script.replace('exec "$p"', 'echo "$p" #');
 
   it('expands a leading ~/ the way an ssh login shell would', () => {
-    const home = mkdtempSync(join(tmpdir(), 'mango-setup-'));
+    const home = makeHome('mango-setup-');
     const command = buildSetupCommand({ profile: 'full' }, {} as never);
 
     const run = runScript(echoResolved(command.script), home, [...command.args]);
@@ -153,7 +149,7 @@ describePosix('buildSetupCommand path resolution against a real shell', () => {
   });
 
   it('passes an absolute custom path through untouched, spaces included', () => {
-    const home = mkdtempSync(join(tmpdir(), 'mango-setup-'));
+    const home = makeHome('mango-setup-');
     const custom = '/opt/custom path/mangostudio-runtime';
     const command = buildSetupCommand({ profile: 'full' }, {} as never, custom);
 
@@ -163,7 +159,7 @@ describePosix('buildSetupCommand path resolution against a real shell', () => {
   });
 
   it('never lets a path with shell metacharacters run as a command', () => {
-    const home = mkdtempSync(join(tmpdir(), 'mango-setup-'));
+    const home = makeHome('mango-setup-');
     const marker = join(home, 'pwned');
     const command = buildSetupCommand({ profile: 'full' }, {} as never, `/tmp/x; touch ${marker}`);
 

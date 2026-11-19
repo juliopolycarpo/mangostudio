@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 
-import type { RuntimeImplementation } from '@mangostudio/shared/runtime-contract';
+import type {
+  RuntimeCapabilityManifest,
+  RuntimeImplementation,
+} from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 
 import {
   capabilityManifestFromHealth,
-  pruneUnknownExternalAgentTargets,
+  pruneUnknownExternalAgentHealth,
 } from '../../../../src/services/runtime-client/manifest-from-health';
 
 const baseReport = {
@@ -171,7 +174,7 @@ describe('capabilityManifestFromHealth', () => {
     });
 
     it('prunes unknown targets and sessions, names each skipped id once, and keeps the true count', () => {
-      const pruned = pruneUnknownExternalAgentTargets(newerPeer);
+      const pruned = pruneUnknownExternalAgentHealth(newerPeer);
 
       expect(pruned.skippedTargetIds).toEqual(['gemini']);
       expect(pruned.report.externalAgents).toEqual({
@@ -188,14 +191,72 @@ describe('capabilityManifestFromHealth', () => {
       };
       const { externalAgents: _omitted, ...withoutSubtree } = newerPeer;
 
-      expect(pruneUnknownExternalAgentTargets(known)).toEqual({
+      expect(pruneUnknownExternalAgentHealth(known)).toEqual({
         report: known,
         skippedTargetIds: [],
       });
-      expect(pruneUnknownExternalAgentTargets(withoutSubtree)).toEqual({
+      expect(pruneUnknownExternalAgentHealth(withoutSubtree)).toEqual({
         report: withoutSubtree,
         skippedTargetIds: [],
       });
+    });
+  });
+
+  // Regression for #2570. Absence of `identityIsolation` is the fail-closed reading: discovery,
+  // native sessions and turn configuration send no `isolation`, and the runtime answers
+  // EXTERNAL_ISOLATION_UNPROVEN, so nothing gated on the attestation is offered.
+  describe('a health report attesting an isolation method this build has no enum member for', () => {
+    const attestingMethod = (method: string): RuntimeHealthReport => ({
+      ...baseReport,
+      profile: 'full',
+      allow: { ...RUNTIME_CONSENT_PRESETS.full, externalAgents: true },
+      externalAgents: {
+        targets: ['codex'],
+        identityIsolation: { method, credentialHomeFingerprint: 'credential-home-v1' },
+        liveSessionCount: 0,
+        liveSessions: [],
+      },
+    });
+    const handshakeAttesting: RuntimeCapabilityManifest = {
+      ...capabilityManifestFromHealth(attestingMethod('os-account')),
+      identityIsolation: { method: 'os-account', credentialHomeFingerprint: 'credential-home-v1' },
+    };
+
+    it('projects no attestation into the manifest, and no handshake one survives it', () => {
+      const manifest = capabilityManifestFromHealth(
+        attestingMethod('micro-vm'),
+        handshakeAttesting
+      );
+
+      expect(
+        'identityIsolation' in manifest,
+        'expected no identityIsolation key: an unknown method is unproven isolation, never a known one'
+      ).toBe(false);
+      expect(manifest.externalAgents, 'the rest of the manifest still refreshes').toEqual([
+        'codex',
+      ]);
+    });
+
+    it('drops the attestation from the pruned report and names the method', () => {
+      const pruned = pruneUnknownExternalAgentHealth(attestingMethod('micro-vm'));
+
+      expect(pruned.skippedIsolationMethod).toBe('micro-vm');
+      expect(pruned.skippedTargetIds).toEqual([]);
+      expect(pruned.report.externalAgents).toEqual({
+        targets: ['codex'],
+        liveSessionCount: 0,
+        liveSessions: [],
+      });
+    });
+
+    it('keeps a known method and reports nothing skipped', () => {
+      const known = attestingMethod('container');
+
+      expect(pruneUnknownExternalAgentHealth(known)).toEqual({
+        report: known,
+        skippedTargetIds: [],
+      });
+      expect(pruneUnknownExternalAgentHealth(known).skippedIsolationMethod).toBeUndefined();
     });
   });
 

@@ -5,6 +5,8 @@
  * service is testable without a supervisor, a state file, or a running server.
  */
 
+import { dirname, join } from 'node:path';
+
 import type { InstallGuard } from '@mangostudio/shared/environments';
 import type {
   HubHealth,
@@ -85,7 +87,7 @@ import {
   type UpgradeService,
 } from '../../updates/application/upgrade-service';
 import { fitInstalledVia, type InstallOriginProbe } from '../../updates/domain/install-origin';
-import type { HubExecutable } from '../domain/hub-executable';
+import { type HubExecutable, withStableLauncher } from '../domain/hub-executable';
 import { describeHubProcess, hubLaunchMode } from '../domain/hub-process';
 import { hubServiceUnitName } from '../domain/hub-service-identity';
 import {
@@ -105,11 +107,15 @@ import {
   buildHubServiceDefinition,
   createHubServiceManager,
   currentHubExecutable,
+  currentHubExecutableProbe,
   currentInstallOriginProbe,
+  currentLauncherPath,
   hubServiceLogPath,
   hubServiceTargetFor,
   isAuthSecretPersisted,
   realPathOrSelf,
+  restartHubService,
+  staleHubServiceMove,
 } from './hub-service';
 
 /** A mutating action was refused by the local-surface guard. */
@@ -189,6 +195,10 @@ export interface MachineServiceDeps {
   readonly evaluateGuard: (clientIp: string | undefined) => InstallGuard;
   readonly environment: () => MachineEnvironment;
   readonly executable: () => HubExecutable;
+  /** The package manager's launcher that follows its upgrades, when this install has one. */
+  readonly launcherPath: () => string | undefined;
+  /** Whether a path exists; the launcher a stale unit moves to must be one the manager left. */
+  readonly pathExists: (path: string) => boolean;
   readonly serviceLogFile: () => string;
   readonly secretPersisted: () => boolean;
   /** The canonical user config.toml path; never a hard-coded `~/.mango`. */
@@ -565,7 +575,8 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
       port: environment.serverPort,
     });
     const definition = buildHubServiceDefinition({
-      executable: d.executable(),
+      // A unit must not record this build's versioned path: see `withStableLauncher`.
+      executable: withStableLauncher(d.executable(), d.launcherPath()),
       unitName,
       logFile: d.serviceLogFile(),
       env: d.env,
@@ -660,7 +671,7 @@ async function* upgradeEvents(
  */
 function scheduleRestart(state: ServerState, launch: HubLaunchMode, d: MachineServiceDeps): void {
   if (launch === 'service') {
-    d.schedule(() => d.manager.restart());
+    d.schedule(() => restartServiceUnit(d));
     return;
   }
   d.schedule(() => {
@@ -669,6 +680,44 @@ function scheduleRestart(state: ServerState, launch: HubLaunchMode, d: MachineSe
     d.spawnSuccessor(state);
     d.shutdown();
   });
+}
+
+/**
+ * Ask the supervisor to bounce this hub's unit, moving a unit that still names
+ * a replaced version onto the package manager's launcher on the way (the
+ * restart a CLI `restart` or upgrade already does).
+ *
+ * On launchd the hub is the job being rewritten: loading the new plist means a
+ * bootout, which ends this process and the `launchctl bootstrap` it would run
+ * next. A stale unit there is therefore moved by `<launcher> restart` run from
+ * a one-shot LaunchAgent of its own, which launchd owns and the hub's bootout
+ * does not reach; a unit that is not stale keeps the in-place `kickstart -k`.
+ * If that helper cannot be loaded, the unit is restarted in place as installed,
+ * which is what every restart did before it could be moved.
+ */
+async function restartServiceUnit(d: MachineServiceDeps): Promise<void> {
+  const launcherPath = d.launcherPath();
+  const probe = { platform: d.environment().platform, pathExists: d.pathExists };
+  const warn = (message: string): void => logger.warn('service_unit_retarget_failed', { message });
+  if (probe.platform !== 'darwin') {
+    await restartHubService(d.manager, launcherPath, { probe, warn });
+    return;
+  }
+  const stale = await staleHubServiceMove(d.manager, launcherPath, probe);
+  if (stale) {
+    try {
+      await d.manager.startRetargetHelper(
+        stale.to,
+        join(dirname(d.serviceLogFile()), 'service-retarget.log')
+      );
+      return;
+    } catch (error) {
+      warn(
+        `Could not start the launchd helper that runs "${stale.to} restart" to move the service unit off ${stale.from} (${error instanceof Error ? error.message : String(error)}); restarting it as installed. Run "mangostudio service install" to repair the unit.`
+      );
+    }
+  }
+  await d.manager.restart();
 }
 
 async function scheduleRestartIfNeeded(
@@ -750,6 +799,8 @@ function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
       }),
     environment,
     executable,
+    launcherPath: deps.launcherPath ?? currentLauncherPath,
+    pathExists: deps.pathExists ?? currentHubExecutableProbe().pathExists,
     serviceLogFile: deps.serviceLogFile ?? hubServiceLogPath,
     secretPersisted: deps.secretPersisted ?? (() => isAuthSecretPersisted()),
     configFilePath: deps.configFilePath ?? (() => getConfig().configFilePath),

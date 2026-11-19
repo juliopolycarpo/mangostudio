@@ -33,14 +33,28 @@ function makeSettings(overrides?: Partial<PromptSettings>): PromptSettings {
 }
 
 let fileContents: Map<string, string | null> = new Map();
+/** Fixed files the fake resolver was asked for, in order. */
+let fixedKindsLoaded: string[] = [];
+
+/** Where the fake registry "resolves" each fixed file; the stored setting path is only a label. */
+const FAKE_FIXED_FILE_KEYS: Record<string, string> = {
+  agents: '~/.mango/AGENTS.md',
+  claude: '~/.claude/CLAUDE.md',
+};
 
 // The registry restores the module after every test, so it is faked again before each one.
 beforeEach(async () => {
   fileContents = new Map();
+  fixedKindsLoaded = [];
   await mockModule('../../../../src/modules/prompt-rules/application/rule-file-resolver', () => ({
     loadRuleFileContent: (path: string) => {
       if (fileContents.has(path)) return fileContents.get(path) ?? null;
       return null;
+    },
+    loadFixedRuleFileContent: (kind: string) => {
+      fixedKindsLoaded.push(kind);
+      const key = FAKE_FIXED_FILE_KEYS[kind] ?? '';
+      return fileContents.get(key) ?? null;
     },
   }));
 });
@@ -271,6 +285,34 @@ describe('composePrompt', () => {
     expect(result.appliedRuleFiles).toHaveLength(2);
     expect(result.effectiveSystemPrompt).toContain('# Fixed');
     expect(result.effectivePrompt).toContain('# Custom');
+  });
+
+  it('reads built-in files through the registry kind and custom files through their path', () => {
+    fileContents.set('~/.mango/AGENTS.md', '# Fixed');
+    fileContents.set('/etc/custom.md', '# Custom');
+
+    composePrompt({
+      settings: makeSettings({
+        agentsMd: { ...makeSettings().agentsMd, enabled: true },
+        // A stored path that points elsewhere must not redirect a built-in file.
+        claudeMd: { ...makeSettings().claudeMd, enabled: true, path: '/etc/custom.md' },
+        customRules: [
+          {
+            id: 'custom-1',
+            label: 'Custom',
+            path: '/etc/custom.md',
+            enabled: true,
+            injectionRole: 'system',
+            sendFrequency: 'first-turn',
+          },
+        ],
+      }),
+      baseSystemPrompt: '',
+      visiblePrompt: 'Hello',
+      isFirstTurn: true,
+    });
+
+    expect(fixedKindsLoaded, '(fixed kinds loaded via the registry)').toEqual(['agents', 'claude']);
   });
 
   it('preserves base system prompt when composing with system rules', () => {

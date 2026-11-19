@@ -367,6 +367,10 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
       pollIntervalMs: 20,
       stream: new DiscardedBenchmarkOutput(),
     });
+    // A failed startup keeps its home on purpose, as evidence; the fixture
+    // records which one it was so the test removes it, even if an assertion fails.
+    const retainedHome = await readFile(join(directory, 'runtime-home'), 'utf8').catch(() => '');
+    if (retainedHome) scratch.push(retainedHome);
     const stdout = await readFile(join(directory, 'logs/startup-receipt.stdout.log'), 'utf8');
     const stderr = await readFile(join(directory, 'logs/startup-receipt.stderr.log'), 'utf8');
     expect(result.timedOut).toBe(false);
