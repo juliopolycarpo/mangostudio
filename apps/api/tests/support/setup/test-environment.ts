@@ -11,6 +11,8 @@
  *   5. The canonical config is reinstalled both before and after every test, so
  *      no `loadConfigForTest` override survives the test that installed it —
  *      including into the next file's module evaluation.
+ *   6. Every module a test faked through `mockModule()` (tests/support/mocks/
+ *      module-mocks.ts) is re-registered as the real one after that test.
  *
  * ## Bun preload await gotcha
  *
@@ -39,6 +41,7 @@ import { setLibraryLocationDefaultsForTest } from '../../../src/modules/app-sett
 import { setChatGptLoopbackPortForTest } from '../../../src/modules/connectors/infrastructure/chatgpt/loopback-server';
 import { setProviderSecretSyncTtlForTest } from '../../../src/services/providers/core/secret-service';
 import { registerApplicationServices } from '../../../src/services/register-application-services';
+import { restoreMockedModules } from '../mocks/module-mocks';
 
 /**
  * A foreign origin every API test runs with, standing in for a split deployment
@@ -164,9 +167,13 @@ export function setupTestEnvironment(): Promise<void> {
   // reverse registration order, which is what covers a test file's own
   // top-level `afterEach` (same root scope as this one, registered later).
   beforeEach(installBaseTestConfig);
-  afterEach(() => {
+  afterEach(async () => {
     resetManagedConfigFile();
     installBaseTestConfig();
+    // Per test rather than `afterAll`: a preload-registered `afterAll` fires once per
+    // process in the unisolated lane, not once per file, so it would not stop a fake
+    // leaking into the next file. A no-op unless a test faked a module.
+    await restoreMockedModules();
   });
   afterAll(removeManagedConfigDir);
 

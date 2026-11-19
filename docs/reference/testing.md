@@ -1619,14 +1619,31 @@ Frontend support lives in `apps/frontend/tests/support/`:
   process — in an unisolated lane, for every file scheduled after the one that
   registered them. `mock.module()` on an already-loaded module also _merges_
   into the live namespace rather than replacing it, so re-registering a
-  hand-listed subset leaves the rest of the fake in place. The sanctioned undo
-  is a whole-namespace capture (`const real = { ...mod }`) in a support module,
-  re-registered from the suite's `afterEach`:
+  hand-listed subset leaves the rest of the fake in place. The sanctioned way
+  to fake a module is `const mockModule = moduleMockerFor(import.meta.dir)` from
+  `support/mocks/module-mocks.ts`, then `mockModule(specifier, factory)` where
+  `mock.module(specifier, factory)` stood. The first call for a module snapshots
+  its whole real namespace; the global `afterEach` in `test-environment.ts`
+  re-registers the snapshot of every module faked during that test. Nothing is
+  listed by hand, so a new fake cannot leak by being forgotten. Two things follow:
+  a fake installed in `beforeAll` or at module scope is gone after the first test
+  (install it in `beforeEach`), and relative specifiers resolve against the
+  `baseDir` you passed, not the calling support module (a bare `mock.module`
+  resolves against the running test file). The drain is per test because a
+  preload-registered `afterAll` fires once per process in the unisolated lane, not
+  once per file.
+  `unit/support/module-mock-guard.test.ts` fails, naming file and line, on any raw
+  `mock.module(` under `apps/api/tests` outside that wrapper, except in files on
+  its allowlist of not-yet-migrated suites. The allowlist records a call count per
+  file and only shrinks. Until a suite migrates it keeps its own restore:
   `support/mocks/google-genai.ts` for the Gemini SDK,
   `support/connectors/index.ts` for the first-party provider modules, and
   `integration/routes/_respond-stream-helpers.ts` for the modules the respond-stream
   suites fake (`respond-stream-helpers.test.ts` fakes every export of each and
   fails if `restoreAllMocks` leaves one behind).
+  Reproduce a leak on the pinned Bun (`packageManager` in `package.json`): a newer
+  canary (1.4.5-canary.1) did not carry a raw `mock.module` into the next file in
+  a plain `bun test`, so a leak proof run there passes for the wrong reason.
 - **Never add a direct import of a mocked module to the bunfig preload.** The
   capture above has to run before any test installs a fake, which makes the
   preload look like its natural home. It is the one place it cannot go: mocking
