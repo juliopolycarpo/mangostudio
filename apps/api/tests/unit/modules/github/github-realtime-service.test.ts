@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it } from 'bun:test';
 
 import type { RealtimeServerMessage } from '@mangostudio/shared/realtime';
 
+import type {
+  RepoInvalidationOptions,
+  RepoInvalidationTarget,
+} from '../../../../src/modules/git/application/repo-invalidation';
 import {
   type GithubInvalidationTarget,
   publishGithubWriteInvalidation,
@@ -25,6 +29,11 @@ class RecordingRealtimeBus {
   }
 }
 
+/** A repository whose key cannot be resolved: no repo-wide frame is published. */
+const UNRESOLVED_REPOSITORY: RepoInvalidationOptions = {
+  resolveRepoKeyForTarget: () => Promise.resolve(undefined),
+};
+
 /** Answers the sibling enumeration from a fixed list, without a database. */
 class FakeSiblingIndex {
   readonly queries: Array<{
@@ -35,6 +44,11 @@ class FakeSiblingIndex {
   }> = [];
 
   constructor(private readonly chatIds: readonly string[]) {}
+
+  /** Options that also keep the repo-wide frame out of the way of per-chat assertions. */
+  get options() {
+    return { listSiblingChatIds: this.list, repoInvalidation: UNRESOLVED_REPOSITORY };
+  }
 
   list = (
     userId: string,
@@ -69,8 +83,8 @@ describe('GitHub write invalidation', () => {
     const bus = installBus();
     const siblings = new FakeSiblingIndex(['chat-1']);
 
-    await publishGithubWriteInvalidation(TARGET, 'create', { listSiblingChatIds: siblings.list });
-    await publishGithubWriteInvalidation(TARGET, 'ready', { listSiblingChatIds: siblings.list });
+    await publishGithubWriteInvalidation(TARGET, 'create', { ...siblings.options });
+    await publishGithubWriteInvalidation(TARGET, 'ready', { ...siblings.options });
 
     expect(bus.published).toEqual([
       {
@@ -91,7 +105,7 @@ describe('GitHub write invalidation', () => {
     const bus = installBus();
     const siblings = new FakeSiblingIndex(['chat-1']);
 
-    await publishGithubWriteInvalidation(TARGET, 'checkout', { listSiblingChatIds: siblings.list });
+    await publishGithubWriteInvalidation(TARGET, 'checkout', { ...siblings.options });
 
     expect(bus.published[0]?.message).toEqual({
       type: 'invalidate',
@@ -106,7 +120,7 @@ describe('GitHub write invalidation', () => {
     const bus = installBus();
     const siblings = new FakeSiblingIndex(['chat-2', 'chat-1', 'chat-3', 'chat-3']);
 
-    await publishGithubWriteInvalidation(TARGET, 'checkout', { listSiblingChatIds: siblings.list });
+    await publishGithubWriteInvalidation(TARGET, 'checkout', { ...siblings.options });
 
     expect(siblings.queries).toEqual([
       { userId: 'user-1', environmentId: 'devbox', workdir: '/remote/repo' },
@@ -134,7 +148,7 @@ describe('GitHub write invalidation', () => {
     const siblings = new FakeSiblingIndex(['chat-2']);
     const target: GithubInvalidationTarget = { ...TARGET, root: '/remote/repo' };
 
-    await publishGithubWriteInvalidation(target, 'checkout', { listSiblingChatIds: siblings.list });
+    await publishGithubWriteInvalidation(target, 'checkout', { ...siblings.options });
 
     expect(siblings.queries).toEqual([
       { userId: 'user-1', environmentId: 'devbox', workdir: '/remote/repo', root: '/remote/repo' },
@@ -154,7 +168,10 @@ describe('GitHub write invalidation', () => {
     const listSiblingChatIds = () => Promise.reject(new Error('db unavailable'));
 
     await expect(
-      publishGithubWriteInvalidation(TARGET, 'ready', { listSiblingChatIds })
+      publishGithubWriteInvalidation(TARGET, 'ready', {
+        listSiblingChatIds,
+        repoInvalidation: UNRESOLVED_REPOSITORY,
+      })
     ).resolves.toBeUndefined();
 
     expect(bus.published).toEqual([
@@ -163,5 +180,90 @@ describe('GitHub write invalidation', () => {
         message: { type: 'invalidate', topic: 'git:chat-1', scopes: ['github'] },
       },
     ]);
+  });
+});
+
+describe('GitHub write repo-wide invalidation (#945)', () => {
+  /** Names one repository and records what it was asked to resolve. */
+  class FakeRepositoryIndex {
+    readonly targets: RepoInvalidationTarget[] = [];
+
+    constructor(private readonly repoKey: string | undefined) {}
+
+    get options(): RepoInvalidationOptions {
+      return {
+        resolveRepoKeyForTarget: (target) => {
+          this.targets.push(target);
+          return Promise.resolve(this.repoKey);
+        },
+      };
+    }
+  }
+
+  it('publishes one repo frame with the write scopes next to the per-chat frame', async () => {
+    const bus = installBus();
+    const siblings = new FakeSiblingIndex([]);
+    const repositories = new FakeRepositoryIndex('repoKeyAbc');
+
+    await publishGithubWriteInvalidation(TARGET, 'create', {
+      listSiblingChatIds: siblings.list,
+      repoInvalidation: repositories.options,
+    });
+
+    // The per-chat frame stays: a tab that never learned a repo key relies on it.
+    expect(bus.published).toEqual([
+      {
+        userId: 'user-1',
+        message: { type: 'invalidate', topic: 'git:chat-1', scopes: ['github'] },
+      },
+      {
+        userId: 'user-1',
+        message: { type: 'invalidate', topic: 'repo:repoKeyAbc', scopes: ['github'] },
+      },
+    ]);
+    expect(repositories.targets).toEqual([
+      { userId: 'user-1', environmentId: 'devbox', workdir: '/remote/repo' },
+    ]);
+  });
+
+  it('hands the resolved checkout root to the key lookup so it does not resolve it twice', async () => {
+    installBus();
+    const repositories = new FakeRepositoryIndex('repoKeyAbc');
+
+    await publishGithubWriteInvalidation({ ...TARGET, root: '/remote/repo' }, 'checkout', {
+      listSiblingChatIds: new FakeSiblingIndex([]).list,
+      repoInvalidation: repositories.options,
+    });
+
+    expect(repositories.targets).toEqual([
+      { userId: 'user-1', environmentId: 'devbox', workdir: '/remote/repo', root: '/remote/repo' },
+    ]);
+  });
+
+  it('publishes no repo frame when the repository has no key', async () => {
+    const bus = installBus();
+
+    await publishGithubWriteInvalidation(TARGET, 'ready', {
+      ...new FakeSiblingIndex([]).options,
+    });
+
+    expect(bus.published.map((entry) => entry.message)).toEqual([
+      { type: 'invalidate', topic: 'git:chat-1', scopes: ['github'] },
+    ]);
+  });
+
+  it('keeps the publish from rejecting when the key lookup throws', async () => {
+    const bus = installBus();
+
+    await expect(
+      publishGithubWriteInvalidation(TARGET, 'ready', {
+        listSiblingChatIds: new FakeSiblingIndex([]).list,
+        repoInvalidation: {
+          resolveRepoKeyForTarget: () => Promise.reject(new Error('git unavailable')),
+        },
+      })
+    ).resolves.toBeUndefined();
+
+    expect(bus.published).toHaveLength(1);
   });
 });

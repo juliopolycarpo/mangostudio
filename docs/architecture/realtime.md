@@ -88,6 +88,7 @@ source of truth and refresh relevant queries after `subscribed` (and after
 | `activity`     | Any authenticated cookie session | None                                                                    |
 | `chats`        | Any authenticated cookie session | None                                                                    |
 | `git:<chatId>` | The user must own `<chatId>`     | `state`, `stashes`, `branches`, `history`, `commits`, `diffs`, `github` |
+| `repo:<key>`   | Any authenticated cookie session | `state`, `stashes`, `branches`, `history`, `commits`, `diffs`, `github` |
 
 `activity` is one topic for every activity kind rather than one per producer.
 The feed is a single query, so a per-kind topic would only ever fan back into
@@ -108,6 +109,35 @@ already had. The API publishes it through `publishChatListInvalidation`
 `apps/api/src/modules/generation/infrastructure/conversation-persistence.ts`;
 only chat create, update and delete, which do not move that column, publish on
 their own. `chat-list-signal-boundary.test.ts` enforces both.
+
+`repo:<key>` is the repository-wide counterpart of `git:<chatId>`. A git or
+GitHub write publishes the same scopes on both: the per-chat frame reaches the
+chat that wrote (and, for GitHub writes, chats bound to the same workdir), and
+the repo frame reaches every chat of the account in the same repository, linked
+worktrees and subdirectories included. The two are published side by side rather
+than one replacing the other so an older tab, which never learns a key, keeps
+working off `git:<chatId>`; a newer tab that holds both coalesces the pair into
+one refetch. Every write path publishes it: the git write service, worktree
+administration, the GitHub writes, file mutations by a turn's tools and turn
+completion (`apps/api/src/modules/git/application/repo-invalidation.ts`).
+
+The key is an opaque digest (URL-safe, at most 64 characters) of the environment
+id and the repository's resolved common directory, the same scope that
+serializes repository mutations (`resolveRepoLockScope`). Git resolves the
+toplevel and the common directory, so symlinks and worktrees map to one key, and
+the runtime's path semantics fold case where its filesystem does; a stored
+workdir string never decides it. No path crosses the socket. The hub hands the
+key to clients as `repoKey` on `GET /git/state` and on each batched summary; a
+client never derives one. When the key cannot be resolved the field is absent
+and the client keeps the per-chat topic only.
+
+The topic needs no ownership check: the key names nothing the user could
+enumerate, and a repo frame is published to the bus under the id of the user
+whose write it was, so a socket receives repo frames for its own account's
+repositories only. Subscribing to a key that matches none of them is a topic
+that never fires. A malformed key returns `UNSUPPORTED`, and so does a hub that
+predates the topic, which is why a client must keep working off `git:<chatId>`
+when a `repo:` subscription is refused.
 
 Foreign Git topics remain unsubscribed and return the same non-enumerating
 `NOT_FOUND` response as an unavailable topic. Unknown topic grammars return

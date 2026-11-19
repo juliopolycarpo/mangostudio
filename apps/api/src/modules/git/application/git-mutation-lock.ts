@@ -149,4 +149,4 @@ async function readRuntimePaths(selection: GitRuntimeSelection): Promise<RepoLoc
   return runtime.paths;
 }
 
-export const { withRepoMutationLock } = createRepoMutationLock();
+export const { resolveRepoLockScope, withRepoMutationLock } = createRepoMutationLock();

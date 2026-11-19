@@ -7,6 +7,7 @@ import {
   isGitAvailable,
   isMissingWorkdirError,
 } from '../infrastructure/git-cli';
+import { resolveRepoKey } from './git-repo-key';
 import { getRepoRoot, getRepoStatus } from './git-status-service';
 
 /**
@@ -54,10 +55,14 @@ export async function computeGitSummary(
 ): Promise<GitSummary | null> {
   const root = await getRepoRoot(workdir, signal, selection);
   if (!root) return null;
-  return toGitSummary(workdir, await getRepoStatus(root, signal, selection));
+  const [status, repoKey] = await Promise.all([
+    getRepoStatus(root, signal, selection),
+    resolveRepoKey(selection, root),
+  ]);
+  return toGitSummary(workdir, status, repoKey);
 }
 
-function toGitSummary(workdir: string, status: GitStatus): GitSummary {
+function toGitSummary(workdir: string, status: GitStatus, repoKey: string | undefined): GitSummary {
   // A path can sit in both the index and the worktree; a badge counts files,
   // not entries.
   const changedPaths = new Set<string>();
@@ -71,6 +76,7 @@ function toGitSummary(workdir: string, status: GitStatus): GitSummary {
     behind: status.branch.behind,
     changedFileCount: changedPaths.size,
     workdir,
+    ...(repoKey ? { repoKey } : {}),
   };
 }
 

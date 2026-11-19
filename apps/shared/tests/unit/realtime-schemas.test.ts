@@ -9,13 +9,17 @@ import {
   EXTERNAL_AGENTS_TOPIC,
   GIT_SCOPES,
   gitTopic,
+  isRepoKey,
   parseGitTopic,
+  parseRepoTopic,
   REALTIME_CLOSE_CODES,
   REALTIME_WRITER_ID_HEADER,
   RealtimeClientMessageSchema,
   RealtimeInvalidateMessageSchema,
   RealtimeServerMessageSchema,
   RealtimeWriterIdSchema,
+  REPO_KEY_MAX_LENGTH,
+  repoTopic,
   SETTINGS_SCOPES,
   SETTINGS_TOPIC,
 } from '../../src/realtime';
@@ -75,6 +79,30 @@ describe('realtime topic helpers', () => {
         topic: oversizedTopic,
       })
     ).toBe(false);
+  });
+
+  it('round-trips repo topics and rejects keys outside the URL-safe bound', () => {
+    const maximumKey = 'k'.repeat(REPO_KEY_MAX_LENGTH);
+
+    expect(repoTopic('Ab3_-xyz')).toBe('repo:Ab3_-xyz');
+    expect(parseRepoTopic(repoTopic('Ab3_-xyz'))).toBe('Ab3_-xyz');
+    expect(parseRepoTopic(repoTopic(maximumKey))).toBe(maximumKey);
+    expect(repoTopic(maximumKey).length).toBeLessThanOrEqual(256);
+
+    for (const badKey of ['', 'has space', 'a:b', 'a/b', 'k'.repeat(REPO_KEY_MAX_LENGTH + 1)]) {
+      expect(() => repoTopic(badKey)).toThrow(TypeError);
+      expect(parseRepoTopic(`repo:${badKey}`)).toBeUndefined();
+    }
+    expect(isRepoKey('Ab3_-xyz')).toBe(true);
+    expect(isRepoKey('k'.repeat(REPO_KEY_MAX_LENGTH))).toBe(true);
+    expect(isRepoKey('')).toBe(false);
+    expect(isRepoKey('has space')).toBe(false);
+    expect(isRepoKey('k'.repeat(REPO_KEY_MAX_LENGTH + 1))).toBe(false);
+    // A repo topic is not a git topic and vice versa: the route picks the
+    // authorization rule from whichever parser answers.
+    expect(parseRepoTopic('git:chat-1')).toBeUndefined();
+    expect(parseGitTopic(repoTopic('abc'))).toBeUndefined();
+    expect(parseRepoTopic('settings')).toBeUndefined();
   });
 
   it('exposes scope lists derived from schemas', () => {
@@ -247,6 +275,35 @@ describe('realtime server messages', () => {
         topic: '',
       })
     ).toBe(false);
+  });
+
+  it('accepts repo invalidations with git scopes and rejects malformed ones', () => {
+    const topic = repoTopic('Ab3_-xyz');
+
+    expect(
+      Value.Check(RealtimeInvalidateMessageSchema, {
+        type: 'invalidate',
+        topic,
+        scopes: ['state', 'github'],
+      })
+    ).toBe(true);
+    expect(Value.Check(RealtimeInvalidateMessageSchema, { type: 'invalidate', topic })).toBe(true);
+    expect(
+      Value.Check(RealtimeServerMessageSchema, { type: 'invalidate', topic, scopes: ['branches'] })
+    ).toBe(true);
+
+    // Settings scopes, an empty scope list, an empty key, an oversized key and
+    // a path-shaped key are all rejected on the wire.
+    for (const invalid of [
+      { type: 'invalidate', topic, scopes: ['app'] },
+      { type: 'invalidate', topic, scopes: [] },
+      { type: 'invalidate', topic: 'repo:' },
+      { type: 'invalidate', topic: `repo:${'k'.repeat(REPO_KEY_MAX_LENGTH + 1)}` },
+      { type: 'invalidate', topic: 'repo:/home/user/project' },
+      { type: 'invalidate', topic, chatId: 'chat-1' },
+    ]) {
+      expect(Value.Check(RealtimeInvalidateMessageSchema, invalid)).toBe(false);
+    }
   });
 
   it('rejects invalidate messages with topic/scope mismatches', () => {

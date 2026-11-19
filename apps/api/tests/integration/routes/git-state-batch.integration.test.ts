@@ -142,6 +142,7 @@ describe('POST /git/state/batch', () => {
         behind: 0,
         changedFileCount: 2,
         workdir: repo,
+        repoKey: expect.any(String),
       });
       // Same repository, same answer — the batch fans one read out.
       expect(payload.states[inRepoB.id]).toEqual(payload.states[inRepoA.id] as GitSummary);
@@ -169,6 +170,7 @@ describe('POST /git/state/batch', () => {
       behind: 0,
       changedFileCount: 0,
       workdir: repo,
+      repoKey: expect.any(String),
     });
   });
 
@@ -220,6 +222,7 @@ describe('POST /git/state/batch', () => {
       behind: 0,
       changedFileCount: 0,
       workdir: tracking,
+      repoKey: expect.any(String),
     });
     expect(payload.states[headless.id]).toEqual({
       branch: null,
@@ -228,6 +231,7 @@ describe('POST /git/state/batch', () => {
       behind: 0,
       changedFileCount: 0,
       workdir: detached,
+      repoKey: expect.any(String),
     });
   });
 

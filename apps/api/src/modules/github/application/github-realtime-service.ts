@@ -23,8 +23,9 @@
  * enumeration is one database read that runs after it and is failure-isolated,
  * because the write already happened and a lookup error must not turn it into
  * an apparent failure. Siblings in *other* checkouts of the same repository are
- * still out of this set on purpose — their staleness line ages visibly until
- * the repo-scoped topic follow-up lands.
+ * outside that set; they hear about the write on the repo-scoped topic, which
+ * is published alongside (see `publishRepoInvalidation`, #945). The workdir
+ * enumeration stays for tabs that never learned a repo key.
  */
 
 import { type GitScope, gitTopic } from '@mangostudio/shared/realtime';
@@ -36,6 +37,10 @@ import {
   listChatIdsByWorkdir,
   listChatIdsUnderWorktreeRoot,
 } from '../../chats/infrastructure/chat-repository';
+import {
+  publishRepoInvalidation,
+  type RepoInvalidationOptions,
+} from '../../git/application/repo-invalidation';
 
 const logger = createDiagnosticLogger('github-realtime');
 
@@ -75,6 +80,8 @@ export type ListSiblingChatIds = (
 export interface GithubRealtimeOptions {
   /** Injected so a test can enumerate siblings without a database. */
   readonly listSiblingChatIds?: ListSiblingChatIds;
+  /** Injected so a test can name the repository without spawning Git. */
+  readonly repoInvalidation?: RepoInvalidationOptions;
 }
 
 const defaultListSiblingChatIds: ListSiblingChatIds = (userId, environmentId, workdir, root) =>
@@ -102,6 +109,22 @@ export async function publishGithubWriteInvalidation(
     scopes: [...scopes],
   });
 
+  // The repository-wide frame covers siblings the workdir enumeration below
+  // cannot: other worktrees and subdirectories of the same repository. It does
+  // not replace that enumeration, which still serves tabs that never learned a
+  // repo key. Awaited so the function still resolves only once both fan-outs
+  // have been attempted; it never rejects.
+  const repoFrame = publishRepoInvalidation(
+    {
+      userId: target.userId,
+      environmentId: target.environmentId,
+      workdir: target.workdir,
+      ...(target.root ? { root: target.root } : {}),
+    },
+    scopes,
+    options.repoInvalidation
+  );
+
   const listSiblingChatIds = options.listSiblingChatIds ?? defaultListSiblingChatIds;
   try {
     const chatIds = await listSiblingChatIds(
@@ -126,4 +149,5 @@ export async function publishGithubWriteInvalidation(
       error: error instanceof Error ? error.message : String(error),
     });
   }
+  await repoFrame;
 }

@@ -75,8 +75,23 @@ export const ACTIVITY_TOPIC = 'activity' as const;
 export const CHATS_TOPIC = 'chats' as const;
 
 const GIT_TOPIC_PREFIX = 'git:' as const;
-const MAX_REALTIME_TOPICS_PER_MESSAGE = 32;
+const REPO_TOPIC_PREFIX = 'repo:' as const;
+/** Topics one subscribe or unsubscribe frame may carry. */
+export const MAX_REALTIME_TOPICS_PER_MESSAGE = 32;
 const MAX_REALTIME_TOPIC_LENGTH = 256;
+
+/**
+ * The opaque repository identity a `repo:<key>` topic is named by. The hub
+ * derives it (a digest of the environment and the repository's resolved common
+ * directory), so a client never builds one: it subscribes with the key the git
+ * state endpoints hand back. URL-safe characters only, so the key never needs
+ * escaping inside a topic and no path ever travels over the socket.
+ */
+export const REPO_KEY_MAX_LENGTH = 64;
+const REPO_KEY_PATTERN = '^[A-Za-z0-9_-]{1,64}$';
+const REPO_KEY_REGEX = new RegExp(REPO_KEY_PATTERN);
+export const RepoKeySchema = Type.String({ pattern: REPO_KEY_PATTERN });
+export type RepoKey = Static<typeof RepoKeySchema>;
 
 /** Topic string for git-panel invalidation scoped to one chat. */
 export function gitTopic(chatId: string): string {
@@ -97,6 +112,33 @@ export function parseGitTopic(topic: string): string | undefined {
   }
   const chatId = topic.slice(GIT_TOPIC_PREFIX.length);
   return chatId.length > 0 ? chatId : undefined;
+}
+
+/** True when `value` is a key the hub could have issued; a client checks before it subscribes. */
+export function isRepoKey(value: string): boolean {
+  return REPO_KEY_REGEX.test(value);
+}
+
+/**
+ * Topic string for git and GitHub writes scoped to one repository, whichever
+ * chat or checkout made them. Where `git:<chatId>` reaches one chat, this
+ * reaches every chat of the account that sits in the same repository, linked
+ * worktrees included.
+ */
+export function repoTopic(repoKey: string): string {
+  if (!REPO_KEY_REGEX.test(repoKey)) {
+    throw new TypeError(
+      `repo key must match ${REPO_KEY_PATTERN} (received ${repoKey.length} characters)`
+    );
+  }
+  return `${REPO_TOPIC_PREFIX}${repoKey}`;
+}
+
+/** Repository key encoded in a repo invalidation topic (`repo:<key>`). */
+export function parseRepoTopic(topic: string): string | undefined {
+  if (!topic.startsWith(REPO_TOPIC_PREFIX)) return undefined;
+  const repoKey = topic.slice(REPO_TOPIC_PREFIX.length);
+  return REPO_KEY_REGEX.test(repoKey) ? repoKey : undefined;
 }
 
 const TopicsArraySchema = Type.Array(
@@ -206,6 +248,17 @@ const RealtimeGitInvalidateMessageSchema = Type.Object(
   { additionalProperties: false }
 );
 
+const RealtimeRepoInvalidateMessageSchema = Type.Object(
+  {
+    type: Type.Literal('invalidate'),
+    topic: Type.String({
+      pattern: `^${REPO_TOPIC_PREFIX}[A-Za-z0-9_-]{1,${REPO_KEY_MAX_LENGTH}}$`,
+    }),
+    scopes: Type.Optional(Type.Array(GitScopeSchema, { minItems: 1 })),
+  },
+  { additionalProperties: false }
+);
+
 const RealtimeEnvironmentsInvalidateMessageSchema = Type.Object(
   {
     type: Type.Literal('invalidate'),
@@ -253,6 +306,7 @@ export const RealtimeInvalidateMessageSchema = Type.Union([
   RealtimeActivityInvalidateMessageSchema,
   RealtimeChatsInvalidateMessageSchema,
   RealtimeGitInvalidateMessageSchema,
+  RealtimeRepoInvalidateMessageSchema,
 ]);
 export type RealtimeInvalidateMessage = Static<typeof RealtimeInvalidateMessageSchema>;
 

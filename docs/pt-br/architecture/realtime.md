@@ -93,6 +93,7 @@ HTTP como fonte da verdade e atualizar as queries relevantes depois de
 | `activity`     | Qualquer sessão autenticada por cookie | Nenhum                                                                  |
 | `chats`        | Qualquer sessão autenticada por cookie | Nenhum                                                                  |
 | `git:<chatId>` | O usuário deve ser dono de `<chatId>`  | `state`, `stashes`, `branches`, `history`, `commits`, `diffs`, `github` |
+| `repo:<key>`   | Qualquer sessão autenticada por cookie | `state`, `stashes`, `branches`, `history`, `commits`, `diffs`, `github` |
 
 `activity` é um único tópico para todos os tipos de evento, em vez de um por
 produtor. O feed é uma única consulta, portanto um tópico por tipo apenas
@@ -115,6 +116,38 @@ cada uma respondida com o que a aba já tinha. A API o publica por
 `apps/api/src/modules/generation/infrastructure/conversation-persistence.ts`;
 apenas a criação, a edição e a exclusão de chat, que não mexem nessa coluna, publicam por
 conta própria. `chat-list-signal-boundary.test.ts` garante as duas regras.
+
+`repo:<key>` é o equivalente, no escopo do repositório, de `git:<chatId>`. Uma
+escrita de git ou GitHub publica os mesmos escopos nos dois: o frame por chat
+alcança o chat que escreveu (e, nas escritas do GitHub, os chats ligados ao mesmo
+workdir), e o frame do repositório alcança todos os chats da conta no mesmo
+repositório, incluindo worktrees vinculadas e subdiretórios. Os dois são
+publicados lado a lado, e um não substitui o outro, para que uma aba antiga, que
+nunca aprende uma chave, continue funcionando com `git:<chatId>`; uma aba nova
+que mantém ambos junta o par em uma única nova busca. Todo caminho de escrita o
+publica: o serviço de escrita git, a administração de worktrees, as escritas do
+GitHub, as mutações de arquivo das ferramentas de um turno e a conclusão do turno
+(`apps/api/src/modules/git/application/repo-invalidation.ts`).
+
+A chave é um digest opaco (URL-safe, no máximo 64 caracteres) do id do ambiente e
+do diretório comum resolvido do repositório, o mesmo escopo que serializa as
+mutações do repositório (`resolveRepoLockScope`). O Git resolve o toplevel e o
+diretório comum, então symlinks e worktrees levam a uma única chave, e a
+semântica de caminhos do runtime ignora maiúsculas e minúsculas onde o sistema
+de arquivos dele faz isso; uma string de workdir armazenada nunca decide. Nenhum
+caminho cruza o socket. O hub entrega a chave aos clientes como `repoKey` em
+`GET /git/state` e em cada resumo em lote; o cliente nunca a deriva. Quando a
+chave não pode ser resolvida, o campo fica ausente e o cliente mantém apenas o
+tópico por chat.
+
+O tópico não exige verificação de ownership: a chave não nomeia nada que o
+usuário possa enumerar, e um frame de repositório é publicado no bus sob o id do
+usuário dono da escrita, então um socket recebe frames de repositório apenas
+dos repositórios da própria conta. Assinar uma chave que não corresponde a
+nenhum deles é um tópico que nunca dispara. Uma chave malformada retorna
+`UNSUPPORTED`, assim como um hub anterior ao tópico, e por isso o cliente deve
+continuar funcionando com `git:<chatId>` quando uma assinatura `repo:` é
+recusada.
 
 Tópicos Git de outro usuário permanecem sem assinatura e retornam a mesma
 resposta `NOT_FOUND`, sem enumeração, de um tópico indisponível. Gramáticas de
