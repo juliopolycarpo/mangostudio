@@ -490,6 +490,32 @@ describe('MachinePage', () => {
         label: 'Skill agents:shared',
         detail: 'sobreposta pela fonte mango (maior precedência)',
       },
+      {
+        section: 'MCP command',
+        check: {
+          label: 'MCP github command',
+          labelKey: 'mcp.label.command',
+          status: 'fail',
+          detail: 'npx not found on PATH (spawn would ENOENT)',
+          detailKey: 'mcp.detail.commandNotFound',
+          params: { slug: 'github', command: 'npx' },
+        },
+        label: 'Comando do MCP github',
+        detail: 'npx não encontrado no PATH (o início falharia com ENOENT)',
+      },
+      {
+        section: 'MCP server',
+        check: {
+          label: 'MCP github',
+          labelKey: 'mcp.label.server',
+          status: 'ok',
+          detail: 'stdio, disabled',
+          detailKey: 'mcp.detail.serverDisabled',
+          params: { slug: 'github', transport: 'stdio' },
+        },
+        label: 'MCP github',
+        detail: 'stdio, desativado',
+      },
     ];
 
     it.each(SECTION_ROWS.map((entry) => [entry.section, entry] as const))(

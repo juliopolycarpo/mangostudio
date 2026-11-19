@@ -793,6 +793,25 @@ export const messages: FeatureMessages<'environments'> = {
           'skills.detail.disabled': 'disabled in settings',
           'skills.detail.precedenceUnverified':
             'higher-priority skill location could not be scanned',
+          'mcp.label.probeNote': 'MCP probe',
+          'mcp.label.server': 'MCP {slug}',
+          'mcp.label.command': 'MCP {slug} command',
+          'mcp.label.probe': 'MCP {slug} probe',
+          'mcp.label.tools': 'MCP {slug} tools',
+          'mcp.detail.probeNote':
+            'a MangoStudio server is running; the probe spawns a second stdio child per server (safe for per-client servers)',
+          'mcp.detail.serverEnabled': '{transport}, enabled',
+          'mcp.detail.serverDisabled': '{transport}, disabled',
+          'mcp.detail.commandMissing':
+            'no command configured (stdio MCP servers require a command)',
+          'mcp.detail.commandMissingDisabled':
+            'no command configured (stdio MCP servers require a command, server disabled)',
+          'mcp.detail.commandFound': '{command} resolvable on PATH',
+          'mcp.detail.commandNotFound': '{command} not found on PATH (spawn would ENOENT)',
+          'mcp.detail.commandNotFoundDisabled': '{command} not found on PATH (server disabled)',
+          'mcp.detail.probeResult': '{result}',
+          'mcp.detail.longToolNames':
+            '{count} tool name(s) exceed {max} chars and are skipped: {names}',
         },
       },
       logs: {

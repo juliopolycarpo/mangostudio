@@ -2936,6 +2936,27 @@ export const messages = {
           'skills.detail.disabled': 'desativada nas configurações',
           'skills.detail.precedenceUnverified':
             'não foi possível varrer um local de skills de maior prioridade',
+          'mcp.label.probeNote': 'Sonda MCP',
+          'mcp.label.server': 'MCP {slug}',
+          'mcp.label.command': 'Comando do MCP {slug}',
+          'mcp.label.probe': 'Sonda do MCP {slug}',
+          'mcp.label.tools': 'Ferramentas do MCP {slug}',
+          'mcp.detail.probeNote':
+            'um servidor MangoStudio está em execução; a sonda inicia um segundo processo stdio por servidor (seguro para servidores por cliente)',
+          'mcp.detail.serverEnabled': '{transport}, ativado',
+          'mcp.detail.serverDisabled': '{transport}, desativado',
+          'mcp.detail.commandMissing':
+            'nenhum comando configurado (servidores MCP stdio exigem um comando)',
+          'mcp.detail.commandMissingDisabled':
+            'nenhum comando configurado (servidores MCP stdio exigem um comando, servidor desativado)',
+          'mcp.detail.commandFound': '{command} encontrado no PATH',
+          'mcp.detail.commandNotFound':
+            '{command} não encontrado no PATH (o início falharia com ENOENT)',
+          'mcp.detail.commandNotFoundDisabled':
+            '{command} não encontrado no PATH (servidor desativado)',
+          'mcp.detail.probeResult': '{result}',
+          'mcp.detail.longToolNames':
+            '{count} nome(s) de ferramenta excedem {max} caracteres e foram ignorados: {names}',
         },
       },
       logs: {

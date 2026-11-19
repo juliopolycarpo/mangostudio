@@ -156,6 +156,21 @@ const DOCTOR_KEYS = [
   'skills.detail.shadowed',
   'skills.detail.disabled',
   'skills.detail.precedenceUnverified',
+  'mcp.label.probeNote',
+  'mcp.label.server',
+  'mcp.label.command',
+  'mcp.label.probe',
+  'mcp.label.tools',
+  'mcp.detail.probeNote',
+  'mcp.detail.serverEnabled',
+  'mcp.detail.serverDisabled',
+  'mcp.detail.commandMissing',
+  'mcp.detail.commandMissingDisabled',
+  'mcp.detail.commandFound',
+  'mcp.detail.commandNotFound',
+  'mcp.detail.commandNotFoundDisabled',
+  'mcp.detail.probeResult',
+  'mcp.detail.longToolNames',
 ] as const;
 
 describe('doctor check keys', () => {

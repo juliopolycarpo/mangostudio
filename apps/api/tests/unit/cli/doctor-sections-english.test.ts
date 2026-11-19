@@ -1236,7 +1236,7 @@ const GROUPS: readonly SectionGroup[] = [
   },
   { name: 'ChatGPT', prefixes: ['chatgpt'], keyed: true, cases: CHATGPT_CASES },
   { name: 'skills', prefixes: ['skills'], keyed: true, cases: SKILLS_CASES },
-  { name: 'MCP', prefixes: ['mcp'], keyed: false, cases: MCP_CASES },
+  { name: 'MCP', prefixes: ['mcp'], keyed: true, cases: MCP_CASES },
   { name: 'environments', prefixes: ['env'], keyed: false, cases: ENVIRONMENT_CASES },
   { name: 'library', prefixes: ['library'], keyed: false, cases: LIBRARY_CASES },
 ];
