@@ -72,8 +72,11 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
 
   const testMutation = useTestMcpServer();
   const updateMutation = useUpdateMcpServer();
-  // The server's configured name is the default here; the registry only decides
-  // what this card and every other surface *call* it.
+  // The pencil form is this server's only rename: the card shows the configured
+  // `name`. The registry contributes the avatar (monogram, image) alone, and a
+  // display name stored for `mcp:` before that rule is ignored on read rather
+  // than cleared, so nothing is rewritten and every surface that resolves this
+  // subject (the chat capability inspector too) shows the same name.
   const { resolve } = useToolIdentities();
   const identity = resolve('mcp', server.slug, server.name);
   // The id is the fallback rather than a blank: an environment that was

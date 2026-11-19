@@ -17,7 +17,7 @@ import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 
 import { IdentityEditDialog } from './IdentityEditDialog';
-import type { ResolvedToolIdentity } from './resolve';
+import { isIdentityNameEditable, type ResolvedToolIdentity } from './resolve';
 import { useResetToolIdentity } from './use-tool-identities';
 
 interface ToolIdentityMenuProps {
@@ -81,7 +81,7 @@ export function ToolIdentityMenu({
             setEditing(true);
           }}
         >
-          {labels.rename}
+          {isIdentityNameEditable(identity.subjectKey) ? labels.rename : labels.customize}
         </MenuItem>
         <MenuItem
           icon={<RotateCcw size={ICON_MD} />}

@@ -3010,8 +3010,12 @@ export const messages = {
     identity: {
       menu: 'Opções de identidade de {name}',
       rename: 'Renomear…',
+      // Para um item cujo nome não é do registro (o de um servidor MCP é o nome
+      // configurado): o mesmo diálogo, sem o campo de nome.
+      customize: 'Definir avatar…',
       reset: 'Voltar ao padrão',
       dialogTitle: 'Renomear {name}',
+      customizeDialogTitle: 'Definir avatar de {name}',
       nameLabel: 'Nome exibido',
       namePlaceholder: '{name}',
       nameHint: 'Deixe vazio para manter o nome padrão. Só muda o que você lê.',
