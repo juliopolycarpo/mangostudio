@@ -170,7 +170,11 @@ fn plan_operation(
                 read_patch_target(service, &policy, &mutation.chat_id, resolved_path, cancel)?
                     .bytes;
             if mutation.capture_snapshot {
-                super::service::snapshot_limit(resolved_path, source.len() as u64)?;
+                super::service::snapshot_limit(
+                    resolved_path,
+                    source.len() as u64,
+                    super::service::snapshot_limit_bytes(mutation.snapshot_max_bytes),
+                )?;
             }
             Ok(PlannedOperation::Delete {
                 input_path: input_path.clone(),
@@ -195,7 +199,11 @@ fn plan_operation(
             let observed =
                 read_patch_target(service, &policy, &mutation.chat_id, resolved_path, cancel)?;
             if mutation.capture_snapshot {
-                super::service::snapshot_limit(resolved_path, observed.bytes.len() as u64)?;
+                super::service::snapshot_limit(
+                    resolved_path,
+                    observed.bytes.len() as u64,
+                    super::service::snapshot_limit_bytes(mutation.snapshot_max_bytes),
+                )?;
             }
             let source = std::str::from_utf8(&observed.bytes).map_err(|_| {
                 io::path_error(format!(

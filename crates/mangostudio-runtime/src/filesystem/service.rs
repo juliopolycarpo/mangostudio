@@ -20,7 +20,8 @@ use super::freshness::{
 use super::io::{self, check_cancel, path_error};
 use super::params::*;
 use super::policy::{CompiledPolicy, PathPolicy};
-use super::snapshot::SNAPSHOT_MAX_BYTES;
+use super::snapshot::CapturedFile;
+use super::stage::{SNAPSHOT_DEFAULT_MAX_BYTES, SNAPSHOT_HARD_MAX_BYTES, StageStore};
 use super::text;
 use crate::blocking::run_blocking;
 use crate::consent::source::ConsentSource;
@@ -41,6 +42,8 @@ pub(super) const EDIT_OCCURRENCE_COUNT_LIMIT: usize = 1_000;
 pub(super) struct State {
     pub(super) ledger: Mutex<Ledger>,
     pub(super) locks: PathLocks,
+    /// Snapshot bytes too large for one frame, in transit to or from the hub.
+    pub(super) stage: StageStore,
 }
 
 pub(super) struct Service {
@@ -150,7 +153,11 @@ impl ResponseBudget {
 }
 
 impl Service {
-    fn authorize(&self, method: &str, capture_snapshot: bool) -> Result<(), RemoteError> {
+    pub(super) fn authorize(
+        &self,
+        method: &str,
+        capture_snapshot: bool,
+    ) -> Result<(), RemoteError> {
         let allow = self.consent.refresh();
         let capabilities = mangostudio_runtime_contract::catalog::capabilities_of(method)
             .expect("filesystem handler belongs to the catalog");
@@ -383,6 +390,7 @@ impl Service {
                 snapshot_limit(
                     &params.resolved_path,
                     observed.as_ref().map_or(0, |value| value.bytes.len() as u64),
+                    snapshot_limit_bytes(params.mutation.snapshot_max_bytes),
                 )?;
             }
             let written = ContentDigest::of(params.content.as_bytes());
@@ -506,6 +514,13 @@ impl Service {
             let observed = self
                 .read_fresh(&policy, &params.mutation.chat_id, &params.resolved_path, &cancel)
                 .map_err(|error| io::explain_unread(&policy, &params.resolved_path, "edit", error))?;
+            if params.mutation.capture_snapshot {
+                snapshot_limit(
+                    &params.resolved_path,
+                    observed.bytes.len() as u64,
+                    snapshot_limit_bytes(params.mutation.snapshot_max_bytes),
+                )?;
+            }
             let replace_all = params.replace_all.unwrap_or(false);
             let count = edit_match_count(&observed.bytes, params.old_string.as_bytes(), replace_all);
             if count == 0 { return Err(tool_argument(format!("The text to replace was not found in \"{}\". Re-read the file — it may have changed, or adjust oldString to match exactly (including whitespace).", params.input_path))); }
@@ -569,6 +584,13 @@ impl Service {
             let observed = self
                 .read_fresh(&policy, &params.mutation.chat_id, &params.resolved_path, &cancel)
                 .map_err(|error| io::explain_unread(&policy, &params.resolved_path, "edit", error))?;
+            if params.mutation.capture_snapshot {
+                snapshot_limit(
+                    &params.resolved_path,
+                    observed.bytes.len() as u64,
+                    snapshot_limit_bytes(params.mutation.snapshot_max_bytes),
+                )?;
+            }
             lock(&self.state.ledger).assert_line_numbers(&params.mutation.chat_id, &params.resolved_path, params.end_line as u64)?;
             let total = text::total_lines(&observed.bytes);
             let (start, end) = validated_range(&params, total)?;
@@ -637,6 +659,13 @@ impl Service {
                 })?;
                 None
             };
+            if let Some(observed) = &before {
+                snapshot_limit(
+                    &params.resolved_path,
+                    observed.bytes.len() as u64,
+                    snapshot_limit_bytes(params.mutation.snapshot_max_bytes),
+                )?;
+            }
             let result = mutation_result(
                 json!({"path":params.input_path,"deleted":true}),
                 &params.mutation,
@@ -688,12 +717,16 @@ impl Service {
                 &cancel,
             )?;
             let metadata = io::assert_regular(&policy, &params.resolved_from, "move")?;
+            // A file past the inline size is streamed into the staging area
+            // rather than read into memory, so a large move costs one chunk of
+            // memory. The guard releases the staged copy unless the response
+            // that names it is returned.
             let before = if params.mutation.capture_snapshot {
-                snapshot_limit(&params.resolved_from, metadata.len)?;
-                Some(io::read(
+                Some(self.capture_file(
                     &policy,
                     &params.resolved_from,
-                    SNAPSHOT_MAX_BYTES,
+                    metadata.len,
+                    snapshot_limit_bytes(params.mutation.snapshot_max_bytes),
                     &cancel,
                 )?)
             } else {
@@ -701,14 +734,16 @@ impl Service {
             };
             let expected_hash = before.as_ref().map_or_else(
                 || io::hash_file(&policy, &params.resolved_from),
-                |observed| Ok(io::sha256_hex(&observed.bytes)),
+                |captured| Ok(captured.sha256().to_owned()),
             )?;
-            let result = mutation_result(
+            let result = mutation_result_with(
                 json!({"from":params.input_from,"to":params.input_to,"moved":true}),
                 &params.mutation,
                 &params.resolved_from,
                 "move",
-                before.as_ref().map(|observed| observed.bytes.as_slice()),
+                before
+                    .as_ref()
+                    .map_or_else(|| before_json(None), CapturedFile::json),
                 &expected_hash,
                 Some(&params.resolved_to),
             );
@@ -736,15 +771,21 @@ impl Service {
                 ledger.forget(&params.mutation.chat_id, &params.resolved_to);
             }
             drop(ledger);
-            Ok(mutation_result(
+            let committed = mutation_result_with(
                 json!({"from":params.input_from,"to":params.input_to,"moved":true}),
                 &params.mutation,
                 &params.resolved_from,
                 "move",
-                before.as_ref().map(|observed| observed.bytes.as_slice()),
+                before
+                    .as_ref()
+                    .map_or_else(|| before_json(None), CapturedFile::json),
                 &committed_hash,
                 Some(&params.resolved_to),
-            ))
+            );
+            if let Some(captured) = before {
+                captured.keep_staged();
+            }
+            Ok(committed)
         })
         .await
     }
@@ -901,21 +942,45 @@ fn blocked_create_parent(params: &WriteParams, error: RemoteError) -> RemoteErro
     ))
 }
 
-pub(super) fn snapshot_limit(path: &Path, size: u64) -> Result<(), RemoteError> {
-    const MAX: u64 = SNAPSHOT_MAX_BYTES as u64;
-    if size <= MAX {
+/// The checkpoint size limit a call asked for, clamped to the staging ceiling.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(snapshot_limit_bytes(None), SNAPSHOT_DEFAULT_MAX_BYTES);
+/// ```
+pub(super) fn snapshot_limit_bytes(requested: Option<u64>) -> u64 {
+    requested
+        .unwrap_or(SNAPSHOT_DEFAULT_MAX_BYTES)
+        .min(SNAPSHOT_HARD_MAX_BYTES)
+}
+
+/// Refuses a file past the checkpoint limit before the mutation touches it.
+///
+/// The refusal is the disclosure: the call fails with the size and the limit
+/// and nothing changes on disk, rather than mutating a file that no revert
+/// could restore.
+///
+/// # Example
+///
+/// ```ignore
+/// snapshot_limit(path, size, snapshot_limit_bytes(params.snapshot_max_bytes))?;
+/// ```
+pub(super) fn snapshot_limit(path: &Path, size: u64, max_bytes: u64) -> Result<(), RemoteError> {
+    if size <= max_bytes {
         return Ok(());
     }
     Err(RemoteError::new(
         codes::INTERNAL,
         format!(
-            "Cannot checkpoint \"{}\": it is {size} bytes, past the {MAX}-byte snapshot limit.",
+            "Cannot checkpoint \"{}\": it is {size} bytes, past the {max_bytes}-byte checkpoint limit, so it was left unchanged.",
             path.display()
         ),
     )
     .with_detail("kind", "snapshot_too_large")
     .with_detail("resolvedPath", path.to_string_lossy().as_ref())
-    .with_detail("sizeBytes", size))
+    .with_detail("sizeBytes", size)
+    .with_detail("limitBytes", max_bytes))
 }
 
 fn lock_error(_: super::freshness::PathLockError) -> RemoteError {
@@ -1048,7 +1113,32 @@ pub(super) fn mutation_result(
     if !params.capture_snapshot {
         return object([("result", result), ("mutations", Value::Array(Vec::new()))]);
     }
-    let snapshot = snapshot_record(path, op, before, hash, moved_to);
+    mutation_result_with(
+        result,
+        params,
+        path,
+        op,
+        before_json(before),
+        hash,
+        moved_to,
+    )
+}
+
+/// [`mutation_result`] for a caller that already holds the record's `before`
+/// value, such as a streamed capture that is staged rather than inline.
+pub(super) fn mutation_result_with(
+    result: Value,
+    params: &Mutation,
+    path: &Path,
+    op: &str,
+    before: Value,
+    hash: &str,
+    moved_to: Option<&Path>,
+) -> Value {
+    if !params.capture_snapshot {
+        return object([("result", result), ("mutations", Value::Array(Vec::new()))]);
+    }
+    let snapshot = snapshot_record_with(path, op, before, hash, moved_to);
     object([
         ("result", result),
         ("mutations", Value::Array(vec![snapshot])),
@@ -1069,11 +1159,20 @@ pub(super) fn snapshot_record(
     after_hash: &str,
     moved_to: Option<&Path>,
 ) -> Value {
-    // `before` carries the file's whole content in base64; it moves into the record.
+    snapshot_record_with(path, op, before_json(before), after_hash, moved_to)
+}
+
+fn snapshot_record_with(
+    path: &Path,
+    op: &str,
+    before: Value,
+    after_hash: &str,
+    moved_to: Option<&Path>,
+) -> Value {
     let mut fields = vec![
         ("path", json!(path)),
         ("op", Value::from(op)),
-        ("before", before_json(before)),
+        ("before", before),
         ("afterHash", Value::from(after_hash)),
     ];
     if let Some(to) = moved_to {
@@ -1679,6 +1778,162 @@ mod tests {
         assert!(!move_to.exists());
     }
 
+    fn pattern_bytes(len: usize) -> Vec<u8> {
+        (0..len).map(|index| (index * 13 % 251) as u8).collect()
+    }
+
+    #[tokio::test]
+    async fn move_of_a_file_past_the_inline_size_stages_its_before_snapshot() {
+        let (home, service) = fixture();
+        let from = home.join("large.bin");
+        let to = home.join("large-moved.bin");
+        let bytes = pattern_bytes(3 * 1024 * 1024 + 5);
+        std::fs::write(&from, &bytes).unwrap();
+
+        let result = Arc::clone(&service)
+            .move_file(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputFrom":"large.bin", "inputTo":"large-moved.bin",
+                    "resolvedFrom":from, "resolvedTo":to
+                })),
+                // A frame that could not hold the file inline, so the response
+                // only fits because the bytes stayed out of it.
+                ResponseBudget::limited(8192),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        assert_schema("fs.move-file", &result);
+        let before = &result["mutations"][0]["before"];
+        assert_eq!(before["exists"], true);
+        assert!(
+            before.get("contentBase64").is_none(),
+            "(fs.move-file): a staged before-snapshot must not inline its bytes | received: {before}"
+        );
+        assert_eq!(before["sizeBytes"], bytes.len());
+        assert_eq!(before["hash"], io::sha256_hex(&bytes));
+        assert_eq!(result["mutations"][0]["afterHash"], io::sha256_hex(&bytes));
+        assert!(!from.exists());
+        assert!(std::fs::read(&to).unwrap() == bytes);
+        assert_eq!(
+            service.state.stage.staged_count(),
+            1,
+            "(fs.move-file): the staged copy must outlive the response that names it"
+        );
+    }
+
+    #[tokio::test]
+    async fn move_that_fails_after_staging_releases_the_staged_copy() {
+        let (home, service) = fixture();
+        let from = home.join("large.bin");
+        let to = home.join("occupied.bin");
+        std::fs::write(&from, pattern_bytes(2 * 1024 * 1024)).unwrap();
+        std::fs::write(&to, b"occupant").unwrap();
+
+        let error = Arc::clone(&service)
+            .move_file(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputFrom":"large.bin", "inputTo":"occupied.bin",
+                    "resolvedFrom":from, "resolvedTo":to
+                })),
+                ResponseBudget::limited(8192),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(from.exists(), "the source must stay put: {error:?}");
+        assert_eq!(std::fs::read(&to).unwrap(), b"occupant");
+        assert_eq!(
+            service.state.stage.staged_count(),
+            0,
+            "(fs.move-file): a refused move must not leave a staged copy behind"
+        );
+    }
+
+    #[tokio::test]
+    async fn move_of_a_file_past_the_requested_limit_is_refused_and_nothing_moves() {
+        let (home, service) = fixture();
+        let from = home.join("big.bin");
+        let to = home.join("big-moved.bin");
+        std::fs::write(&from, vec![7_u8; 4096]).unwrap();
+
+        let error = Arc::clone(&service)
+            .move_file(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true, "snapshotMaxBytes":1024,
+                    "inputFrom":"big.bin", "inputTo":"big-moved.bin",
+                    "resolvedFrom":from, "resolvedTo":to
+                })),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+
+        let details = error.details.as_ref().unwrap();
+        assert_eq!(
+            (
+                details["kind"].as_str(),
+                details["sizeBytes"].as_u64(),
+                details["limitBytes"].as_u64()
+            ),
+            (Some("snapshot_too_large"), Some(4096), Some(1024)),
+            "(fs.move-file): expected snapshot_too_large naming size 4096 and limit 1024 | received: {error:?}"
+        );
+        assert!(
+            from.exists() && !to.exists(),
+            "a refused move changes nothing"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_guarded_mutations_past_the_requested_limit_are_refused_unchanged() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        let original = "line one\nline two\n".repeat(200);
+        seed_and_read(&service, &path, original.as_bytes()).await;
+
+        let edit_error = Arc::clone(&service)
+            .edit(
+                decode(json!({
+                    "chatId":"chat","inputPath":"file","resolvedPath":path,
+                    "oldString":"line one\nline two\n","newString":"x\n",
+                    "replaceAll":true,"captureSnapshot":true,"snapshotMaxBytes":1024
+                })),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        let delete_error = Arc::clone(&service)
+            .delete(
+                decode(json!({
+                    "chatId":"chat","inputPath":"file","resolvedPath":path,
+                    "captureSnapshot":true,"snapshotMaxBytes":1024
+                })),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+
+        for (method, error) in [
+            ("fs.edit-file", edit_error),
+            ("fs.delete-file", delete_error),
+        ] {
+            assert_eq!(
+                error.details.as_ref().unwrap()["kind"],
+                "snapshot_too_large",
+                "({method}): expected snapshot_too_large | received: {error:?}"
+            );
+        }
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    }
+
     #[tokio::test]
     async fn oversized_snapshot_free_mutation_response_refuses_before_commit() {
         let (home, service) = fixture();
@@ -2107,7 +2362,7 @@ mod tests {
             Registry::new(),
             ConsentSource::new(RuntimeSlot::Host, home.to_path_buf()),
         );
-        assert_eq!(registry.implemented_methods().len(), 14);
+        assert_eq!(registry.implemented_methods().len(), 17);
         assert!(positive_integer(0.0, "startLine").is_err());
         assert!(positive_integer(1.5, "startLine").is_err());
         assert_eq!(positive_integer(2.0, "startLine").unwrap(), 2);

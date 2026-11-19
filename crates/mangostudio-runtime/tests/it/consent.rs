@@ -168,6 +168,7 @@ fn every_library_and_snapshot_writer_declares_fs_write() {
         "library.remove",
         "library.undo",
         "snapshot.revert",
+        "snapshot.stage-chunk",
     ] {
         let capabilities = declared(method);
         assert!(

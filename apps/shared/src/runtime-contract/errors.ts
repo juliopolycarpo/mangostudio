@@ -53,6 +53,10 @@ export const RUNTIME_SERVICE_ERROR_KINDS = [
   'workdir_validation',
   'snapshot_conflict',
   'snapshot_too_large',
+  /** A staged snapshot id the runtime does not hold, or that expired before it was used. */
+  'snapshot_stage_missing',
+  /** A staged snapshot whose bytes do not hash to the digest the revert named. */
+  'snapshot_stage_corrupt',
   'runtime_update_refused',
   'runtime_service_unsupported',
   'runtime_service_no_session_bus',

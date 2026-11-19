@@ -40,6 +40,7 @@ mod mcp_stdio_ownership;
 mod mcp_stdio_shutdown;
 mod panic_isolation;
 mod release_profile;
+mod snapshot_stage;
 mod transport_connect;
 mod transport_serve;
 mod transport_stdio_spawned;

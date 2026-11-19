@@ -176,6 +176,24 @@ const RUNTIME_METHODS = {
     Methods.RuntimeSnapshotHashResultSchema,
     ['checkpoints', 'fsRead']
   ),
+  'snapshot.read-chunk': method(
+    Methods.RuntimeSnapshotReadChunkParamsSchema,
+    Methods.RuntimeSnapshotReadChunkResultSchema,
+    ['checkpoints', 'fsRead'],
+    'Reads one bounded slice of a snapshot staged by a capture too large to return inline.'
+  ),
+  'snapshot.stage-chunk': method(
+    Methods.RuntimeSnapshotStageChunkParamsSchema,
+    Methods.RuntimeSnapshotStageChunkResultSchema,
+    ['checkpoints', 'fsWrite'],
+    'Appends one slice of a snapshot to stage for a revert whose content is too large to send inline.'
+  ),
+  'snapshot.release': method(
+    Methods.RuntimeSnapshotReleaseParamsSchema,
+    Methods.RuntimeSnapshotReleaseResultSchema,
+    ['checkpoints'],
+    'Frees a staged snapshot. Releasing an id the runtime no longer holds succeeds.'
+  ),
   'snapshot.revert': method(
     Methods.RuntimeSnapshotRevertParamsSchema,
     Methods.RuntimeSnapshotRevertResultSchema,

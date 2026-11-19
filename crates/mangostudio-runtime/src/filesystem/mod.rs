@@ -11,6 +11,7 @@ mod policy;
 mod search;
 mod service;
 mod snapshot;
+mod stage;
 mod text;
 
 pub(crate) use service::register;
