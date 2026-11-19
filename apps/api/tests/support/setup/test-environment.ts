@@ -11,7 +11,10 @@
  *   5. The canonical config is reinstalled both before and after every test, so
  *      no `loadConfigForTest` override survives the test that installed it —
  *      including into the next file's module evaluation.
- *   6. Every module a test faked through `mockModule()` (tests/support/mocks/
+ *   6. The tool registry is put back to its startup contents after every test
+ *      (tool-registry-baseline.ts), so a suite that clears it cannot hide a
+ *      built-in tool from the next file.
+ *   7. Every module a test faked through `mockModule()` (tests/support/mocks/
  *      module-mocks.ts) is re-registered as the real one after that test.
  *
  * ## Bun preload await gotcha
@@ -42,6 +45,7 @@ import { setChatGptLoopbackPortForTest } from '../../../src/modules/connectors/i
 import { setProviderSecretSyncTtlForTest } from '../../../src/services/providers/core/secret-service';
 import { registerApplicationServices } from '../../../src/services/register-application-services';
 import { restoreMockedModules } from '../mocks/module-mocks';
+import { captureToolRegistryBaseline, restoreToolRegistryBaseline } from './tool-registry-baseline';
 
 /**
  * A foreign origin every API test runs with, standing in for a split deployment
@@ -141,6 +145,7 @@ export function setupTestEnvironment(): Promise<void> {
   resetManagedConfigFile();
   installBaseTestConfig();
   registerApplicationServices();
+  const toolRegistryBaseline = captureToolRegistryBaseline();
   initialized = true;
 
   // Per-test isolation. beforeEach reinstalls the canonical config so no test
@@ -170,6 +175,9 @@ export function setupTestEnvironment(): Promise<void> {
   afterEach(async () => {
     resetManagedConfigFile();
     installBaseTestConfig();
+    // A suite that clears or swaps tools without restoring them would hide
+    // `generate_image` (and the rest) from every later file in this process.
+    restoreToolRegistryBaseline(toolRegistryBaseline);
     // Per test rather than `afterAll`: a preload-registered `afterAll` fires once per
     // process in the unisolated lane, not once per file, so it would not stop a fake
     // leaking into the next file. A no-op unless a test faked a module.

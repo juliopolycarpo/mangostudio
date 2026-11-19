@@ -9,6 +9,7 @@ import {
   register as registerCreateFileTool,
 } from '../../../../src/services/tools/builtin/create-file';
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
+import { registerTools } from '../../../../src/services/tools/register-tools';
 import { clearRegistry, executeTool, getTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
 
@@ -24,6 +25,7 @@ beforeEach(() => {
 
 afterEach(() => {
   clearRegistry();
+  registerTools();
   rmSync(tempDir, { recursive: true, force: true });
 });
 
