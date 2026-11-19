@@ -1142,6 +1142,8 @@ export const messages: CoreMessages = {
         'This branch does not exist on the remote yet. It will be pushed before the pull request is opened.',
       pushError: 'The branch could not be pushed, so no pull request was created.',
       noBranch: 'Check out a branch to create a pull request.',
+      readOnly:
+        'GitHub writes are turned off on this machine, so pull requests can only be read here.',
     },
 
     /**

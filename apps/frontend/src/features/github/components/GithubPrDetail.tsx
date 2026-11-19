@@ -112,7 +112,11 @@ function DetailBody({ chatId, number }: { readonly chatId: string; readonly numb
         </p>
       </div>
 
-      <MarkReadyAction chatId={chatId} number={number} isDraft={pr.isDraft} />
+      {/* Not offered where the machine refuses `gh` writes: the runtime would
+          answer the press with a denial, so the control would only ever fail. */}
+      {query.data.canMutate ? (
+        <MarkReadyAction chatId={chatId} number={number} isDraft={pr.isDraft} />
+      ) : null}
       <ChecksBlock chatId={chatId} number={number} />
       <ReviewThreadsAction chatId={chatId} number={number} />
     </div>

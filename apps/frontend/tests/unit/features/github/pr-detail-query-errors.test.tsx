@@ -68,6 +68,49 @@ function scenarioWith(overrides: { checksStatus?: number; threadsStatus?: number
   return scenario;
 }
 
+describe('GithubPrDetail write actions', () => {
+  const DRAFT_DETAIL = (canMutate: boolean) => ({
+    ...DETAIL_OK,
+    canMutate,
+    pr: { ...DETAIL_OK.pr, isDraft: true },
+  });
+
+  function installDraft(canMutate: boolean) {
+    return createFetchScenario()
+      .respondWithJson('GET', DETAIL_PATH, { body: DRAFT_DETAIL(canMutate) })
+      .respondWithJson('GET', CHECKS_PATH, {
+        body: { state: 'ok', cachedAt: 1_700_000_000_000, checks: [], summary: null },
+      })
+      .respondWithJson('GET', THREADS_PATH, { body: THREADS_OK })
+      .install();
+  }
+
+  it('offers "mark ready" for a draft only on a machine that allows writes', async () => {
+    const allowed = installDraft(true);
+    try {
+      render(<GithubPrDetail chatId={CHAT_ID} number={NUMBER} onBack={jest.fn()} />);
+      await flushAsyncRender();
+      expect(await screen.findByRole('button', { name: 'Mark ready for review' })).toBeTruthy();
+    } finally {
+      allowed.restore();
+    }
+  });
+
+  it('hides "mark ready" on a machine that refuses writes', async () => {
+    const refused = installDraft(false);
+    try {
+      render(<GithubPrDetail chatId={CHAT_ID} number={NUMBER} onBack={jest.fn()} />);
+      await flushAsyncRender();
+
+      // Wait for the detail itself so an absent button is not just "not loaded yet".
+      expect(await screen.findByText(/Build the GitHub rail panel/)).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Mark ready for review' })).toBeNull();
+    } finally {
+      refused.restore();
+    }
+  });
+});
+
 describe('GithubPrDetail sub-query failures', () => {
   it('reports a failed checks read instead of rendering nothing', async () => {
     const scenario = scenarioWith({ checksStatus: 500 });

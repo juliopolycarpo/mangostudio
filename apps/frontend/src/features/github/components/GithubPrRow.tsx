@@ -18,6 +18,8 @@ interface GithubPrRowProps {
   readonly pr: GithubPrSummary;
   readonly onOpen: (number: number) => void;
   readonly onCheckout: (number: number) => void;
+  /** False on a machine that refuses `gh` writes: the checkout entry is not offered. */
+  readonly canMutate: boolean;
 }
 
 /**
@@ -28,9 +30,16 @@ interface GithubPrRowProps {
  * entry away for when it is not.
  *
  * @example
- * <GithubPrRow chatId={chatId} nameWithOwner="mango/studio" pr={pr} onOpen={setSelected} onCheckout={checkout} />
+ * <GithubPrRow chatId={chatId} nameWithOwner="mango/studio" pr={pr} onOpen={setSelected} onCheckout={checkout} canMutate />
  */
-export function GithubPrRow({ chatId, nameWithOwner, pr, onOpen, onCheckout }: GithubPrRowProps) {
+export function GithubPrRow({
+  chatId,
+  nameWithOwner,
+  pr,
+  onOpen,
+  onCheckout,
+  canMutate,
+}: GithubPrRowProps) {
   const { t } = useI18n();
   const checks = checkChipStatus(pr.checks);
 
@@ -59,9 +68,11 @@ export function GithubPrRow({ chatId, nameWithOwner, pr, onOpen, onCheckout }: G
       </button>
       <GithubPrBadge state={pr.state} draft={pr.isDraft} />
       <GithubRowMenu chatId={chatId} target={{ url: pr.url, number: pr.number, nameWithOwner }}>
-        <MenuItem onSelect={() => onCheckout(pr.number)} icon={<GitBranch size={ICON_MD} />}>
-          {t.github.actions.checkout}
-        </MenuItem>
+        {canMutate ? (
+          <MenuItem onSelect={() => onCheckout(pr.number)} icon={<GitBranch size={ICON_MD} />}>
+            {t.github.actions.checkout}
+          </MenuItem>
+        ) : null}
       </GithubRowMenu>
     </GithubRowShell>
   );
