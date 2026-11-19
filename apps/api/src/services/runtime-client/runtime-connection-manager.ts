@@ -29,7 +29,7 @@ import {
   EnvironmentUnavailableError,
   type EnvironmentUnavailableReason,
 } from '../../lib/environment-unavailable';
-import { createDiagnosticLogger } from '../../lib/logger';
+import { createDiagnosticLogger, type DiagnosticLogger } from '../../lib/logger';
 import { resolveRuntimeLaunchCommand, RuntimeBinaryNotFoundError } from '../../lib/runtime-paths';
 import {
   type EnvironmentStateTransitionRecorder,
@@ -49,7 +49,10 @@ import { connectContainerRuntime } from './connect-container-runtime';
 import { connectHttpRuntime } from './connect-http-runtime';
 import { connectSshRuntime } from './connect-ssh-runtime';
 import { type HubWorkspaceBinding, STAND_IN_USER_ID } from './hub-workspace-authority';
-import { capabilityManifestFromHealth } from './manifest-from-health';
+import {
+  capabilityManifestFromHealth,
+  pruneUnknownExternalAgentTargets,
+} from './manifest-from-health';
 import { RuntimeClient } from './runtime-client';
 import { registerRuntimeConnectionRelease } from './runtime-connection-release';
 import {
@@ -183,6 +186,8 @@ export interface RuntimeConnectionManagerOptions {
    * {@link MANIFEST_REFRESH_TIMEOUT_MS}. A caller's own `timeoutMs` wins.
    */
   readonly manifestRefreshTimeoutMs?: number;
+  /** Where health entries the hub chose to skip are reported; tests record here. */
+  readonly healthLogger?: DiagnosticLogger;
 }
 
 /**
@@ -249,6 +254,12 @@ interface RuntimeConnectionEntry {
   /** Epoch ms {@link health} was last read. */
   healthReadAtMs?: number;
   /**
+   * Target ids health named that this build cannot, already logged. A refresh
+   * repeats every few seconds and the peer's answer does not change between
+   * them, so each id is reported once per environment rather than per read.
+   */
+  skippedTargetIdsLogged?: Set<string>;
+  /**
    * Epoch ms before which a lazy connect fails fast instead of respawning.
    * `Infinity` latches the environment until someone connects it explicitly.
    */
@@ -289,6 +300,9 @@ export const BOUND_ELSEWHERE_RETRY_MS = 60_000;
 
 /** Logs each real connect failure once, with the full text the HTTP layer withholds. */
 const connectLogger = createDiagnosticLogger('runtime-connection');
+
+/** Reports what the hub chose not to read from a peer's health, once per id. */
+const healthLogger = createDiagnosticLogger('runtime-health');
 
 /**
  * True when the runtime closed the handshake with the already-bound code.
@@ -518,6 +532,7 @@ export class RuntimeConnectionManager {
   readonly #connectDeadlinesMs: Partial<Record<EnvironmentTransportKind, number>>;
   readonly #hostedAgentsReadTimeoutMs: number;
   readonly #manifestRefreshTimeoutMs: number;
+  readonly #healthLogger: DiagnosticLogger;
   readonly #openerReleaseTimeoutMs: number;
   #externalAgentsRevoked: ExternalAgentsRevokedObserver | undefined;
   #terminalsRevoked: TerminalsRevokedObserver | undefined;
@@ -533,6 +548,7 @@ export class RuntimeConnectionManager {
       options.hostedAgentsReadTimeoutMs ?? HOSTED_AGENTS_READ_TIMEOUT_MS;
     this.#manifestRefreshTimeoutMs =
       options.manifestRefreshTimeoutMs ?? MANIFEST_REFRESH_TIMEOUT_MS;
+    this.#healthLogger = options.healthLogger ?? healthLogger;
     this.#publishHook = options.publish ?? (() => undefined);
     this.#recordTransition = options.recordTransition ?? recordEnvironmentStateTransition;
     this.#resolveEnvironment = options.resolveEnvironment;
@@ -1412,6 +1428,22 @@ export class RuntimeConnectionManager {
     this.#publish(userId);
   }
 
+  /** Logs each target id the hub skipped from health, the first time this environment reports it. */
+  #logSkippedTargetIds(
+    entry: RuntimeConnectionEntry,
+    environmentId: string,
+    skippedTargetIds: readonly string[]
+  ): void {
+    const logged = (entry.skippedTargetIdsLogged ??= new Set<string>());
+    const fresh = skippedTargetIds.filter((targetId) => !logged.has(targetId));
+    if (fresh.length === 0) return;
+    for (const targetId of fresh) logged.add(targetId);
+    this.#healthLogger.warn('unknown_external_agent_target_skipped', {
+      environmentId,
+      targetIds: fresh,
+    });
+  }
+
   /**
    * Re-reads `runtime.health` on a live connection, replaces the cached
    * handshake manifest, and publishes so environment cards refresh. Consent
@@ -1435,9 +1467,11 @@ export class RuntimeConnectionManager {
     entry.manifestReadAtMs = Date.now();
 
     // Never unbounded: a caller that names no deadline gets the manager's.
-    const health = await client.health({
-      timeoutMs: options.timeoutMs ?? this.#manifestRefreshTimeoutMs,
-    });
+    const { report: health, skippedTargetIds } = pruneUnknownExternalAgentTargets(
+      await client.health({
+        timeoutMs: options.timeoutMs ?? this.#manifestRefreshTimeoutMs,
+      })
+    );
     if (
       entry.revision !== revision ||
       entry.connection?.client !== client ||
@@ -1445,6 +1479,7 @@ export class RuntimeConnectionManager {
     ) {
       return this.getStatus(userId, environmentId);
     }
+    this.#logSkippedTargetIds(entry, environmentId, skippedTargetIds);
     entry.health = health;
     entry.healthReadAtMs = entry.manifestReadAtMs;
     client.replaceManifest(
