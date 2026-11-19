@@ -80,11 +80,14 @@ export async function executeTool(
   // already done so by the time it reports either way. This is the one place
   // any builtin executor runs, so declaring `uncheckpointedWriteSource` is
   // enough to be covered — no dispatcher has to remember to record it.
-  await noteUncheckpointedSource(context, tool.settings.uncheckpointedWriteSource);
-  return tool.execute(args, {
-    ...context,
-    parameters: { ...effectiveSettings.parameters, ...context.parameters },
-  });
+  const parameters = { ...effectiveSettings.parameters, ...context.parameters };
+  // A tool that snapshots its own writes owns the note: it records the source
+  // only when the snapshot did not cover the call, so noting here would
+  // disclose a gap that is not there.
+  if (!tool.settings.checkpointsOwnWrites?.(parameters)) {
+    await noteUncheckpointedSource(context, tool.settings.uncheckpointedWriteSource);
+  }
+  return tool.execute(args, { ...context, parameters });
 }
 
 /** Removes all registrations — for test isolation only. */

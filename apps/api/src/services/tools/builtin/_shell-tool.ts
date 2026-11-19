@@ -23,6 +23,7 @@ import {
   TOOL_EXECUTION_TIMEOUT_SECONDS_MIN,
   ToolExecutionTimedOutError,
 } from '../execution-timeout';
+import { runWithWorkspaceCheckpoint } from '../shell-workspace-checkpoint';
 import type { RegisteredTool, ToolContext } from '../types';
 import {
   assertWorkdirContainment,
@@ -56,6 +57,8 @@ interface ShellToolSettings {
   allowedEnvVars: string[];
   /** Extra env vars always withheld from commands (denylist additions). */
   deniedEnvVars: string[];
+  /** Snapshot the workspace around each command so revert can undo its file changes. */
+  checkpointWorkspaceWrites: boolean;
 }
 
 /**
@@ -88,6 +91,7 @@ export function normalizeShellToolSettings(parameters: Record<string, unknown>):
     ),
     allowedEnvVars: normalizeStringList(parameters.allowedEnvVars),
     deniedEnvVars: normalizeStringList(parameters.deniedEnvVars),
+    checkpointWorkspaceWrites: parameters.checkpointWorkspaceWrites === true,
   };
 }
 
@@ -111,18 +115,25 @@ async function execute(
   if (cwd) {
     assertWorkdirContainment(cwd, resolution);
   }
-  const result = await runtime.shell.run(
-    {
-      kind,
-      command,
-      ...(cwd ? { cwd } : {}),
-      timeoutMs: settings.timeoutSeconds * 1000,
-      maxOutputBytes: settings.maxOutputBytes,
-      envPolicy: { allow: settings.allowedEnvVars, deny: settings.deniedEnvVars },
-      ...toolchain,
-    },
-    context.signal ? { signal: context.signal } : undefined
-  );
+  const run = () =>
+    runtime.shell.run(
+      {
+        kind,
+        command,
+        ...(cwd ? { cwd } : {}),
+        timeoutMs: settings.timeoutSeconds * 1000,
+        maxOutputBytes: settings.maxOutputBytes,
+        envPolicy: { allow: settings.allowedEnvVars, deny: settings.deniedEnvVars },
+        ...toolchain,
+      },
+      context.signal ? { signal: context.signal } : undefined
+    );
+  // Outside a turn there is no manifest to record into, so there is nothing to
+  // snapshot for either.
+  const result =
+    settings.checkpointWorkspaceWrites && context.assistantMessageId
+      ? await runWithWorkspaceCheckpoint({ context, runtime, paths: runtime.paths, cwd, run })
+      : await run();
   if (result.termination.kind === 'timed_out') {
     throw new ToolExecutionTimedOutError(
       `Command timed out after ${settings.timeoutSeconds} seconds.`
@@ -177,13 +188,19 @@ function buildSettings(label: string, description: string): RegisteredTool['sett
     canDisable: true,
     requiredCapabilities: ['shell'],
     // The command runs in a child process, so there is no path list to snapshot
-    // before the fact and nothing a checkpoint could restore afterwards.
+    // before the fact. By default nothing a checkpoint could restore afterwards;
+    // `checkpointWorkspaceWrites` opts into a bounded workspace snapshot.
     uncheckpointedWriteSource: 'shell',
+    // With the option on, `runWithWorkspaceCheckpoint` notes the source itself,
+    // and only for a call its snapshot did not cover.
+    checkpointsOwnWrites: (parameters) =>
+      normalizeShellToolSettings(parameters).checkpointWorkspaceWrites,
     defaultParameters: {
       timeoutSeconds: SHELL_DEFAULT_TIMEOUT_SECONDS,
       maxOutputBytes: SHELL_DEFAULT_MAX_OUTPUT_BYTES,
       allowedEnvVars: [],
       deniedEnvVars: [],
+      checkpointWorkspaceWrites: false,
     },
     managesOwnTimeout: true,
     parameterDescriptors: [
@@ -218,6 +235,20 @@ function buildSettings(label: string, description: string): RegisteredTool['sett
         type: 'string_list',
         required: false,
         defaultValue: [] as string[],
+      },
+      {
+        name: 'checkpointWorkspaceWrites',
+        label: 'Checkpoint workspace writes',
+        description:
+          'Before each command, snapshot the files git tracks or would track under the chat ' +
+          'working directory (up to 500 files and 16 MiB), then record what the command ' +
+          'changed so a revert can restore it. Adds a snapshot cost to every command. Files ' +
+          'git ignores, paths outside the working directory, and git state itself are not ' +
+          'covered. When the workspace is not a git repository or is over the limits, the ' +
+          'revert dialog keeps its shell warning.',
+        type: 'boolean',
+        required: false,
+        defaultValue: false,
       },
     ],
   };
