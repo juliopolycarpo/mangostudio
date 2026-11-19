@@ -1788,6 +1788,7 @@ export const messages: CoreMessages = {
       parseFailure: {
         'invalid-json': 'Invalid JSON',
         'invalid-toml': 'Invalid TOML',
+        'invalid-rules': 'Rules could not be parsed',
         unreadable: 'Could not be read',
         'not-regular-file': 'Not a regular file',
         'too-large': 'Too large to read',

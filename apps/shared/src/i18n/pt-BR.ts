@@ -2665,6 +2665,7 @@ export const messages = {
       parseFailure: {
         'invalid-json': 'JSON inválido',
         'invalid-toml': 'TOML inválido',
+        'invalid-rules': 'Não foi possível interpretar as regras',
         unreadable: 'Não pôde ser lido',
         'not-regular-file': 'Não é um arquivo comum',
         'too-large': 'Grande demais para ler',
