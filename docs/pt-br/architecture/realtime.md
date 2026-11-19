@@ -146,6 +146,17 @@ campo — é tratado como de outra aba, então a aba refaz a leitura. Isso custa
 máximo uma leitura redundante e nunca uma visão desatualizada. Só o tópico
 `settings` carrega o campo; `chats` e `activity` não têm supressão a substituir.
 
+O header também consta na lista de request headers do CORS, então vira uma regra
+de ordem de deploy em uma implantação dividida (bundle em outra origem, veja
+[Serving the bundle from another origin](../../architecture/frontend-build.md#serving-the-bundle-from-another-origin)):
+**atualize a API antes do bundle.** Um bundle novo envia `x-mangostudio-writer-id`
+em toda escrita de app-settings, e uma API anterior ao campo não o lista em
+`Access-Control-Allow-Headers`, então o navegador falha o preflight e o save é
+recusado. O binário na mesma origem entrega os dois juntos e não é afetado. O
+header não é condicionado à capacidade do hub: a aba só descobre o que o hub
+suporta depois que o socket confirma um subscribe, e uma escrita feita antes disso
+sairia sem a condição.
+
 ## Limites E Códigos De Fechamento
 
 O servidor Elysia raiz aplica limites de transporte a todas as rotas WebSocket:

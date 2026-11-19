@@ -140,7 +140,14 @@ export function useGlobalSettings() {
     onError: async (error, _nextSettings, context) => {
       // A superseded save must not roll back: a newer submission either already
       // persisted its value or will report its own failure against it.
-      const restoredSettings = context?.write.isLatest() ? context.previousSettings : null;
+      // `rollbackRef` first: a refetch that landed while this save was open
+      // rebased it onto the fetched snapshot (see the rebase effect), and
+      // `previousSettings` still names the one the burst started on. Restoring
+      // that would drop what the refetch brought and leave the cache on a
+      // revision the next `If-Match` is guaranteed to lose.
+      const restoredSettings = context?.write.isLatest()
+        ? (rollbackRef.current ?? context.previousSettings)
+        : null;
       if (restoredSettings) {
         queryClient.setQueryData(appSettingsKeys.current(), restoredSettings);
       }
@@ -182,10 +189,25 @@ export function useGlobalSettings() {
       const pending = pendingSaveRef.current;
       const revision = appSettingsRevision(savedSettings);
       if (
+        pending?.revision !== undefined &&
+        revision !== undefined &&
+        submitted.revision !== undefined &&
+        pending.revision !== submitted.revision &&
+        pending.revision !== revision
+      ) {
+        // A refetch re-anchored the queue on a revision later than this save's
+        // own commit: this save committed on the one it named, so anything
+        // else is a write that landed after it. The cache already holds the
+        // fetched state plus the queued edits, and the response in hand is
+        // older than both, so publishing it would drop the queued edits from
+        // the cache the next keystroke builds on.
+        return;
+      }
+      if (
         pending &&
         revision !== undefined &&
         submitted.revision !== undefined &&
-        pending.revision === submitted.revision
+        (pending.revision === submitted.revision || pending.revision === revision)
       ) {
         // This owner's queued typing extends the exact snapshot its own PUT
         // just confirmed. Advance that queue only; another owner's older draft
@@ -296,6 +318,14 @@ export function useGlobalSettings() {
    * the queued save on the fetched revision, so `If-Match` names the snapshot
    * the edit now sits on; if that is stale too, the save is rejected and the
    * conflict path refreshes as usual.
+   *
+   * Every mounted consumer registers its own listener over its own refs, and
+   * they all run for the same event in subscription order. A consumer with no
+   * burst returns at once. When two have one, the later reads the earlier's
+   * rebased cache as its "fetched" state and re-applies only its own edited
+   * fields on top, so the shared cache ends up as fetched plus both edits
+   * (pinned by the "several consumers" tests). Capturing the fetched data once
+   * per client instead would let the last writer overwrite the other's edits.
    *
    * Only reads rebase: a cache write from this hook is `manual`, and a queue
    * the conflict epoch already rejected is left to fail, since replaying it

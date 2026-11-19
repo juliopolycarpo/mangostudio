@@ -143,6 +143,17 @@ treated as another tab's, so the tab refetches. That costs at most one redundant
 read and never a stale view. Only the `settings` topic carries the field; the
 `chats` and `activity` topics have no suppression to replace.
 
+The header is also a CORS-listed request header, so it is a deploy-order rule in a
+split deployment (the bundle on another origin, see
+[Serving the bundle from another origin](frontend-build.md#serving-the-bundle-from-another-origin)):
+**upgrade the API before the bundle.** A new bundle sends `x-mangostudio-writer-id`
+on every app-settings write, and an API that predates it does not list the header in
+`Access-Control-Allow-Headers`, so the browser fails the preflight and the save is
+refused. The same-origin binary ships both together and is not affected. The header
+is not gated on hub capability: a tab only learns what the hub supports after the
+socket acknowledges a subscribe, and a write made before that would still go out
+without the gate.
+
 ## Limits And Close Codes
 
 The root Elysia server applies transport limits to every WebSocket route:
