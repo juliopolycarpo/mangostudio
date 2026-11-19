@@ -1,6 +1,7 @@
 import { SETTINGS_SCOPES, SETTINGS_TOPIC, type SettingsScope } from '@mangostudio/shared/realtime';
 import { type QueryClient, useQueryClient } from '@tanstack/react-query';
 
+import { invalidateForSignal } from '@/lib/realtime/read-after-subscribe';
 import { type RealtimeSignal } from '@/lib/realtime/realtime-client';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { isOwnWriterId } from '@/lib/realtime/writer-id';
@@ -61,10 +62,13 @@ function sectionsToRefresh(signal: RealtimeSignal): readonly SettingsPageScope[]
 
 async function invalidateScopes(
   queryClient: QueryClient,
-  scopes: readonly SettingsPageScope[]
+  scopes: readonly SettingsPageScope[],
+  signal: RealtimeSignal
 ): Promise<void> {
   await Promise.all(
-    scopes.map((scope) => queryClient.invalidateQueries({ queryKey: SECTION_QUERY_KEYS[scope] }))
+    scopes.map((scope) =>
+      invalidateForSignal(queryClient, signal, { queryKey: SECTION_QUERY_KEYS[scope] })
+    )
   );
 }
 
@@ -82,6 +86,6 @@ export function useSettingsRealtimeInvalidation(): void {
   const queryClient = useQueryClient();
 
   useRealtimeInvalidation(SETTINGS_TOPIC, 'settings-sections', (signal) =>
-    invalidateScopes(queryClient, sectionsToRefresh(signal))
+    invalidateScopes(queryClient, sectionsToRefresh(signal), signal)
   );
 }

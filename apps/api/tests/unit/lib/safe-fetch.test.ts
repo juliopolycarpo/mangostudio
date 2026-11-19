@@ -71,6 +71,81 @@ describe('safeFetchBytes', () => {
     expect(stub.inits[0]?.headers).toEqual({ Accept: 'application/vnd.npm.install-v1+json' });
   });
 
+  describe('credentialsForHost', () => {
+    const credentials = {
+      host: 'api.example.test',
+      headers: { Authorization: 'Bearer dummy-token-not-a-secret' },
+    };
+    const redirectTo = (location: string) =>
+      new Response(null, { status: 302, headers: { location } });
+    const authorizationOf = (init: RequestInit | undefined) =>
+      new Headers(init?.headers).get('authorization');
+
+    it('sends the credential, beside the shared headers, to its own host', async () => {
+      const stub = respondWith(new Response('{}'));
+
+      await safeFetchBytes(
+        'https://api.example.test/list',
+        { ...limits, headers: { Accept: 'application/json' }, credentialsForHost: credentials },
+        { fetch: stub.fetch, resolveHostname: publicResolver }
+      );
+
+      expect(stub.inits[0]?.headers).toEqual({
+        Accept: 'application/json',
+        Authorization: 'Bearer dummy-token-not-a-secret',
+      });
+    });
+
+    it('withholds the credential from any other host', async () => {
+      const stub = respondWith(new Response('{}'));
+
+      await safeFetchBytes(
+        'https://cdn.example.test/list',
+        { ...limits, headers: { Accept: 'application/json' }, credentialsForHost: credentials },
+        { fetch: stub.fetch, resolveHostname: publicResolver }
+      );
+
+      expect(stub.inits[0]?.headers).toEqual({ Accept: 'application/json' });
+    });
+
+    it('drops the credential on a redirect to another host and restores it on the way back', async () => {
+      const stub = respondWith(
+        redirectTo('https://cdn.example.test/blob'),
+        redirectTo('https://api.example.test/final'),
+        new Response('{}')
+      );
+
+      await safeFetchBytes(
+        'https://api.example.test/list',
+        { ...limits, credentialsForHost: credentials },
+        { fetch: stub.fetch, resolveHostname: publicResolver }
+      );
+
+      expect(stub.calls).toEqual([
+        'https://api.example.test/list',
+        'https://cdn.example.test/blob',
+        'https://api.example.test/final',
+      ]);
+      expect(stub.inits.map(authorizationOf)).toEqual([
+        'Bearer dummy-token-not-a-secret',
+        null,
+        'Bearer dummy-token-not-a-secret',
+      ]);
+    });
+
+    it('matches the host exactly, port included', async () => {
+      const stub = respondWith(new Response('{}'));
+
+      await safeFetchBytes(
+        'https://api.example.test:8443/list',
+        { ...limits, credentialsForHost: credentials },
+        { fetch: stub.fetch, resolveHostname: publicResolver }
+      );
+
+      expect(stub.inits[0]?.headers).toBeUndefined();
+    });
+  });
+
   it('refuses anything that is not HTTPS before making a request', async () => {
     const stub = respondWith(new Response('nope'));
 

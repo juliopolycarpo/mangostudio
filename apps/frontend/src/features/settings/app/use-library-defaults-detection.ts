@@ -22,6 +22,7 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query';
 
+import { invalidateForSignal } from '@/lib/realtime/read-after-subscribe';
 import type { RealtimeSignal } from '@/lib/realtime/realtime-client';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { isOwnWriterId } from '@/lib/realtime/writer-id';
@@ -70,7 +71,7 @@ export function useLibraryDefaultsDetection(): LibraryDefaultsDetection {
  */
 function refetchOnAppInvalidation(queryClient: QueryClient, signal: RealtimeSignal): Promise<void> {
   if (signal.type === 'subscribed') {
-    return queryClient.invalidateQueries({ queryKey: appSettingsKeys.all });
+    return invalidateForSignal(queryClient, signal, { queryKey: appSettingsKeys.all });
   }
   const { message } = signal;
   const writerId = 'writerId' in message ? message.writerId : undefined;

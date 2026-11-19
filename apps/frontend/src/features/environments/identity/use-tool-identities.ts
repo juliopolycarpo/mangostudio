@@ -18,6 +18,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 
 import { useI18n } from '@/hooks/use-i18n';
+import { invalidateForSignal } from '@/lib/realtime/read-after-subscribe';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 
 import { displayName, type ToolNameLookup } from '../format';
@@ -40,7 +41,7 @@ function useToolIdentityRealtime(): void {
         : (signal.message.scopes as readonly SettingsScope[] | undefined);
     if (scopes && !scopes.includes('tool-identity')) return;
 
-    void queryClient.invalidateQueries({ queryKey: toolIdentityKeys.all });
+    return invalidateForSignal(queryClient, signal, { queryKey: toolIdentityKeys.all });
   });
 }
 
