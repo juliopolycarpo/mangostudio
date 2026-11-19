@@ -153,10 +153,50 @@ export function planWorkspaceChanges(
   return changes;
 }
 
+/**
+ * The key under which two spellings of a path collide on a case-insensitive
+ * filesystem. NFC first, because macOS stores names decomposed.
+ */
+export function foldPathKey(relative: string): string {
+  return relative.normalize('NFC').toLowerCase();
+}
+
+/**
+ * Splits the post-command listing into the paths that are new to the command
+ * and the ones that only look new.
+ *
+ * A path the listing named before the command is never new, whether or not the
+ * snapshot managed to read it: a file it could not capture or hash is still a
+ * file that existed, and recording it as a create would let a revert delete it.
+ *
+ * With `foldedBefore` set (a case-insensitive filesystem), a path that matches a
+ * pre-command one only in case is a rename of it — `git mv Foo.ts foo.ts` — and
+ * both spellings name the same file there, so treating it as a create would
+ * delete the only copy. Those come back in `renamedByCase`, never in `added`.
+ */
+export function selectAddedPaths(
+  listedAfter: readonly string[],
+  listedBefore: ReadonlySet<string>,
+  foldedBefore: ReadonlySet<string> | null
+): { added: string[]; renamedByCase: string[] } {
+  const added: string[] = [];
+  const renamedByCase: string[] = [];
+  for (const path of listedAfter) {
+    if (listedBefore.has(path)) continue;
+    if (foldedBefore?.has(foldPathKey(path))) renamedByCase.push(path);
+    else added.push(path);
+  }
+  return { added, renamedByCase };
+}
+
 type Baseline =
   | {
       readonly ok: true;
       readonly files: Map<string, BaselineFile>;
+      /** Every path the pre-command listing named, captured or not. */
+      readonly listedBefore: ReadonlySet<string>;
+      /** Folded keys of `listedBefore`, or null when the filesystem is case-sensitive. */
+      readonly foldedBefore: ReadonlySet<string> | null;
       readonly ignoredEntries: ReadonlySet<string>;
       /** Files whose pre-command state is known only by hash, so they cannot be restored. */
       readonly hashOnly: Set<string>;
@@ -247,9 +287,10 @@ async function captureBaseline(
   const startedAt = Date.now();
   const overBudget = () => Date.now() - startedAt > limits.setupBudgetMs;
 
-  const [listing, ignoredEntries] = await Promise.all([
+  const [listing, ignoredEntries, foldsCase] = await Promise.all([
     listWorkspace(runtime, root, signal),
     listIgnoredEntries(runtime, root, signal),
+    filesystemFoldsCase(runtime, root, signal),
   ]);
   if (!listing || !ignoredEntries) return { ok: false, reason: 'git_unavailable' };
   if (listing.files.length > limits.maxFiles) return { ok: false, reason: 'too_many_files' };
@@ -304,7 +345,45 @@ async function captureBaseline(
   });
 
   if (abort) return { ok: false, reason: abort };
-  return { ok: true, files, ignoredEntries, hashOnly, incomplete };
+  return {
+    ok: true,
+    files,
+    listedBefore: new Set(listing.files),
+    foldedBefore: foldsCase ? new Set(listing.files.map(foldPathKey)) : null,
+    ignoredEntries,
+    hashOnly,
+    incomplete,
+  };
+}
+
+/**
+ * Whether the workdir's filesystem treats `Foo.ts` and `foo.ts` as one file.
+ * Git probes the volume at `init` and records the answer as `core.ignorecase`,
+ * which is the one fact that is right for the runtime's disk rather than the
+ * hub's. The platform is the fallback for a repository whose config lost it.
+ */
+async function filesystemFoldsCase(
+  runtime: RuntimeClient,
+  root: string,
+  signal: AbortSignal | undefined
+): Promise<boolean> {
+  if (runtime.manifest.platform === 'darwin' || runtime.manifest.platform === 'win32') return true;
+  try {
+    const result = await runtime.git.exec(
+      {
+        args: ['config', '--type=bool', '--get', 'core.ignorecase'],
+        cwd: root,
+        timeoutMs: GIT_TIMEOUT_MS,
+        // Exit 1 is git's "key not set", an answer rather than a failure.
+        acceptedExitCodes: [0, 1],
+      },
+      requestOptions(signal)
+    );
+    return result.exitCode === 0 && result.stdout.trim() === 'true';
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return false;
+  }
 }
 
 /**
@@ -322,8 +401,15 @@ async function recordWorkspaceChanges(
 
   const listing = await listWorkspace(runtime, root);
   if (!listing) return false;
-  const listed = listing.files.map((relative) => paths.join(root, relative));
-  let added = listed.filter((path) => !baseline.files.has(path));
+  const { added: addedRelative, renamedByCase } = selectAddedPaths(
+    listing.files,
+    baseline.listedBefore,
+    baseline.foldedBefore
+  );
+  // A case-only rename is not recorded (see `selectAddedPaths`), so the call is
+  // not fully covered however the rest turns out.
+  if (renamedByCase.length > 0) complete = false;
+  let added = addedRelative.map((relative) => paths.join(root, relative));
   if (added.length > limits.maxFiles) {
     // A command that dumps this many new files is a build, not an edit: keep a
     // bounded prefix and say the rest is uncovered.

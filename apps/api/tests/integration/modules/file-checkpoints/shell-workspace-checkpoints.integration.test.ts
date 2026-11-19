@@ -10,7 +10,16 @@
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -306,6 +315,59 @@ describe.skipIf(!runnable)('shell workspace checkpoints', () => {
     expect(await revert()).toEqual({ revertedFiles: 1, uncheckpointedSources: [] });
     expect(read('a.txt')).toBe('a-original\n');
   });
+
+  // A file that predates the command is never the command's to lose, whatever
+  // the snapshot managed to read about it. Root ignores file modes, and Windows
+  // has no mode bits to deny a read with.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'never deletes a pre-existing file the snapshot could not read once the command makes it readable',
+    async () => {
+      initRepository({ 'a.txt': 'a\n' });
+      const locked = join(workdir, 'locked.txt');
+      writeFileSync(locked, 'precious\n', { mode: 0o000 });
+      chmodSync(locked, 0o000);
+      await runBash("chmod 644 locked.txt; printf 'touched\\n' >> locked.txt");
+
+      await revert();
+      expect(existsSync(locked)).toBe(true);
+      expect(read('locked.txt')).toBe('precious\ntouched\n');
+      // Nothing could be restored for it, so the call is not fully covered.
+      expect(await storedSources()).toEqual(['shell']);
+    }
+  );
+
+  // A case-sensitive disk cannot hold one file under two spellings, so the alias
+  // a case-insensitive volume gives for free is made by hand: `Foo.ts` becomes a
+  // link to the renamed `foo.ts`. Hashing either name reads the same bytes, as
+  // it would there, and the listing carries `foo.ts` as a new path.
+  it.skipIf(process.platform === 'win32')(
+    'leaves the only copy of a case-only rename alone when git folds case',
+    async () => {
+      initRepository({ 'Foo.ts': 'export const foo = 1;\n' });
+      git('config', 'core.ignorecase', 'true');
+      await runBash('git mv Foo.ts foo.ts && ln -s foo.ts Foo.ts');
+
+      await revert();
+      expect(read('foo.ts')).toBe('export const foo = 1;\n');
+      expect(read('Foo.ts')).toBe('export const foo = 1;\n');
+      expect(await storedSources()).toEqual(['shell']);
+    }
+  );
+
+  // The real thing: git init sets core.ignorecase on a case-insensitive volume
+  // by itself, and `foo.ts` then names the file `Foo.ts` already holds.
+  it.skipIf(process.platform !== 'darwin' && process.platform !== 'win32')(
+    'keeps the only copy of a case-only rename on a case-insensitive filesystem',
+    async () => {
+      initRepository({ 'Foo.ts': 'export const foo = 1;\n' });
+      await runBash('git mv Foo.ts foo.ts');
+
+      await revert();
+      const survivors = readdirSync(workdir).filter((name) => name.toLowerCase() === 'foo.ts');
+      expect(survivors.length).toBe(1);
+      expect(read(survivors[0] as string)).toBe('export const foo = 1;\n');
+    }
+  );
 
   it('refuses to revert over an edit made after the command', async () => {
     initRepository({ 'a.txt': 'a-original\n' });

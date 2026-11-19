@@ -6,10 +6,12 @@ import type { RuntimeClient } from '../../../../src/services/runtime-client/runt
 import { createTargetPaths } from '../../../../src/services/runtime-client/target-paths';
 import {
   type BaselineFile,
+  foldPathKey,
   isHiddenBeforeCommand,
   parseWorkspaceListing,
   planWorkspaceChanges,
   runWithWorkspaceCheckpoint,
+  selectAddedPaths,
   SHELL_WORKSPACE_LIMITS,
 } from '../../../../src/services/tools/shell-workspace-checkpoint';
 import type { ToolContext } from '../../../../src/services/tools/types';
@@ -111,8 +113,41 @@ describe('planWorkspaceChanges', () => {
   });
 });
 
+describe('selectAddedPaths', () => {
+  const before = new Set(['a.txt', 'unreadable.txt', 'Foo.ts']);
+
+  it('never calls a path the pre-command listing named new, readable or not', () => {
+    const result = selectAddedPaths(['a.txt', 'unreadable.txt', 'fresh.txt'], before, null);
+
+    expect(result).toEqual({ added: ['fresh.txt'], renamedByCase: [] });
+  });
+
+  it('treats a path differing only in case as new on a case-sensitive filesystem', () => {
+    expect(selectAddedPaths(['foo.ts'], before, null)).toEqual({
+      added: ['foo.ts'],
+      renamedByCase: [],
+    });
+  });
+
+  it('reports a case-only rename instead of a create on a case-folding filesystem', () => {
+    const folded = new Set([...before].map(foldPathKey));
+
+    expect(selectAddedPaths(['foo.ts', 'fresh.txt', 'Foo.ts'], before, folded)).toEqual({
+      added: ['fresh.txt'],
+      renamedByCase: ['foo.ts'],
+    });
+  });
+});
+
+describe('foldPathKey', () => {
+  it('folds case and Unicode normalization form', () => {
+    expect(foldPathKey('Café/README.md')).toBe(foldPathKey('café/readme.MD'));
+  });
+});
+
 /** Records every runtime call a degrading checkpoint should or should not make. */
 class FakeWorkspaceRuntime {
+  readonly manifest = { platform: 'linux' };
   readonly gitCalls: string[][] = [];
   readonly captureCalls: string[] = [];
   readonly hashCalls: string[] = [];
