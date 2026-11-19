@@ -1,5 +1,7 @@
 import type { GitWorktree } from '@mangostudio/shared/git';
 
+import type { ParsedWorktree } from './worktree-parser';
+
 /**
  * The two path operations this comparison needs, performed the way the machine
  * that owns the repository would perform them.
@@ -60,4 +62,27 @@ export function isSameWorktreePath(
   paths: WorktreePathSemantics
 ): boolean {
   return paths.equals(left, right);
+}
+
+/**
+ * Stamps `isCurrent` on the listed worktree the calling chat's repository root
+ * names, comparing through the target's path rules rather than string equality.
+ *
+ * `git rev-parse --show-toplevel` (the root) and `git worktree list` can spell
+ * one directory differently — a trailing separator, or casing on Windows — and
+ * the removal guard already compares them with {@link isSameWorktreePath}. Using
+ * the same comparison here keeps the flag and the refusal answering one question.
+ *
+ * @example
+ * markCurrentWorktree(parsed, '/work/feature/', paths); // /work/feature gets isCurrent: true
+ */
+export function markCurrentWorktree(
+  worktrees: readonly ParsedWorktree[],
+  root: string,
+  paths: WorktreePathSemantics
+): GitWorktree[] {
+  return worktrees.map((worktree) => ({
+    ...worktree,
+    isCurrent: isSameWorktreePath(worktree.path, root, paths),
+  }));
 }
