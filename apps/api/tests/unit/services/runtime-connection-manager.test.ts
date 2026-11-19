@@ -32,6 +32,7 @@ import {
   localLaunchFailure,
   type LocalRuntimeOpenOptions,
   type ManagedRuntimeConnection,
+  MANIFEST_REFRESH_TIMEOUT_MS,
   type RuntimeConnectContext,
   RuntimeConnectionManager,
   type RuntimeEnvironmentConnector,
@@ -41,6 +42,7 @@ import { RuntimeDiscoveryCache } from '../../../src/services/runtime-client/runt
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import { useLocalConnectDeadlines } from '../../support/local-connect-deadlines';
 import { moduleMockerFor } from '../../support/mocks/module-mocks';
+import { RecordingDiagnosticLogger } from '../../support/mocks/recording-diagnostic-logger';
 import { connectTestRuntime, type TestRuntime } from '../../support/runtime-fixture';
 
 const mockModule = moduleMockerFor(import.meta.dir);
@@ -1330,6 +1332,118 @@ describe('RuntimeConnectionManager', () => {
     }
   });
 
+  // A newer runtime may add a member to the externalAgents subtree of its health report. The
+  // hub reads that report through a validating session, so a rejected field used to be caught
+  // by the refresh and leave the manifest frozen at its handshake value with no signal.
+  it('refreshes the manifest from a health report whose externalAgents subtree has a newer field', async () => {
+    const hello: RuntimeCapabilityManifest = {
+      ...TEST_MANIFEST,
+      features: { ...TEST_MANIFEST.features, externalAgents: true },
+    };
+    let targets: ('codex' | 'cursor')[] = ['codex'];
+    const runtime = await connectTestRuntime({
+      manifest: hello,
+      handlers: {
+        'runtime.health': () => ({
+          ...HEALTH_REPORT,
+          allow: { ...HEALTH_REPORT.allow, externalAgents: true },
+          externalAgents: {
+            targets,
+            identityIsolation: { ...ATTESTED, attestedBy: 'a-newer-runtime' },
+            liveSessionCount: 1,
+            liveSessions: [
+              { sessionId: 's-1', targetId: 'codex', ageMs: 5, state: 'running', pid: 4242 },
+            ],
+            queuedTurns: 0,
+          },
+        }),
+      },
+    });
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: { stdio: () => Promise.resolve(runtime) },
+    });
+    try {
+      const client = await manager.getClient('user-1', 'devbox');
+      expect(
+        client.manifest.externalAgents,
+        'expected the targets from health (the handshake named none): a rejected report keeps the handshake manifest'
+      ).toEqual(['codex']);
+      // The unknown member is ignored, not forwarded into the closed manifest shape.
+      expect(client.manifest.identityIsolation).toEqual(ATTESTED);
+
+      targets = ['codex', 'cursor'];
+      const refreshed = await manager.refreshManifest('user-1', 'devbox');
+      expect(refreshed.manifest?.externalAgents).toEqual(['codex', 'cursor']);
+    } finally {
+      manager.disconnect('user-1', 'devbox');
+      await runtime.close();
+    }
+  });
+
+  // A newer runtime that hosts one more vendor reports its id in `targets` and in a live
+  // session. That is an additive enum member, which the closed id union refused, taking the
+  // whole report with it and leaving the manifest frozen with nothing logged.
+  it('refreshes the manifest from a health report that names a target this hub does not know, and logs it once', async () => {
+    const hello: RuntimeCapabilityManifest = {
+      ...TEST_MANIFEST,
+      features: { ...TEST_MANIFEST.features, externalAgents: true },
+    };
+    let targets = ['codex', 'gemini'];
+    const runtime = await connectTestRuntime({
+      manifest: hello,
+      handlers: {
+        'runtime.health': () => ({
+          ...HEALTH_REPORT,
+          allow: { ...HEALTH_REPORT.allow, externalAgents: true },
+          externalAgents: {
+            targets,
+            liveSessionCount: 2,
+            liveSessions: [
+              { sessionId: 's-1', targetId: 'codex', ageMs: 5, state: 'running' },
+              { sessionId: 's-2', targetId: 'gemini', ageMs: 6, state: 'running' },
+            ],
+          },
+        }),
+      },
+    });
+    const healthLogger = new RecordingDiagnosticLogger();
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: { stdio: () => Promise.resolve(runtime) },
+      healthLogger,
+    });
+    try {
+      const client = await manager.getClient('user-1', 'devbox');
+      expect(
+        client.manifest.externalAgents,
+        'expected the known target from health: a rejected report keeps the handshake manifest'
+      ).toEqual(['codex']);
+
+      targets = ['codex', 'gemini', 'cursor'];
+      const refreshed = await manager.refreshManifest('user-1', 'devbox');
+      expect(refreshed.manifest?.externalAgents).toEqual(['codex', 'cursor']);
+
+      const retained = manager.getCachedHealth('user-1', 'devbox')?.health.externalAgents;
+      expect(retained?.targets).toEqual(['codex', 'cursor']);
+      expect(retained?.liveSessions.map((session) => session.sessionId)).toEqual(['s-1']);
+
+      expect(
+        healthLogger.entries,
+        'expected one warning for gemini across both health reads'
+      ).toEqual([
+        {
+          level: 'warn',
+          event: 'unknown_external_agent_target_skipped',
+          metadata: { environmentId: 'devbox', targetIds: ['gemini'] },
+        },
+      ]);
+    } finally {
+      manager.disconnect('user-1', 'devbox');
+      await runtime.close();
+    }
+  });
+
   describe('the read of which agents a runtime hosts at connect', () => {
     const HELLO: RuntimeCapabilityManifest = {
       ...TEST_MANIFEST,
@@ -2301,6 +2415,122 @@ describe('RuntimeConnectionManager', () => {
     const status = await refresh;
     expect(status.state).toBe('disconnected');
     expect(replaceCalls).toBe(0);
+  });
+
+  describe('the deadline on a manifest refresh', () => {
+    /**
+     * A peer that answered hello and then never answers `runtime.health`. Like the protocol
+     * session, it fails the request only when the caller gave it a deadline, and with the
+     * session's own message shape.
+     */
+    function silentHealthPeer(received: Array<number | undefined>) {
+      return (options?: { timeoutMs?: number }) =>
+        new Promise<RuntimeHealthReport>((_, reject) => {
+          received.push(options?.timeoutMs);
+          if (options?.timeoutMs === undefined) return;
+          setTimeout(
+            () =>
+              reject(
+                new RemoteError(
+                  RESERVED_ERROR_CODES.TIMEOUT,
+                  `Request "runtime.health" timed out after ${options.timeoutMs}ms.`
+                )
+              ),
+            options.timeoutMs
+          );
+        });
+    }
+
+    /** Settles with what the refresh did, or names the hang after `guardMs`. */
+    async function outcomeOf(refresh: Promise<unknown>, guardMs: number): Promise<string> {
+      return await Promise.race([
+        refresh.then(
+          () => 'resolved',
+          (error: unknown) => (error instanceof Error ? error.message : String(error))
+        ),
+        new Promise<string>((resolve) =>
+          setTimeout(() => resolve(`a refresh still waiting after ${guardMs}ms`), guardMs)
+        ),
+      ]);
+    }
+
+    function managerOver(
+      client: RuntimeClient,
+      options: { manifestRefreshTimeoutMs?: number } = {}
+    ) {
+      return new RuntimeConnectionManager({
+        resolveEnvironment: () => Promise.resolve(definition()),
+        connectors: { stdio: () => Promise.resolve({ client, close: () => undefined }) },
+        ...options,
+      });
+    }
+
+    it('bounds a refresh that names no timeout, and names the call and the deadline', async () => {
+      const received: Array<number | undefined> = [];
+      const probe = healthProbe(TEST_MANIFEST, silentHealthPeer(received));
+      const manager = managerOver(probe.client, { manifestRefreshTimeoutMs: 30 });
+      await manager.connect('user-1', 'devbox');
+
+      const outcome = await outcomeOf(manager.refreshManifest('user-1', 'devbox'), 1_000);
+
+      expect(
+        outcome,
+        'expected a rejection naming runtime.health and the 30ms deadline | received an unbounded wait'
+      ).toBe('Request "runtime.health" timed out after 30ms.');
+      expect(received).toEqual([30]);
+    });
+
+    it('asks every unbounded caller for the named default deadline', async () => {
+      const received: Array<number | undefined> = [];
+      const probe = healthProbe(TEST_MANIFEST, (options) => {
+        received.push(options?.timeoutMs);
+        return Promise.resolve(HEALTH_REPORT);
+      });
+      const manager = managerOver(probe.client);
+      await manager.connect('user-1', 'devbox');
+
+      await manager.refreshManifest('user-1', 'devbox');
+
+      expect(received, 'expected runtime.health to carry the default refresh deadline').toEqual([
+        MANIFEST_REFRESH_TIMEOUT_MS,
+      ]);
+    });
+
+    it('lets a caller pass a tighter deadline than the default', async () => {
+      const received: Array<number | undefined> = [];
+      const probe = healthProbe(TEST_MANIFEST, silentHealthPeer(received));
+      const manager = managerOver(probe.client, { manifestRefreshTimeoutMs: 5_000 });
+      await manager.connect('user-1', 'devbox');
+
+      const outcome = await outcomeOf(
+        manager.refreshManifest('user-1', 'devbox', { timeoutMs: 20 }),
+        1_000
+      );
+
+      expect(outcome).toBe('Request "runtime.health" timed out after 20ms.');
+      expect(received).toEqual([20]);
+    });
+
+    it('frees the background refresh slot once the deadline ends a silent read', async () => {
+      const received: Array<number | undefined> = [];
+      const probe = healthProbe(TEST_MANIFEST, silentHealthPeer(received));
+      const manager = managerOver(probe.client, { manifestRefreshTimeoutMs: 20 });
+      await manager.connect('user-1', 'devbox');
+      try {
+        setSystemTime(new Date(Date.now() + 60_000));
+        manager.refreshManifestIfStale('user-1', 'devbox');
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        setSystemTime(new Date(Date.now() + 60_000));
+        manager.refreshManifestIfStale('user-1', 'devbox');
+      } finally {
+        setSystemTime();
+      }
+
+      expect(
+        received,
+        'expected a second stale read to ask again once the first deadline freed the slot'
+      ).toEqual([20, 20]);
+    });
   });
 
   it('clears cached health and peer identity without requiring a reconnect', async () => {

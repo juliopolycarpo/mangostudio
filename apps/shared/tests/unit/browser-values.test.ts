@@ -6,6 +6,7 @@ import * as GenerationValues from '@mangostudio/shared/generation/values';
 import * as LibraryValues from '@mangostudio/shared/library/values';
 import * as MachineLimits from '@mangostudio/shared/machine/limits';
 import * as RuntimeValues from '@mangostudio/shared/runtime-home/values';
+import * as StreamingLimits from '@mangostudio/shared/streaming/limits';
 import Value from 'typebox/value';
 
 import * as Environments from '../../src/environments';
@@ -16,6 +17,7 @@ import * as Machine from '../../src/machine';
 import { RuntimeShellKindSchema as ManifestShellKinds } from '../../src/runtime-contract/manifest';
 import { RuntimeShellKindSchema } from '../../src/runtime-contract/shell-kinds';
 import * as Runtime from '../../src/runtime-home';
+import * as Streaming from '../../src/streaming';
 
 describe('lightweight browser values', () => {
   it('keeps environment identities, mount limits and toolchain keys canonical', () => {
@@ -165,6 +167,7 @@ describe('lightweight browser values', () => {
     }
     expect(MachineLimits.MACHINE_LOG_TAIL_DEFAULT).toBe(Machine.MACHINE_LOG_TAIL_DEFAULT);
     expect(MachineLimits.MACHINE_LOG_TAIL_MAX).toBe(Machine.MACHINE_LOG_TAIL_MAX);
+    expect(StreamingLimits.SSE_FRAME_MAX_CHARS).toBe(Streaming.SSE_FRAME_MAX_CHARS);
   });
 
   it.each(

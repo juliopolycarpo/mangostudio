@@ -225,14 +225,18 @@ export function realPathOrSelf(path: string): string {
  * The launcher a restart may come back through for this install, when there is
  * one. The version directory this process runs from is the manager's to
  * replace, so re-execing that path after a delegated upgrade starts the build
- * that was just replaced — but only a launcher that execs in place can carry
- * the restart's pid handshake, which is `restartLauncher`'s call to make.
- * Undefined for a self-managed install, which the `current` pointer covers.
+ * that was just replaced; `restartLauncher` names the path that follows the
+ * manager's upgrade instead. Undefined for a self-managed install, which the
+ * `current` pointer covers, and for npm and bun, whose own path already does.
  * // Usage: restartExecutableOptions(currentHubExecutable(), currentLauncherPath())
  */
 export function currentLauncherPath(): string | undefined {
   const probe = currentInstallOriginProbe();
-  return restartLauncher(detectInstallOrigin(probe), probe.platform);
+  return restartLauncher(detectInstallOrigin(probe), {
+    platform: probe.platform,
+    execPath: probe.execPath,
+    pathExists: currentHubExecutableProbe().pathExists,
+  });
 }
 
 /**

@@ -907,6 +907,27 @@ describe('external session manager', () => {
     expect(manager.liveSessionCount()).toBe(1);
   });
 
+  it("reads the session's runtime state from the health report, with the caller's deadline", async () => {
+    const runtime = createFakeExternalRuntime({ sessionHealth: () => 'idle' });
+    const manager = managerFor(runtime);
+    const handle = await manager.ensureSession(baseInput());
+
+    await expect(handle.runtimeState({ timeoutMs: 777 })).resolves.toBe('idle');
+    expect(runtime.calls.healthTimeoutMs).toEqual([777]);
+  });
+
+  it('rejects a runtime state read the runtime cannot answer, rather than guessing', async () => {
+    const runtime = createFakeExternalRuntime({
+      sessionHealth: () => new Error('runtime.health timed out'),
+    });
+    const manager = managerFor(runtime);
+    const handle = await manager.ensureSession(baseInput());
+
+    await expect(handle.runtimeState({ timeoutMs: 50 })).rejects.toThrow(
+      'runtime.health timed out'
+    );
+  });
+
   it('never sends a MangoStudio tool definition or environment to the vendor', async () => {
     const runtime = createFakeExternalRuntime();
     const manager = managerFor(runtime);

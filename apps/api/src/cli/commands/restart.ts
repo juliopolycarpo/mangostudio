@@ -19,7 +19,7 @@ import {
 } from '../../modules/machine/application/hub-service';
 import type { HubExecutable } from '../../modules/machine/domain/hub-executable';
 import { hubLaunchMode, hubUrl } from '../../modules/machine/domain/hub-process';
-import { restartExecutableOptions, spawnDetached } from '../detach';
+import { spawnDetached } from '../detach';
 import { CliError } from '../errors';
 import { confirmsHealthy } from '../health';
 import { type HubShutdownRequester, requestHubShutdown } from '../hub-shutdown-request';
@@ -30,6 +30,7 @@ import {
   STOP_POLL_INTERVAL_MS,
   stopPidOrThrow,
 } from '../process-control';
+import { readRestartTargetVersion, restartDetachedHub } from '../restart-detached';
 import { sleep } from '../sleep';
 
 export interface RestartDeps {
@@ -54,6 +55,8 @@ export interface RestartDeps {
    * directory this process runs from is the manager's to replace.
    */
   launcherPath: () => string | undefined;
+  /** Runs the launcher with `--version` before the old hub is stopped; throws when it cannot run. */
+  readTargetVersion: (argv: readonly string[]) => Promise<string>;
 }
 
 const COMEBACK_TIMEOUT_MS = 20_000;
@@ -109,18 +112,17 @@ async function startInstalledService(d: Required<RestartDeps>): Promise<void> {
  * safety net rather than the mechanism.
  */
 async function restartDetached(state: ServerState, d: Required<RestartDeps>): Promise<void> {
-  await stopPidOrThrow(
-    { ...d, notice: d.log },
-    state,
-    `MangoStudio (PID ${state.pid}) did not stop within 10s; try "mangostudio killserver" and then "mangostudio serve -d".`
-  );
-  const result = await d.spawnDetached(
-    state.port,
-    state.host,
-    {},
+  const result = await restartDetachedHub(
+    { state, executable: d.executable(), launcherPath: d.launcherPath() },
     {
-      waitForPid: state.pid,
-      ...restartExecutableOptions(d.executable(), d.launcherPath()),
+      stop: () =>
+        stopPidOrThrow(
+          { ...d, notice: d.log },
+          state,
+          `MangoStudio (PID ${state.pid}) did not stop within 10s; try "mangostudio killserver" and then "mangostudio serve -d".`
+        ),
+      spawnDetached: d.spawnDetached,
+      readTargetVersion: d.readTargetVersion,
     }
   );
   d.log(`MangoStudio restarted (PID ${result.pid}, ${hubUrl(state.host, result.port)}).`);
@@ -171,5 +173,6 @@ function resolveDeps(deps: Partial<RestartDeps>): Required<RestartDeps> {
     requestShutdown: deps.requestShutdown ?? requestHubShutdown,
     executable: deps.executable ?? (() => currentHubExecutable()),
     launcherPath: deps.launcherPath ?? currentLauncherPath,
+    readTargetVersion: deps.readTargetVersion ?? readRestartTargetVersion,
   };
 }

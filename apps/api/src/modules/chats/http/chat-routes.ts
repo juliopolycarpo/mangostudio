@@ -21,6 +21,7 @@ import { type Elysia, status, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
 import { createJsonResponseEncoder } from '../../../lib/compiled-json-response';
+import { generationDeadlineResponse } from '../../../lib/generation-deadline-response';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { NoModelAvailableError } from '../../generation/application/resolve-model';
 import { modelUnavailableResponse } from '../../generation/http/model-unavailable-response';
@@ -141,6 +142,7 @@ export const chatRoutes = (app: Elysia) =>
             400: ApiErrorResponseSchema,
             500: ApiErrorResponseSchema,
             503: ApiErrorResponseSchema,
+            504: ApiErrorResponseSchema,
           },
         },
         async ({ body, user }) => {
@@ -158,6 +160,8 @@ export const chatRoutes = (app: Elysia) =>
               const refusal = modelUnavailableResponse(err);
               return status(refusal.status, refusal.body);
             }
+            const timedOut = generationDeadlineResponse(err);
+            if (timedOut) return timedOut;
             return status(
               500,
               apiError('Chat title generation failed.', ERROR_CODES.PROVIDER_ERROR)
@@ -231,12 +235,18 @@ export const chatRoutes = (app: Elysia) =>
             404: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,
             503: ApiErrorResponseSchema,
+            504: ApiErrorResponseSchema,
           },
         },
-        async ({ params, body, user }) => {
+        async ({ params, body, request, user }) => {
           try {
             return await compactChatUseCase(
-              { chatId: params.id, userId: user?.id ?? '', model: body.model },
+              {
+                chatId: params.id,
+                userId: user?.id ?? '',
+                model: body.model,
+                signal: request.signal,
+              },
               getDb()
             );
           } catch (err) {
@@ -256,12 +266,18 @@ export const chatRoutes = (app: Elysia) =>
             404: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,
             503: ApiErrorResponseSchema,
+            504: ApiErrorResponseSchema,
           },
         },
-        async ({ params, body, user }) => {
+        async ({ params, body, request, user }) => {
           try {
             return await summarizeToNewChatUseCase(
-              { chatId: params.id, userId: user?.id ?? '', model: body.model },
+              {
+                chatId: params.id,
+                userId: user?.id ?? '',
+                model: body.model,
+                signal: request.signal,
+              },
               getDb()
             );
           } catch (err) {

@@ -124,6 +124,7 @@ impl std::error::Error for WorkspaceContainmentError {}
 ///
 /// let outside = resolve_contained_workspace_path(&root, "../../etc/passwd");
 /// assert!(outside.is_err());
+/// # std::fs::remove_dir_all(&root).unwrap();
 /// ```
 pub fn resolve_contained_workspace_path(
     root: &Path,
@@ -436,6 +437,7 @@ pub(crate) fn lexically_normalize(path: &Path) -> PathBuf {
 ///     panic!("must never run: the target is outside the root");
 /// });
 /// assert!(refused.is_err());
+/// # std::fs::remove_dir_all(&root).unwrap();
 /// ```
 pub fn guard_mutation<T>(
     root: &Path,

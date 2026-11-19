@@ -14,6 +14,7 @@ import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import { Elysia, type ElysiaStatus, NotFound, status, ValidationError } from 'elysia';
 
 import { environmentUnavailableResponse } from '../lib/environment-unavailable';
+import { generationDeadlineResponse } from '../lib/generation-deadline-response';
 import { negotiateErrorRepresentation } from './error-negotiation';
 
 /**
@@ -74,12 +75,27 @@ export const errorHandler = new Elysia({ name: 'error-handler' })
   )
   .onError(
     'global',
-    ({ error, set }): ElysiaStatus<503, ApiErrorResponse> | ElysiaStatus<500, ApiErrorResponse> => {
+    ({
+      error,
+      set,
+    }):
+      | ElysiaStatus<503, ApiErrorResponse>
+      | ElysiaStatus<504, ApiErrorResponse>
+      | ElysiaStatus<500, ApiErrorResponse> => {
       // An environment that cannot be reached is a recoverable 503, not a fault.
       // It is not logged here: the connection manager logged the connect attempt
       // once, and a client polling a down environment must not log per request.
       const unavailable = environmentUnavailableResponse(error, set);
       if (unavailable) return unavailable;
+
+      // A vendor that went quiet is the provider's timeout, not a hub fault. The
+      // error names the provider and deadline, so it is logged; the client gets
+      // the fixed message.
+      const timedOut = generationDeadlineResponse(error);
+      if (timedOut) {
+        console.error(`[error-handler][${error instanceof Error ? error.name : 'unknown'}]`, error);
+        return timedOut;
+      }
 
       // The raw error is deliberately logged server-side — it is the only record
       // of what actually failed — while the client is told nothing about it.

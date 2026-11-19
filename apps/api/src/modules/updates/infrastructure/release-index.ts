@@ -8,13 +8,22 @@
  * never needed — the tag "latest" resolves to right now, for each channel.
  */
 
-import { safeFetchBytes, type SafeFetchDeps, SafeFetchError } from '../../../lib/safe-fetch';
+import { createDiagnosticLogger } from '../../../lib/logger';
+import {
+  safeFetchBytes,
+  type SafeFetchDeps,
+  SafeFetchError,
+  type SafeFetchOptions,
+  type SafeFetchResult,
+} from '../../../lib/safe-fetch';
 import {
   CANARY_MANIFEST_ASSET,
   type CanaryManifest,
   parseCanaryManifest,
 } from '../../environments/domain/canary-manifest';
 import { releaseAssetUrl } from '../../environments/domain/wsl-runtime-release';
+
+const logger = createDiagnosticLogger('release-index');
 
 export const UPDATES_REPOSITORY = 'juliopolycarpo/mangostudio';
 const GITHUB_RELEASES_BASE = `https://github.com/${UPDATES_REPOSITORY}`;
@@ -25,6 +34,55 @@ const GITHUB_API_BASE = `https://api.github.com/repos/${UPDATES_REPOSITORY}`;
 // keeps every call in this module identifiable the same way.
 const GITHUB_HEADERS = { 'User-Agent': 'mangostudio-hub' };
 const GITHUB_API_HEADERS = { ...GITHUB_HEADERS, Accept: 'application/vnd.github+json' };
+const GITHUB_API_HOST = new URL(GITHUB_API_BASE).host;
+
+/**
+ * The `Authorization` header for an `api.github.com` lookup, scoped to that
+ * host so `safeFetchBytes` drops it on a redirect anywhere else. Anonymous
+ * calls share the caller's 60-requests-per-hour limit, which CI and shared NAT
+ * exhaust; a token raises it. Only the REST API takes one: github.com release
+ * pages and asset downloads stay anonymous, like the install scripts.
+ * // Usage: githubApiCredentials(getGithubApiToken(env)) // undefined without a token
+ */
+export function githubApiCredentials(
+  token: string | undefined
+): Pick<SafeFetchOptions, 'credentialsForHost'> {
+  if (!token) return {};
+  return {
+    credentialsForHost: { host: GITHUB_API_HOST, headers: { Authorization: `Bearer ${token}` } },
+  };
+}
+
+/**
+ * Fetches an `api.github.com` URL with the caller's token, and again without it
+ * if GitHub answers 401. An expired or revoked token makes GitHub refuse even
+ * public endpoints, so a stale `GITHUB_TOKEN` in the environment would
+ * otherwise break lookups that work anonymously. The retry is single and only
+ * happens when a credential was sent; a 401 on an anonymous request is a real
+ * answer and surfaces as is. The `github_token_rejected` event names the host
+ * and status only — never the token or any header.
+ * // Usage: fetchGithubApiBytes(url, options, deps, token)
+ */
+export async function fetchGithubApiBytes(
+  url: string,
+  options: SafeFetchOptions,
+  deps: SafeFetchDeps,
+  githubToken: string | undefined
+): Promise<SafeFetchResult> {
+  const credentials = githubApiCredentials(githubToken);
+  try {
+    return await safeFetchBytes(url, { ...options, ...credentials }, deps);
+  } catch (error) {
+    const rejected =
+      credentials.credentialsForHost !== undefined &&
+      error instanceof SafeFetchError &&
+      error.kind === 'http' &&
+      error.status === 401;
+    if (!rejected) throw error;
+    logger.warn('github_token_rejected', { host: GITHUB_API_HOST, status: 401 });
+    return safeFetchBytes(url, options, deps);
+  }
+}
 
 /**
  * Without a deadline a stalled socket hangs the whole upgrade: the engine's
@@ -92,10 +150,15 @@ const CANARY_TAG = /^v\d+\.\d+\.\d+-canary(?:\.g?[0-9a-f]{7,40})?$/i;
  * channel: since canary releases became per-commit and immutable, a build's own
  * tag names *itself*, so reading the tag off the running version would answer
  * "nothing is newer" forever.
- * // Usage: resolveLatestCanaryVersion({ fetch }) // '0.2.0-canary.abc1234'
+ * `githubToken` authenticates this `api.github.com` call (see
+ * `githubApiCredentials`); omit it to stay anonymous.
+ * // Usage: resolveLatestCanaryVersion({ fetch }, token) // '0.2.0-canary.abc1234'
  */
-export async function resolveLatestCanaryVersion(deps: SafeFetchDeps): Promise<string> {
-  const result = await safeFetchBytes(
+export async function resolveLatestCanaryVersion(
+  deps: SafeFetchDeps,
+  githubToken?: string
+): Promise<string> {
+  const result = await fetchGithubApiBytes(
     `${GITHUB_API_BASE}/releases?per_page=30`,
     {
       maxBytes: MAX_RELEASE_LIST_BYTES,
@@ -103,7 +166,8 @@ export async function resolveLatestCanaryVersion(deps: SafeFetchDeps): Promise<s
       timeoutMs: LOOKUP_TIMEOUT_MS,
       headers: GITHUB_API_HEADERS,
     },
-    deps
+    deps,
+    githubToken
   );
   const parsed: unknown = JSON.parse(new TextDecoder().decode(result.bytes));
   if (!Array.isArray(parsed)) {

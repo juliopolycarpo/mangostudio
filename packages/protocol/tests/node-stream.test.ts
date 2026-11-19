@@ -211,6 +211,40 @@ describe('createStreamPort read delivery', () => {
     expect(port.order).toEqual(['ping', 'pong']);
   });
 
+  it('resolves drained once every queued read has been delivered', async () => {
+    const port = openPort(true);
+
+    port.emitData(PING);
+    port.emitEnd();
+    expect(port.order).toEqual([]);
+    await port.handle.drained();
+
+    expect(port.order).toEqual(['ping', 'closure:closed']);
+  });
+
+  it('resolves drained at once when no read is waiting', async () => {
+    const deferred = openPort(true);
+    const inline = openPort(false);
+
+    inline.emitData(PING);
+
+    // Not `await`ed on a macrotask: a bounded race fails if it needs one.
+    const outcomes = await Promise.all([deferred.handle.drained(), inline.handle.drained()]);
+    expect(outcomes).toEqual([undefined, undefined]);
+  });
+
+  it('resolves drained when the port closes with reads still waiting', async () => {
+    const port = openPort(true);
+
+    port.emitData(PING);
+    const drained = port.handle.drained();
+    port.handle.port.close(CLOSE_CODES.RELEASED);
+    await drained;
+
+    // The dropped read is not delivered, and the wait must not hang on it.
+    expect(port.frames).toEqual([]);
+  });
+
   it('still delivers the end of the stream after a frame listener throws', () => {
     const immediates = new ManualImmediates();
     try {

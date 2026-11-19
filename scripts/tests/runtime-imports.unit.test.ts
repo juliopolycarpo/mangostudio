@@ -5,9 +5,8 @@ import { dirname, join, relative } from 'node:path';
 
 import { walkRuntimeImports } from './support/runtime-imports';
 
-const SPECIFIER = '@mangostudio/api/test-support/chatgpt/fake-server';
-const EXPORT = './test-support/chatgpt/fake-server';
-const TARGET = './tests/support/chatgpt/fake-server.ts';
+const WORKSPACE_SPECIFIER = '@mangostudio/api/test-support/chatgpt/fake-server';
+const LEAF = 'scripts/lib/leaf.ts';
 let fixtureRoot: string;
 
 function writeFixture(path: string, source: string): void {
@@ -16,59 +15,40 @@ function writeFixture(path: string, source: string): void {
   writeFileSync(target, source);
 }
 
-function writeAlias(targets: string[]): void {
-  writeFixture(
-    'scripts/tsconfig.json',
-    JSON.stringify({ compilerOptions: { paths: { [SPECIFIER]: targets } } })
-  );
-}
-
-function writeApiManifest(exports: Record<string, string>, name = '@mangostudio/api'): void {
-  writeFixture('apps/api/package.json', JSON.stringify({ name, exports }));
-}
-
 beforeEach(() => {
-  fixtureRoot = mkdtempSync(join(tmpdir(), 'mangostudio-workspace-imports-'));
-  writeFixture('package.json', JSON.stringify({ name: '@mangostudio/root' }));
-  writeFixture('scripts/entry.ts', `import { fixture } from '${SPECIFIER}';\n`);
-  writeAlias([`../apps/api/${TARGET.slice(2)}`]);
-  writeApiManifest({ [EXPORT]: TARGET });
-  writeFixture('apps/api/tests/support/chatgpt/fake-server.ts', "export * from './index';\n");
-  writeFixture('apps/api/tests/support/chatgpt/index.ts', 'export const fixture = 1;\n');
+  fixtureRoot = mkdtempSync(join(tmpdir(), 'mangostudio-runtime-imports-'));
+  writeFixture('scripts/entry.ts', "import { fixture } from './lib/middle';\n");
+  writeFixture('scripts/lib/middle.ts', "export * from './leaf';\n");
+  writeFixture(LEAF, 'export const fixture = 1;\n');
 });
 
 afterEach(() => {
   rmSync(fixtureRoot, { recursive: true, force: true });
 });
 
-describe('runtime import walker workspace aliases', () => {
-  test('follows the export and still reports a transitive external runtime dependency', () => {
+describe('runtime import walker', () => {
+  test('follows relative imports and still reports a transitive external runtime dependency', () => {
     writeFixture(
-      'apps/api/tests/support/chatgpt/index.ts',
+      LEAF,
       "import 'external-runtime';\nimport type { Model } from 'type-only-model';\n"
     );
 
     const walk = walkRuntimeImports('scripts/entry.ts', fixtureRoot);
 
-    expect(walk.files.has(join(fixtureRoot, 'apps/api/tests/support/chatgpt/fake-server.ts'))).toBe(
-      true
-    );
-    expect([...walk.externalSpecifiers]).toEqual([
-      ['external-runtime', ['apps/api/tests/support/chatgpt/index.ts']],
-    ]);
+    expect(walk.files.has(join(fixtureRoot, 'scripts/lib/middle.ts'))).toBe(true);
+    expect([...walk.externalSpecifiers]).toEqual([['external-runtime', [LEAF]]]);
   });
 
   test('reports an unused external binding in a transitively imported file', () => {
-    const importer = 'apps/api/tests/support/chatgpt/index.ts';
-    writeFixture(importer, "import { unused } from 'external-runtime';\n");
+    writeFixture(LEAF, "import { unused } from 'external-runtime';\n");
 
     expect([...walkRuntimeImports('scripts/entry.ts', fixtureRoot).externalSpecifiers]).toEqual([
-      ['external-runtime', [importer]],
+      ['external-runtime', [LEAF]],
     ]);
   });
 
   // Planted violations: each form must surface `planted-runtime-package` against
-  // `apps/api/tests/support/chatgpt/index.ts`. The regex scanner this replaced missed
+  // `scripts/lib/leaf.ts`. The regex scanner this replaced missed
   // the wrapped loader and `module['require']`, and counted `import('x').Type` and
   // `other.require('x')` as runtime edges.
   test.each([
@@ -81,11 +61,10 @@ describe('runtime import walker workspace aliases', () => {
     "const loaded = await import('planted-runtime-package');",
     "import { type Model, value } from 'planted-runtime-package';",
   ])('reports the planted runtime edge in %s', (source) => {
-    const importer = 'apps/api/tests/support/chatgpt/index.ts';
-    writeFixture(importer, `${source}\n`);
+    writeFixture(LEAF, `${source}\n`);
 
     expect([...walkRuntimeImports('scripts/entry.ts', fixtureRoot).externalSpecifiers]).toEqual([
-      ['planted-runtime-package', [importer]],
+      ['planted-runtime-package', [LEAF]],
     ]);
   });
 
@@ -99,7 +78,7 @@ describe('runtime import walker workspace aliases', () => {
     'const example = "import loaded from \'planted-runtime-package\';";',
     "const loaded = other.require('planted-runtime-package');",
   ])('ignores the type-only, commented or unrelated edge in %s', (source) => {
-    writeFixture('apps/api/tests/support/chatgpt/index.ts', `${source}\n`);
+    writeFixture(LEAF, `${source}\n`);
 
     expect([...walkRuntimeImports('scripts/entry.ts', fixtureRoot).externalSpecifiers]).toEqual([]);
   });
@@ -111,65 +90,12 @@ describe('runtime import walker workspace aliases', () => {
     expect([...walk.externalSpecifiers]).toEqual([]);
   });
 
-  test('keeps unmapped workspace imports external instead of trusting their prefix', () => {
-    rmSync(join(fixtureRoot, 'scripts/tsconfig.json'));
+  // A workspace package name needs `node_modules`, which a `--no-install` script lacks.
+  test('reports a workspace package import as external, with no alias to follow', () => {
+    writeFixture(LEAF, `import { fixture } from '${WORKSPACE_SPECIFIER}';\n`);
 
     expect([...walkRuntimeImports('scripts/entry.ts', fixtureRoot).externalSpecifiers]).toEqual([
-      [SPECIFIER, ['scripts/entry.ts']],
+      [WORKSPACE_SPECIFIER, [LEAF]],
     ]);
-  });
-
-  test('rejects an alias when the API no longer deliberately exports it', () => {
-    writeApiManifest({});
-
-    expect(() => walkRuntimeImports('scripts/entry.ts', fixtureRoot)).toThrow(
-      `expected one file matching @mangostudio/api export "${EXPORT}"; received package "@mangostudio/api" with export target undefined`
-    );
-  });
-
-  test('rejects an alias that points to a different file than the API export', () => {
-    writeFixture('apps/api/tests/support/alternate.ts', 'export const fixture = 2;\n');
-    writeAlias(['../apps/api/tests/support/alternate.ts']);
-
-    expect(() => walkRuntimeImports('scripts/entry.ts', fixtureRoot)).toThrow(
-      `Workspace alias "${SPECIFIER}" -> ["../apps/api/tests/support/alternate.ts"] | expected one file matching @mangostudio/api export "${EXPORT}"; received different manifest export target ${TARGET}`
-    );
-  });
-
-  test('rejects the wrong package owner even if its export target matches', () => {
-    writeApiManifest({ [EXPORT]: TARGET }, '@mangostudio/other');
-
-    expect(() => walkRuntimeImports('scripts/entry.ts', fixtureRoot)).toThrow(
-      `received package "@mangostudio/other" with export target "${TARGET}"`
-    );
-  });
-
-  test('rejects fallback and wildcard alias targets', () => {
-    for (const targets of [
-      [`../apps/api/${TARGET.slice(2)}`, '../apps/api/fallback.ts'],
-      ['../apps/api/tests/support/*'],
-    ]) {
-      writeAlias(targets);
-
-      expect(() => walkRuntimeImports('scripts/entry.ts', fixtureRoot)).toThrow(
-        `Workspace alias "${SPECIFIER}" -> ${JSON.stringify(targets)} | expected one file matching @mangostudio/api export "${EXPORT}"; wildcard or fallback targets are not allowed`
-      );
-    }
-  });
-
-  test('rejects a target outside the fixture without reading that path', () => {
-    writeAlias(['../../outside.ts']);
-
-    expect(() => walkRuntimeImports('scripts/entry.ts', fixtureRoot)).toThrow(
-      `Workspace alias "${SPECIFIER}" -> ["../../outside.ts"] | expected one file matching @mangostudio/api export "${EXPORT}"; received a path outside the repository`
-    );
-  });
-
-  test('rejects a missing exported file with the intended target-shape error', () => {
-    rmSync(join(fixtureRoot, 'apps/api', TARGET));
-
-    expect(() => walkRuntimeImports('scripts/entry.ts', fixtureRoot)).toThrow(
-      `expected one file matching @mangostudio/api export "${EXPORT}"; received a missing or non-file target`
-    );
   });
 });

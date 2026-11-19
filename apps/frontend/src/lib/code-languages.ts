@@ -25,9 +25,11 @@ export const SHIKI_LANGUAGE_IDS = [
   'ruby',
   'rust',
   'sql',
+  'svelte',
   'swift',
   'tsx',
   'typescript',
+  'vue',
   'xml',
   'yaml',
 ] as const;

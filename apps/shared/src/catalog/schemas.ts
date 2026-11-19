@@ -19,8 +19,18 @@ export const ModelCapabilitiesSchema = Type.Object({
   streaming: Type.Boolean(),
   reasoning: Type.Optional(Type.Boolean()),
   tools: Type.Optional(Type.Boolean()),
-  /** Provider runs its own agent tool loop (not MangoStudio-managed tools). */
-  internalAgentTools: Type.Optional(Type.Boolean()),
+  /**
+   * @deprecated Accepted and ignored. A provider running its own tool loop is not a
+   * supported shape: every model runs MangoStudio's tool loop, so the API never emits
+   * this and nothing reads it. Kept for one release so a client that still sends or
+   * stores it keeps validating; remove it in the next release.
+   */
+  internalAgentTools: Type.Optional(
+    Type.Boolean({
+      deprecated: true,
+      description: 'Deprecated: accepted and ignored. The API never emits it.',
+    })
+  ),
   statefulContinuation: Type.Optional(Type.Boolean()),
   promptCaching: Type.Optional(Type.Boolean()),
   parallelToolCalls: Type.Optional(Type.Boolean()),

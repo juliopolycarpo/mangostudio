@@ -21,6 +21,7 @@ import {
   cargoProbe,
   dockerProbe,
   npmProbe,
+  probe,
   PROBE_VERSION as CURRENT_VERSION,
   selfManagedProbe,
 } from './support/install-origin-probes';
@@ -106,6 +107,8 @@ function baseDeps(overrides: Partial<UpgradeServiceDeps> = {}): Partial<UpgradeS
       argv: ['/home/j/.mango/dist/current/mangostudio'],
       pointer: 'current',
     }),
+    // Hermetic: a manager's launcher exists only where a test says it does.
+    pathExists: () => false,
     readState: () => Promise.resolve(detachedState()),
     isAlive: () => true,
     now: () => 1_700_000_000_000,
@@ -160,6 +163,57 @@ describe('upgrade-service self-managed', () => {
     await collect(service);
 
     expect(capturedContext?.buildSha).toBeUndefined();
+  });
+
+  it('hands the target resolver the GitHub token the hub was started with', async () => {
+    let capturedContext: { readonly githubToken?: string } | undefined;
+    const service = createUpgradeService(
+      baseDeps({
+        env: { GITHUB_TOKEN: 'dummy-token-not-a-secret' },
+        resolveUpgradeTarget: (_request, context) => {
+          capturedContext = context;
+          return Promise.resolve(newerTarget());
+        },
+      })
+    );
+
+    await collect(service);
+
+    expect(capturedContext?.githubToken).toBe('dummy-token-not-a-secret');
+  });
+
+  it('resolves anonymously when no token is set', async () => {
+    let capturedContext: { readonly githubToken?: string } | undefined;
+    const service = createUpgradeService(
+      baseDeps({
+        env: { GITHUB_TOKEN: '' },
+        resolveUpgradeTarget: (_request, context) => {
+          capturedContext = context;
+          return Promise.resolve(newerTarget());
+        },
+      })
+    );
+
+    await collect(service);
+
+    expect(capturedContext?.githubToken).toBeUndefined();
+  });
+
+  it('does not hand the token to the install script', async () => {
+    const script = fakeRunScript(0);
+    const service = createUpgradeService(
+      baseDeps({
+        env: { PATH: '/usr/bin', GITHUB_TOKEN: 'dummy-token-not-a-secret' },
+        runScript: script.runScript,
+      })
+    );
+
+    await collect(service);
+
+    expect(script.calls.length).toBeGreaterThan(0);
+    for (const call of script.calls) {
+      expect(Object.keys(call.env)).not.toContain('GITHUB_TOKEN');
+    }
   });
 
   it('upgrades, restarts a detached hub, and reports every stage in order', async () => {
@@ -736,13 +790,108 @@ describe('upgrade-service delegate plans', () => {
     expect(restarted).toEqual(['/home/j/.cargo/bin/mangostudio']);
   });
 
+  it('restarts a Homebrew install through the prefix bin symlink, not the Cellar entry it runs from', async () => {
+    // The Cellar entry is versioned and `brew cleanup` removes it; the prefix
+    // symlink is what the upgrade relinked to the new build.
+    const restarted: (string | undefined)[] = [];
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () =>
+          probe({
+            platform: 'darwin',
+            execPath: '/opt/homebrew/Cellar/mangostudio/0.1.1/libexec/mangostudio',
+          }),
+        platform: 'darwin',
+        pathExists: (path) => path === '/opt/homebrew/bin/mangostudio',
+        restartHub: (input) => {
+          restarted.push(input.launcherPath);
+          return Promise.resolve();
+        },
+      })
+    );
+
+    const { report } = await collect(service);
+
+    expect(restarted).toEqual(['/opt/homebrew/bin/mangostudio']);
+    expect(report.restart).toBe('scheduled');
+  });
+
+  it('restarts a pnpm install through the shim in the pnpm home, not the versioned store path', async () => {
+    const restarted: (string | undefined)[] = [];
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () =>
+          probe({
+            execPath:
+              '/home/j/.local/share/pnpm/global/5/.pnpm/@mangostudio+cli-linux-x64@0.1.1/node_modules/@mangostudio/cli-linux-x64/mangostudio',
+            env: {
+              MANGOSTUDIO_LAUNCHER: 'npm',
+              MANGOSTUDIO_LAUNCHER_PATH:
+                '/home/j/.local/share/pnpm/global/5/.pnpm/mangostudio@0.1.1/node_modules/mangostudio/bin/mangostudio.js',
+            },
+          }),
+        pathExists: (path) => path === '/home/j/.local/share/pnpm/mangostudio',
+        restartHub: (input) => {
+          restarted.push(input.launcherPath);
+          return Promise.resolve();
+        },
+      })
+    );
+
+    await collect(service);
+
+    expect(restarted).toEqual(['/home/j/.local/share/pnpm/mangostudio']);
+  });
+
+  it('falls back to this binary when the manager left no launcher on disk', async () => {
+    const restarted: (string | undefined)[] = [];
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () =>
+          probe({
+            platform: 'darwin',
+            execPath: '/opt/homebrew/Cellar/mangostudio/0.1.1/libexec/mangostudio',
+          }),
+        platform: 'darwin',
+        pathExists: () => false,
+        restartHub: (input) => {
+          restarted.push(input.launcherPath);
+          return Promise.resolve();
+        },
+      })
+    );
+
+    await collect(service);
+
+    expect(restarted).toEqual([undefined]);
+  });
+
+  it('reports a restart that failed on its launcher as manual, naming why, and still reports the upgrade', async () => {
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => cargoProbe(),
+        restartHub: () =>
+          Promise.reject(
+            new Error(
+              'Cannot run "/home/j/.cargo/bin/mangostudio --version" (exited with code 1); the running hub was not stopped.'
+            )
+          ),
+      })
+    );
+
+    const { report } = await collect(service);
+
+    expect(report.outcome).toBe('upgraded');
+    expect(report.restart).toBe('manual');
+    expect(report.message).toContain('the running hub was not stopped');
+    expect(report.message).toContain('Run "mangostudio restart"');
+  });
+
   it('re-execs this binary rather than the npm wrapper it was launched from', async () => {
     // packages/cli/bin/mangostudio.js is a Node script that spawnSyncs the
-    // platform binary, so spawning it hands the restart handshake the
-    // wrapper's pid while the hub writes the grandchild's — a 20s timeout on
-    // an upgrade that actually worked. Re-execing this process's path is also
-    // the right target here: the platform package's path carries no version,
-    // so npm replaced the binary in place.
+    // platform binary, and a `.js` path is not something a restart can exec.
+    // Re-execing this process's path is the right target here: the platform
+    // package's path carries no version, so npm replaced the binary in place.
     const restarted: (string | undefined)[] = [];
     const service = createUpgradeService(
       baseDeps({

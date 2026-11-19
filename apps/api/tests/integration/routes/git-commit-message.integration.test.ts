@@ -13,6 +13,7 @@ import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { updateAppSettings } from '../../../src/modules/app-settings/application/app-settings-service';
 import { gitRoutes } from '../../../src/modules/git/http/git-routes';
+import { SHORT_TEXT_GENERATION_TIMEOUT_MS } from '../../../src/services/providers/core/generation-deadline';
 import {
   getProvider,
   registerProvider,
@@ -155,6 +156,10 @@ Build the suggestion from the selected diff.`;
       truncated: true,
     });
     expect(capturedRequests).toHaveLength(1);
+    expect(
+      capturedRequests[0]?.timeoutMs,
+      'expected the commit message call to carry the short generation budget'
+    ).toBe(SHORT_TEXT_GENERATION_TIMEOUT_MS);
     expect(capturedRequests[0]?.prompt).toContain('Selected diff (staged)');
     expect(capturedRequests[0]?.prompt).toContain('staged version');
     expect(capturedRequests[0]?.prompt).not.toContain('unstaged version');

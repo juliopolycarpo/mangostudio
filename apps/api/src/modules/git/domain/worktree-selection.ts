@@ -92,6 +92,25 @@ export function isWithinWorktree(
   );
 }
 
+/**
+ * True when two directories are the same one, under any pairing of their
+ * spellings: the strings as written, or where the runtime says each really is.
+ *
+ * The exact-match counterpart of {@link isWithinWorktree}. Equality goes
+ * through the target's path rules, so `C:\Repo` and `c:\repo` match on a
+ * case-folding volume and not elsewhere.
+ *
+ * @example
+ * isSameDirectory(['/home/me/wt', '/data/wt'], ['/data/wt'], paths); // true
+ */
+export function isSameDirectory(
+  left: PathSpellings,
+  right: PathSpellings,
+  paths: WorktreePathSemantics
+): boolean {
+  return left.some((candidate) => right.some((other) => paths.equals(candidate, other)));
+}
+
 /** True when two paths name the same worktree once written the same way. */
 export function isSameWorktreePath(
   left: string,

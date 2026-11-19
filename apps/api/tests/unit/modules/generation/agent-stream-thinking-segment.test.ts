@@ -69,7 +69,6 @@ const GEMINI_CAPABILITIES: ModelCapabilities = {
   image: false,
   streaming: true,
   tools: true,
-  internalAgentTools: false,
 };
 
 /**

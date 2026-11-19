@@ -16,6 +16,7 @@ import {
 import type { ContextInfo } from '@/features/generation/types';
 import { invalidateAllGitScopes } from '@/features/workspace/hooks/use-git-state';
 import { client } from '@/lib/api-client';
+import { invalidateForSignal } from '@/lib/realtime/read-after-subscribe';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError } from '@/lib/utils';
 
@@ -98,9 +99,9 @@ export function useChatsQuery() {
   // the list as it was. Signal only — mutation-driven cache updates above stay
   // the fast path, and a dead socket degrades to exactly the behavior before
   // this subscription.
-  useRealtimeInvalidation(CHATS_TOPIC, 'chat-list', async () => {
-    await queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
-  });
+  useRealtimeInvalidation(CHATS_TOPIC, 'chat-list', (signal) =>
+    invalidateForSignal(queryClient, signal, { queryKey: chatKeys.lists() })
+  );
   return useQuery(chatListQueryOptions());
 }
 

@@ -4,12 +4,7 @@
     "lib": ["ES2022"],
     "types": ["bun"],
     "allowJs": true,
-    "checkJs": false,
-    "paths": {
-      "@mangostudio/api/test-support/chatgpt/fake-server": [
-        "../apps/api/tests/support/chatgpt/fake-server.ts"
-      ]
-    }
+    "checkJs": false
   },
   "include": ["."]
 }

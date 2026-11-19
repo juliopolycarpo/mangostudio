@@ -6,19 +6,19 @@
 //! `\uD800` escapes and out-of-range numbers such as `1e400` (see
 //! [`json_parse_yields_object`]).
 //!
-//! TOML validity matches `smol-toml`, bare scalars included: an integer
-//! outside `Number.isSafeInteger` is refused, `1e1000` is accepted as
-//! `Infinity`, and dates follow Bun's `Date` (see [`parse_like_smol_toml`]).
-//! One rule is narrowed on both hosts rather than matched: a document whose
-//! parsed value nests more than 64 containers below the root is
-//! `invalid-metadata`, where `smol-toml` alone would accept any depth of
-//! dotted keys. `tests/fixtures/ts-library/corpus.json` records the
-//! TypeScript host's answer for each of these edge documents.
+//! TOML validity matches the hub's `Bun.TOML.parse`, bare scalars included:
+//! an integer outside `Number.isSafeInteger` is refused, `1e1000` is accepted
+//! as `Infinity`, and dates follow the TOML calendar (see
+//! [`parse_library_toml`]). One rule is narrowed on both hosts rather than
+//! matched: a document whose parsed value nests more than 64 containers below
+//! the root is `invalid-metadata`, where Bun alone would accept any depth of
+//! dotted keys. `tests/fixtures/library-toml/validity-cases.json` is the case
+//! table both hosts replay.
 
 use super::cache::Display;
 use super::frontmatter::parse_frontmatter;
 use super::js::js_trim;
-use super::smol_toml::parse_like_smol_toml;
+use super::toml_document::parse_library_toml;
 use super::types::InvalidReason;
 use crate::probing::locations::{LocationDefinition, ResourceFormat};
 
@@ -126,7 +126,7 @@ fn describe_markdown(kind: &str, slug: &str, text: &str) -> Display {
 }
 
 fn describe_toml(format: ResourceFormat, slug: &str, text: &str) -> Display {
-    let Some(table) = parse_like_smol_toml(text) else {
+    let Some(table) = parse_library_toml(text) else {
         return titled(slug, None, Some(InvalidReason::InvalidMetadata));
     };
     if format != ResourceFormat::TomlAgent {
@@ -325,15 +325,13 @@ mod tests {
     }
 
     #[test]
-    fn toml_scalars_smol_toml_accepts_stay_valid() {
+    fn toml_scalars_the_hub_accepts_stay_valid() {
         let documents = [
-            "a = 1979-02-30",
-            "a = 1979-02-29",
-            "a = 1979-06-31T07:32",
-            "a = 1979-02-31 07:32:00+01:00",
-            "a = 1979-05-27Z",
-            "a = 07:32Z",
-            "a = 07:32:00+01:00",
+            "a = 1980-02-29",
+            "a = 1979-06-30T07:32",
+            "a = 1979-05-27 07:32:00+01:00",
+            "a = 23:59:60",
+            "a = 1979-05-27T23:59:60Z",
             "a = 1e1000",
             "a = -1e400",
             "a = 9007199254740991",
@@ -347,10 +345,12 @@ mod tests {
     }
 
     #[test]
-    fn toml_scalars_smol_toml_rejects_are_invalid_metadata() {
+    fn toml_scalars_the_hub_rejects_are_invalid_metadata() {
         let documents = [
-            "a = 00:00:60",
-            "a = 1979-05-27T23:59:60Z",
+            "a = 1979-02-30",
+            "a = 07:32Z",
+            "a = 1979-05-27Z",
+            "a = 00:00:61",
             "a = 9007199254740992",
             "a = -9007199254740992",
             "a = 9223372036854775807",

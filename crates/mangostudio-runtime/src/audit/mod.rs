@@ -218,6 +218,7 @@ impl State {
 ///     .await;
 /// let contents = std::fs::read_to_string(dir.join("audit.log")).unwrap();
 /// assert!(contents.contains("\"method\":\"runtime.health\""));
+/// # std::fs::remove_dir_all(&dir).unwrap();
 /// # }
 /// ```
 #[derive(Clone)]
