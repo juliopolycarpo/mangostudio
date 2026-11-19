@@ -1633,7 +1633,13 @@ Frontend support lives in `apps/frontend/tests/support/`:
   preload-registered `afterAll` fires once per process in the unisolated lane, not
   once per file.
   `unit/support/module-mock-guard.test.ts` fails, naming file and line, on any raw
-  `mock.module(` under `apps/api/tests` outside that wrapper.
+  `mock.module(` under `apps/api/tests` outside that wrapper, and on any other use
+  of `mock` in a file that imports it from `bun:test` beyond calling it or reading
+  a member other than `module` (`mock['module']`, `const { module } = mock`,
+  `const m = mock`, `export { mock }`, a namespace import's `ns.mock`, a dynamic
+  `import('bun:test')`). If a restore fails, `restoreMockedModules` still attempts
+  every pending id, keeps the failed ones pending, and throws an `AggregateError`
+  naming each module id and its cause.
   Reproduce a leak on the pinned Bun (`packageManager` in `package.json`): a newer
   canary (1.4.5-canary.1) did not carry a raw `mock.module` into the next file in
   a plain `bun test`, so a leak proof run there passes for the wrong reason.
