@@ -123,12 +123,13 @@ describe('buildSetupRows — git', () => {
 
 describe('buildSetupRows — node', () => {
   it('is todo with the install chain when nothing is installed yet', () => {
-    const row = rowFor('node', [], [], [NVM_NODE_INSTALL]);
+    const row = rowFor('node', [], [], [NVM_NODE_INSTALL, NVM_NODE_SET_DEFAULT]);
 
     expect(row.status).toBe('todo');
     if (row.remedy.kind !== 'install') throw new Error(`expected install, got ${row.remedy.kind}`);
     expect(row.remedy.step.recipe.id).toBe('nvm.node.install');
-    expect(row.remedy.followUp).toBeUndefined();
+    // nvm install never writes the default alias, so the chain must.
+    expect(row.remedy.followUp?.map((step) => step.recipe.id)).toEqual(['nvm.node.set-default']);
   });
 
   it('is done when the effective Node carries no outdated-lts finding', () => {

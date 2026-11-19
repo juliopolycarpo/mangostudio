@@ -65,7 +65,17 @@ export const messages = {
         session: 'sessão',
         library: 'em disco',
         skill: 'skill',
+        builtin: 'integrado',
       },
+      slashBuiltIn: {
+        clear: 'Iniciar um novo chat',
+        model: 'Trocar o modelo deste chat: /model <nome>',
+      },
+      slashModelSwitched: 'Modelo alterado para {model}.',
+      slashModelUsage: 'Informe o modelo: /model <nome>. Modelo atual: {model}.',
+      slashModelNone: 'Nenhum modelo corresponde a “{query}”.',
+      slashModelAmbiguous:
+        '“{query}” corresponde a mais de um modelo: {models}. Digite mais do nome.',
       mcpPromptArgsTitle: 'Argumentos do prompt',
       mcpPromptInsert: 'Inserir',
       mcpPromptCancel: 'Cancelar',
@@ -3150,6 +3160,8 @@ export const messages = {
       winget: 'winget',
       git: 'Git',
       volta: 'Volta',
+      scoop: 'Scoop',
+      mise: 'mise',
       mangostudio: 'MangoStudio',
       claude: 'Claude Code',
       codex: 'Codex',
@@ -3785,6 +3797,10 @@ export const messages = {
       toolchainAutoSystem:
         'Os processos rodam a escolha automática: {version}, uma instalação do sistema.',
       toolchainPinned: 'Os processos rodam {version} a partir de {path}.',
+      // O pin aponta para um caminho que a última sondagem não encontrou mais,
+      // então não pode estar em vigor: os processos voltam ao que o PATH resolver.
+      toolchainPinMissing:
+        'A instalação fixada em {path} não está mais instalada. Os processos voltam ao PATH até você escolher outra versão ou voltar ao automático.',
       toolchainUpdateFailed: 'A seleção de toolchain não pôde ser atualizada.',
     },
     // De onde o binário de uma instalação veio, anexado à linha da instalação
@@ -3797,6 +3813,8 @@ export const messages = {
       winget: 'via winget',
       bun: 'via instalador do Bun',
       'mangostudio-managed': 'gerenciado pelo MangoStudio',
+      scoop: 'via Scoop',
+      mise: 'via mise',
     },
     versions: {
       title: 'Gerenciado por {manager}',

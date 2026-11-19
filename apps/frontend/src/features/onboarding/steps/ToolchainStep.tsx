@@ -14,7 +14,7 @@ import { CircleAlert, CircleCheck } from 'lucide-react';
 import { Callout } from '@/components/ui/Callout';
 import { Spinner } from '@/components/ui/Spinner';
 import { RecipeAction } from '@/features/environments/components/RecipeAction';
-import { installStep } from '@/features/environments/format';
+import { installStep, nodeInstallFollowUp } from '@/features/environments/format';
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import {
   installRecipesQueryOptions,
@@ -88,6 +88,12 @@ export function ToolchainStep({ environmentId }: { readonly environmentId: strin
                     <span className="text-xs text-fg-muted">{s.missing}</span>
                     <RecipeAction
                       step={installStep(recipes.data ?? [], id)}
+                      {...(id === 'node' && {
+                        followUpSteps: nodeInstallFollowUp(
+                          recipes.data ?? [],
+                          installStep(recipes.data ?? [], id)
+                        ),
+                      })}
                       action="install"
                       catalog={recipes.data ?? []}
                       name={name}

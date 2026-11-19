@@ -96,6 +96,7 @@ const PROBLEM_TITLES: Record<ErrorCode, string> = {
   TERMINAL_DISABLED: 'Terminals disabled',
   TERMINAL_LIMIT: 'Terminal limit reached',
   TERMINAL_NOT_ISOLATED: 'Terminal host not isolated',
+  INSTALL_RUNTIME_BUSY: 'Runtime busy',
   INTERNAL: 'Internal server error',
 };
 

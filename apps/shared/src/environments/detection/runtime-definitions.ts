@@ -27,6 +27,8 @@ export function wellKnownNodeDirectories(env: PathEnv): string[] {
   if (env.platform === 'win32') {
     const { ProgramFiles, LOCALAPPDATA, NVM_SYMLINK, VOLTA_HOME, FNM_DIR } = env.env;
     const fnmDir = FNM_DIR?.trim() || windowsDefaultFnmDir(env);
+    const voltaHome =
+      VOLTA_HOME?.trim() || (LOCALAPPDATA ? win32.join(LOCALAPPDATA, 'Volta') : undefined);
     return [
       NVM_SYMLINK,
       ProgramFiles ? win32.join(ProgramFiles, 'nodejs') : undefined,
@@ -35,7 +37,8 @@ export function wellKnownNodeDirectories(env: PathEnv): string[] {
         : undefined,
       LOCALAPPDATA ? win32.join(LOCALAPPDATA, 'Programs', 'nodejs') : undefined,
       fnmDir ? win32.join(fnmDir, 'aliases', 'default') : undefined,
-      VOLTA_HOME ? win32.join(VOLTA_HOME, 'bin') : undefined,
+      // Volta's installer defaults to %LOCALAPPDATA%\Volta when VOLTA_HOME is unset.
+      voltaHome ? win32.join(voltaHome, 'bin') : undefined,
     ].filter((directory): directory is string => Boolean(directory?.trim()));
   }
 

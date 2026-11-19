@@ -15,6 +15,7 @@ import {
   createInstallService,
   InstallBlockedError,
   InstallPreparationError,
+  InstallRuntimeBusyError,
 } from '../../../../src/modules/environments/application/install-service';
 import type { EnvironmentProbingService } from '../../../../src/modules/environments/application/probing-service';
 import type { ToolchainService } from '../../../../src/modules/environments/application/toolchain-service';
@@ -1023,6 +1024,90 @@ describe('install service', () => {
     // it rather than of the hub.
     expect(scopes.length).toBeGreaterThan(0);
     expect(scopes.every((environmentId) => environmentId === 'ubuntu')).toBe(true);
+  });
+
+  describe('per-runtime exclusion', () => {
+    function createBunService(controlled: ReturnType<typeof deferredRunner>) {
+      let nextId = 0;
+      return createInstallService({
+        toolchain: NO_OP_TOOLCHAIN,
+        recipes: [getInstallRecipe('bun.update'), getInstallRecipe('bun.uninstall')],
+        ...createDetectionServices(),
+        repository: createMemoryRepository().repository,
+        runner: controlled.runner,
+        resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
+        generateId: () => {
+          nextId += 1;
+          return `exclusion-run-${nextId}`;
+        },
+        now: () => 1_700_000_000_000,
+        platform: 'linux',
+      });
+    }
+    const UPDATE = { recipeId: 'bun.update', input: NO_INPUT } as const;
+    const UNINSTALL = { recipeId: 'bun.uninstall', input: NO_INPUT } as const;
+
+    it('refuses an uninstall while an update of the same runtime runs, naming the update', async () => {
+      const controlled = deferredRunner();
+      const service = createBunService(controlled);
+      const update = await service.start(UPDATE, REQUEST_CONTEXT);
+
+      const attempt = service.start(UNINSTALL, REQUEST_CONTEXT);
+
+      await expect(attempt).rejects.toMatchObject({
+        name: 'InstallRuntimeBusyError',
+        runtimeId: 'bun',
+        requestedRecipeId: 'bun.uninstall',
+        runningRecipeId: 'bun.update',
+        runningRunId: update.runId,
+      });
+      controlled.finish();
+    });
+
+    it('lets exactly one of two conflicting starts through when they overlap', async () => {
+      const controlled = deferredRunner();
+      const service = createBunService(controlled);
+
+      // Neither has registered a run yet; which preview settles first is not
+      // part of the contract, only that the pair never both proceeds.
+      const outcomes = await Promise.allSettled([
+        service.start(UPDATE, REQUEST_CONTEXT),
+        service.start(UNINSTALL, REQUEST_CONTEXT),
+      ]);
+
+      expect(outcomes.map((outcome) => outcome.status).sort()).toEqual(['fulfilled', 'rejected']);
+      const rejected = outcomes.find((outcome) => outcome.status === 'rejected');
+      expect(rejected?.status === 'rejected' && rejected.reason).toBeInstanceOf(
+        InstallRuntimeBusyError
+      );
+      controlled.finish();
+    });
+
+    it('lets the other recipe run once the first one has finished', async () => {
+      const controlled = deferredRunner();
+      const service = createBunService(controlled);
+      const update = await service.start(UPDATE, REQUEST_CONTEXT);
+      const events = collectEvents(
+        await service.getRunStream(update.runId, REQUEST_CONTEXT.userId)
+      );
+      controlled.finish();
+      await events;
+
+      await expect(service.start(UNINSTALL, REQUEST_CONTEXT)).resolves.toMatchObject({
+        attached: false,
+      });
+    });
+
+    it('does not cross machines', async () => {
+      const controlled = deferredRunner();
+      const service = createBunService(controlled);
+      await service.start(UPDATE, REQUEST_CONTEXT);
+
+      await expect(
+        service.start({ ...UNINSTALL, environmentId: 'ubuntu' }, REQUEST_CONTEXT)
+      ).resolves.toMatchObject({ attached: false });
+      controlled.finish();
+    });
   });
 
   it('refuses to start on an environment that was never trusted', async () => {
