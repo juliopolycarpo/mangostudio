@@ -1,5 +1,9 @@
 import type { ChatAttachment, ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
+import {
+  type BuiltInSlashInvocation,
+  parseBuiltInSlashInvocation,
+} from '@mangostudio/shared/library/values';
 import { CornerDownRight, FileText, Send, Square, X } from 'lucide-react';
 import {
   type CSSProperties,
@@ -17,6 +21,7 @@ import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { KbdHint, ReturnKey } from '@/components/ui/KbdHint';
 import { Spinner } from '@/components/ui/Spinner';
+import { useToast } from '@/components/ui/Toast';
 import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
@@ -27,6 +32,7 @@ import { filesFromClipboard, useComposerAttachments } from '../hooks/use-compose
 import { useComposerDraft } from '../hooks/use-composer-draft';
 import { usePromptHistory } from '../hooks/use-prompt-history';
 import { useSlashCommands } from '../hooks/use-slash-commands';
+import { availableBuiltIns, resolveModelChoice } from '../lib/built-in-commands';
 import { CHAT_COLUMN_CLASS } from '../lib/chat-column';
 import { COMPOSER_ACCENT_PROPERTY, composerAccent } from '../lib/composer-accent';
 import { onComposerFocusRequest } from '../lib/composer-draft-store';
@@ -109,6 +115,11 @@ interface Props extends Partial<ForwardedChipRowProps> {
    */
   railTriggerSlotRef?: RefCallback<HTMLElement>;
   externalDescriptor?: ExternalAgentDescriptor;
+  /**
+   * Opens a fresh chat. What the built-in `/clear` runs; without it the command
+   * is not offered.
+   */
+  onNewChat?: () => void | Promise<void>;
 }
 
 export function InputBar({
@@ -125,9 +136,11 @@ export function InputBar({
   runner,
   externalDescriptor,
   railTriggerSlotRef,
+  onNewChat,
   ...chipRow
 }: Props) {
   const { t } = useI18n();
+  const { toast } = useToast();
   const [prompt, setPrompt] = useComposerDraft(chatId);
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
   const [steering, setSteering] = useState(false);
@@ -236,12 +249,38 @@ export function InputBar({
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
   const slashQuery = slashDismissed || inputDisabled ? null : slashQueryAt(prompt, caret);
+
+  // Offered only when there is something to run: `/model` needs a chat whose
+  // selector is usable, since it does exactly what the selector does.
+  const modelOptions = chipRow.activeModels ?? CHIP_ROW_DEFAULTS.activeModels;
+  const onModelChange = chipRow.onModelChange;
+  const builtIns = useMemo(
+    () =>
+      availableBuiltIns({
+        isExternalRunner,
+        canStartChat: onNewChat !== undefined,
+        canSwitchModel:
+          chatId !== null &&
+          onModelChange !== undefined &&
+          !(chipRow.isModelSelectorDisabled ?? CHIP_ROW_DEFAULTS.isModelSelectorDisabled) &&
+          modelOptions.length > 0,
+      }),
+    [
+      isExternalRunner,
+      onNewChat,
+      chatId,
+      onModelChange,
+      chipRow.isModelSelectorDisabled,
+      modelOptions.length,
+    ]
+  );
   const slashCommands = useSlashCommands({
     chatId,
     runner,
     environmentId: externalDescriptor?.environmentId ?? null,
     activeModel,
     selectedAgentId,
+    builtIns,
     active: slashQuery !== null,
   });
   const slashMatches = useMemo(
@@ -341,6 +380,51 @@ export function InputBar({
     }
   };
 
+  /**
+   * Runs a built-in instead of sending it. A command that did not take — an
+   * unknown or ambiguous model — leaves the text in the box so the user can fix
+   * the name rather than retype the line.
+   */
+  const runBuiltInCommand = (invocation: BuiltInSlashInvocation) => {
+    if (invocation.name === 'clear') {
+      setPrompt('');
+      setPendingAttachments([]);
+      void onNewChat?.();
+      return;
+    }
+
+    const current = modelOptions.find((model) => model.modelId === activeModel);
+    const chat = t.chat.input;
+    if (invocation.args.length === 0) {
+      toast(
+        formatMessage(chat.slashModelUsage, {
+          model: current?.displayName ?? activeModel ?? '—',
+        }),
+        'info'
+      );
+      return;
+    }
+    const choice = resolveModelChoice(invocation.args, modelOptions, chipRow.lockedProvider);
+    if (choice.kind === 'none') {
+      toast(formatMessage(chat.slashModelNone, { query: invocation.args }), 'error');
+      return;
+    }
+    if (choice.kind === 'ambiguous') {
+      toast(
+        formatMessage(chat.slashModelAmbiguous, {
+          query: invocation.args,
+          models: choice.models.map((model) => model.displayName).join(', '),
+        }),
+        'error'
+      );
+      return;
+    }
+    onModelChange?.(choice.model.modelId);
+    toast(formatMessage(chat.slashModelSwitched, { model: choice.model.displayName }), 'info');
+    history.record(prompt);
+    setPrompt('');
+  };
+
   const handleSubmit = (e: { preventDefault: () => void }) => {
     e.preventDefault();
     if (!prompt.trim()) return;
@@ -354,6 +438,11 @@ export function InputBar({
       return;
     }
     if (disabled || cannotSubmit) return;
+    const builtIn = parseBuiltInSlashInvocation(prompt);
+    if (builtIn && builtIns.includes(builtIn.name)) {
+      runBuiltInCommand(builtIn);
+      return;
+    }
     const attachmentIds = pendingAttachments.map((attachment) => attachment.id);
     history.record(prompt);
     onSubmit(prompt, attachmentIds.length > 0 ? attachmentIds : undefined);

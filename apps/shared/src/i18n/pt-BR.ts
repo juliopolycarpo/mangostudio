@@ -65,7 +65,17 @@ export const messages = {
         session: 'sessão',
         library: 'em disco',
         skill: 'skill',
+        builtin: 'integrado',
       },
+      slashBuiltIn: {
+        clear: 'Iniciar um novo chat',
+        model: 'Trocar o modelo deste chat: /model <nome>',
+      },
+      slashModelSwitched: 'Modelo alterado para {model}.',
+      slashModelUsage: 'Informe o modelo: /model <nome>. Modelo atual: {model}.',
+      slashModelNone: 'Nenhum modelo corresponde a “{query}”.',
+      slashModelAmbiguous:
+        '“{query}” corresponde a mais de um modelo: {models}. Digite mais do nome.',
       mcpPromptArgsTitle: 'Argumentos do prompt',
       mcpPromptInsert: 'Inserir',
       mcpPromptCancel: 'Cancelar',
