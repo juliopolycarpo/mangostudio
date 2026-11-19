@@ -933,7 +933,10 @@ const MCP_CASES: readonly SectionCase[] = [
 // Environments
 // ---------------------------------------------------------------------------
 
-function installation(version: string, path: string): NonNullable<RuntimeStatus['effective']> {
+function installation(
+  version: string | null,
+  path: string
+): NonNullable<RuntimeStatus['effective']> {
   return { path, rawPath: path, version, origin: 'path', effective: true };
 }
 
@@ -1025,6 +1028,14 @@ const ENVIRONMENT_CASES: readonly SectionCase[] = [
         ],
       }),
     expected: [{ label: 'Bun', status: 'ok', detail: '1.2.3  /usr/local/bin/bun' }],
+  },
+  {
+    name: 'a runtime whose install reported no version',
+    rows: () =>
+      environmentRows({
+        runtimes: [runtimeStatus('bun', { effective: installation(null, '/usr/local/bin/bun') })],
+      }),
+    expected: [{ label: 'Bun', status: 'ok', detail: 'version unknown  /usr/local/bin/bun' }],
   },
   {
     name: 'a missing runtime, by finding and without one',
@@ -1163,6 +1174,14 @@ const ENVIRONMENT_CASES: readonly SectionCase[] = [
       },
       { label: 'Cursor', status: 'fail', detail: 'not installed' },
     ],
+  },
+  {
+    name: 'an agent CLI whose install reported no version',
+    rows: () =>
+      environmentRows({
+        agents: [agentStatus('claude', { effective: installation(null, '/usr/bin/claude') })],
+      }),
+    expected: [{ label: 'Claude Code', status: 'ok', detail: 'version unknown  /usr/bin/claude' }],
   },
   {
     name: 'the WSL executable, on Windows only',

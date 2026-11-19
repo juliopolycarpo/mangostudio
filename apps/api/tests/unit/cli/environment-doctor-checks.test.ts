@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import type { VersionManagerStatus } from '@mangostudio/shared/environments';
+import type { RuntimeStatus, VersionManagerStatus } from '@mangostudio/shared/environments';
 
 import { collectEnvironmentDoctorSection } from '../../../src/cli/environment-doctor-checks';
 
@@ -56,5 +56,38 @@ describe('collectEnvironmentDoctorSection', () => {
 
     const row = rows.find((candidate) => candidate.label === 'fnm');
     expect(row?.detail).toBe('fnm was not found on PATH or in any well-known location.');
+  });
+
+  it('keys an install with no version by its own detail key, with no version param', async () => {
+    const rows = await collectEnvironmentDoctorSection({
+      listRuntimes: () =>
+        Promise.resolve([
+          {
+            id: 'bun',
+            health: 'ok',
+            effective: {
+              path: '/usr/bin/bun',
+              rawPath: '/usr/bin/bun',
+              version: null,
+              origin: 'path',
+              effective: true,
+            },
+            installs: [],
+            findings: [],
+          } as unknown as RuntimeStatus,
+        ]),
+      listVersionManagers: () => Promise.resolve([]),
+      listAgents: () => Promise.resolve([]),
+    });
+
+    const row = rows.find((candidate) => candidate.label === 'Bun');
+    expect(
+      { detailKey: row?.detailKey, params: row?.params, detail: row?.detail },
+      '(row for an install whose version is null)'
+    ).toEqual({
+      detailKey: 'env.detail.versionUnknownAndPath',
+      params: { tool: 'Bun', path: '/usr/bin/bun' },
+      detail: 'version unknown  /usr/bin/bun',
+    });
   });
 });

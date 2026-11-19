@@ -60,12 +60,19 @@ function findingRow(id: string, finding: RuntimeFinding): CheckResult {
 }
 
 /** A row for an installation the probe found: version and where it is. */
-function installationRow(id: string, effective: NonNullable<RuntimeStatus['effective']>) {
+function installationRow(
+  id: string,
+  effective: NonNullable<RuntimeStatus['effective']>
+): CheckResult {
+  const base = { ...toolParams(id), path: effective.path };
+  // A probe can find an install and still fail to read its version; say so
+  // in words instead of printing the literal `null`.
+  if (effective.version === null) {
+    return keyedCheck('ok', 'env.label.tool', 'env.detail.versionUnknownAndPath', base);
+  }
   return keyedCheck('ok', 'env.label.tool', 'env.detail.versionAndPath', {
-    ...toolParams(id),
-    // `String` keeps the old output for a probe that reported no version: "null".
-    version: String(effective.version),
-    path: effective.path,
+    ...base,
+    version: effective.version,
   });
 }
 
