@@ -360,9 +360,11 @@ build):
   from-scratch render. `bun scripts/bench/markdown-stream.ts` measures it.
 
 **Rail panel bodies are lazy.** `rail/panel-registry.ts` is imported by the command palette and
-the chat page, so the Git, GitHub and Todo bodies load through `retryableLazy`
+the chat page, so the Git, GitHub, Todo and Terminal bodies load through `retryableLazy`
 (`src/lib/retryable-lazy.ts`) instead of a static import: that took 117 KB raw (27 KB
-Brotli) out of the entry. The rail starts those imports on hover or focus of the dock
+Brotli) out of the entry, and the Terminal body (tab strip and close dialog, in front of the
+already lazy xterm view) another 3.3 KB Brotli. `tests/unit/lazy-entry-modules.test.ts`
+walks the entry's static imports and names the importer if one of them comes back. The rail starts those imports on hover or focus of the dock
 button and, once the page is idle, for every available panel (`src/lib/idle-preload.ts`;
 skipped under `saveData`; hover and focus still start the chunk), so a click rarely waits.
 A switch on an open rail keeps the previous body up while the new chunk arrives (a React
