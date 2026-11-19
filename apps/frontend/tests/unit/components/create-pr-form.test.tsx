@@ -80,4 +80,85 @@ describe('CreatePrForm', () => {
       scenario.restore();
     }
   });
+
+  /**
+   * The pull request exists but its read-back failed. Leaving the form mounted
+   * with the title and body intact invited a second submit, which opens a
+   * duplicate pull request for the same branch.
+   */
+  it('replaces the form with a link when the pull request was created but could not be read', async () => {
+    const user = userEvent.setup();
+    const scenario = createFetchScenario().install();
+    scenario.fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            state: 'created-unreadable',
+            url: 'https://github.com/mango/studio/pull/7',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      )
+    );
+
+    try {
+      const onDone = jest.fn();
+      render(
+        <CreatePrForm
+          chatId={CHAT_ID}
+          needsPush={false}
+          defaultTitle="Fix the rail"
+          onDone={onDone}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Create pull request' }));
+
+      const link = await screen.findByRole('link', { name: 'Open on GitHub' });
+      expect(link).toHaveAttribute('href', 'https://github.com/mango/studio/pull/7');
+      expect(screen.getByText(/created, but .* could not be read/i)).toBeInTheDocument();
+      // Nothing left to submit: the draft and the button that would duplicate it are gone.
+      expect(screen.queryByRole('button', { name: 'Create pull request' })).toBeNull();
+      expect(screen.queryByDisplayValue('Fix the rail')).toBeNull();
+      // Closing is the user's call, so the pull request link stays on screen until then.
+      expect(onDone).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole('button', { name: 'Done' }));
+      expect(onDone).toHaveBeenCalledTimes(1);
+    } finally {
+      scenario.restore();
+    }
+  });
+
+  it('offers no link when the created pull request has no known URL', async () => {
+    const user = userEvent.setup();
+    const scenario = createFetchScenario().install();
+    scenario.fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ state: 'created-unreadable', url: null }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      )
+    );
+
+    try {
+      render(
+        <CreatePrForm
+          chatId={CHAT_ID}
+          needsPush={false}
+          defaultTitle="Fix the rail"
+          onDone={jest.fn()}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Create pull request' }));
+
+      await screen.findByText(/created, but .* could not be read/i);
+      expect(screen.queryByRole('link')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Create pull request' })).toBeNull();
+    } finally {
+      scenario.restore();
+    }
+  });
 });

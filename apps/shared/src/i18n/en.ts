@@ -1138,6 +1138,10 @@ export const messages: CoreMessages = {
       cancel: 'Cancel',
       success: 'Pull request #{number} created.',
       error: 'The pull request could not be created.',
+      createdUnreadable:
+        'The pull request was created, but its details could not be read back. Do not create it again.',
+      openOnGithub: 'Open on GitHub',
+      done: 'Done',
       pushHint:
         'This branch does not exist on the remote yet. It will be pushed before the pull request is opened.',
       pushError: 'The branch could not be pushed, so no pull request was created.',
