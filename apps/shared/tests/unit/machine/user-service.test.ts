@@ -17,11 +17,15 @@ import {
   renderScheduledTaskInstallScript,
   renderScheduledTaskRunnerScript,
   renderSystemdUnitFile,
+  replaceUnitProgram,
+  RestartRetargetedError,
+  retargetScheduledTaskArguments,
   systemdUserUnitPath,
   type UserServiceDefinition,
   type UserServiceExecDeps,
   type UserServiceExecResult,
   type UserServiceIdentity,
+  type UserServiceManager,
 } from '../../../src/machine/user-service';
 import { RuntimeServiceManagementError } from '../../../src/runtime-contract';
 import { UserServiceStatusSchema } from '../../../src/runtime-home';
@@ -56,6 +60,8 @@ class FakeServiceHost {
   busSocket: boolean;
   /** How often the manager looked for the bus socket. */
   busLookups = 0;
+  /** Every backoff the manager asked for; none is actually waited. */
+  readonly sleeps: number[] = [];
 
   constructor(
     private readonly options: {
@@ -115,6 +121,10 @@ class FakeServiceHost {
       },
       warn: (message) => {
         this.warnings.push(message);
+      },
+      sleep: (ms) => {
+        this.sleeps.push(ms);
+        return Promise.resolve();
       },
     };
   }
@@ -524,8 +534,26 @@ describe('createUserServiceManager on darwin', () => {
     });
   });
 
+  /** A darwin host whose job has left the domain: `print` and `kickstart` find nothing until a bootstrap loads it. */
+  function stoppedJobHost(bootstrap: UserServiceExecResult | null = null): FakeServiceHost {
+    let loaded = false;
+    return new FakeServiceHost({
+      platform: 'darwin',
+      onExec: (argv) => {
+        if (argv[1] === 'bootstrap') {
+          if (bootstrap) return bootstrap;
+          loaded = true;
+        }
+        if ((argv[1] === 'print' || argv[1] === 'kickstart') && !loaded) {
+          return { exitCode: 113, stdout: '', stderr: 'Could not find service' };
+        }
+        return undefined;
+      },
+    });
+  }
+
   it('bootstraps before kickstarting on restart, so a stopped job comes back', async () => {
-    const host = new FakeServiceHost({ platform: 'darwin' });
+    const host = stoppedJobHost();
 
     await createUserServiceManager(IDENTITY, host.deps()).restart();
 
@@ -533,6 +561,7 @@ describe('createUserServiceManager on darwin', () => {
     // with "Could not find service" while the CLI reported a restart. systemd
     // and Task Scheduler both start a stopped unit on restart.
     expect(host.argv).toEqual([
+      ['launchctl', 'print', 'gui/1000/com.example.unit'],
       [
         'launchctl',
         'bootstrap',
@@ -544,11 +573,12 @@ describe('createUserServiceManager on darwin', () => {
   });
 
   it('bootstraps before kickstarting, since a stopped job has left the domain', async () => {
-    const host = new FakeServiceHost({ platform: 'darwin' });
+    const host = stoppedJobHost();
 
     await createUserServiceManager(IDENTITY, host.deps()).start();
 
     expect(host.argv).toEqual([
+      ['launchctl', 'print', 'gui/1000/com.example.unit'],
       [
         'launchctl',
         'bootstrap',
@@ -557,6 +587,36 @@ describe('createUserServiceManager on darwin', () => {
       ],
       ['launchctl', 'kickstart', 'gui/1000/com.example.unit'],
     ]);
+  });
+
+  it('kickstarts a job that is already loaded without bootstrapping it again', async () => {
+    const host = new FakeServiceHost({ platform: 'darwin' });
+
+    await createUserServiceManager(IDENTITY, host.deps()).restart();
+
+    // A bootstrap of a loaded job only fails, so it is not attempted.
+    expect(host.argv).toEqual([
+      ['launchctl', 'print', 'gui/1000/com.example.unit'],
+      ['launchctl', 'kickstart', '-k', 'gui/1000/com.example.unit'],
+    ]);
+  });
+
+  // A restart that lost the race against a bootout left the job out of the
+  // domain. The single tolerated bootstrap failed too, the kickstart found
+  // nothing, and what surfaced was a kickstart error for a job that was never
+  // loaded — not the bootstrap refusal that explains it.
+  it('reports the failed bootstrap of an unloaded job instead of kickstarting nothing', async () => {
+    const host = stoppedJobHost({
+      exitCode: 5,
+      stdout: '',
+      stderr: 'Bootstrap failed: 5: Input/output error',
+    });
+
+    await expect(createUserServiceManager(IDENTITY, host.deps()).restart()).rejects.toMatchObject({
+      message: 'launchctl bootstrap failed (exit 5): Bootstrap failed: 5: Input/output error',
+    });
+
+    expect(host.argv.some((argv) => argv[1] === 'kickstart')).toBe(false);
   });
 });
 
@@ -602,6 +662,625 @@ describe('createUserServiceManager on win32', () => {
     expect(script.indexOf('Stop-ScheduledTask')).toBeLessThan(script.indexOf('Start-Sleep'));
     expect(script.indexOf('Start-Sleep')).toBeLessThan(script.indexOf('Start-ScheduledTask'));
     expect(script).toContain("-eq 'Running'");
+  });
+});
+
+describe('replaceUnitProgram', () => {
+  const STABLE = '/opt/homebrew/bin/mangostudio';
+
+  it('replaces the systemd program and keeps arguments, environment and log lines', () => {
+    const body = renderSystemdUnitFile(DEFINITION);
+    const updated = replaceUnitProgram(body, STABLE) ?? '';
+    expect(updated).toBe(
+      body.replace('ExecStart="/opt/My Apps/example" serve', `ExecStart=${STABLE} serve`)
+    );
+    expect(execPathFromUnitBody(updated)).toBe(STABLE);
+  });
+
+  it('quotes a replacement program the way renderSystemdUnitFile would', () => {
+    const body = renderSystemdUnitFile({ ...DEFINITION, argv: ['/plain/example', 'serve'] });
+    const updated = replaceUnitProgram(body, '/opt/My Apps/new') ?? '';
+    expect(updated).toContain('ExecStart="/opt/My Apps/new" serve');
+  });
+
+  // systemd reads `-`, `@`, `:`, `+` and `!` before the path as execution
+  // modifiers (ignore failure, argv[0] override, ...). They are the operator's
+  // and are not part of the program, so a retarget must neither drop them nor
+  // report them as part of the path.
+  for (const prefix of ['-', '@', ':', '+', '!', '!!', '-+']) {
+    it(`keeps the "${prefix}" ExecStart prefix while replacing the program`, () => {
+      const body = renderSystemdUnitFile(DEFINITION).replace(
+        'ExecStart="/opt/My Apps/example" serve',
+        `ExecStart=${prefix}/old/example serve`
+      );
+      expect(execPathFromUnitBody(body)).toBe('/old/example');
+
+      const updated = replaceUnitProgram(body, STABLE) ?? '';
+
+      expect(updated).toContain(`ExecStart=${prefix}${STABLE} serve`);
+      expect(execPathFromUnitBody(updated)).toBe(STABLE);
+    });
+  }
+
+  it('keeps a prefix in front of a quoted program', () => {
+    const body = renderSystemdUnitFile(DEFINITION).replace(
+      'ExecStart="/opt/My Apps/example"',
+      'ExecStart=-"/opt/My Apps/example"'
+    );
+    expect(execPathFromUnitBody(body)).toBe('/opt/My Apps/example');
+    expect(replaceUnitProgram(body, '/opt/My Apps/new')).toContain(
+      'ExecStart=-"/opt/My Apps/new" serve'
+    );
+  });
+
+  it('replaces the launchd program and keeps the rest of the plist', () => {
+    const body = renderLaunchdPlistFile('com.example.unit', DEFINITION);
+    const updated = replaceUnitProgram(body, STABLE) ?? '';
+    expect(updated).toBe(
+      body.replace('<string>/opt/My Apps/example</string>', `<string>${STABLE}</string>`)
+    );
+    expect(execPathFromUnitBody(updated)).toBe(STABLE);
+  });
+
+  it('returns null for a body that names no program', () => {
+    expect(replaceUnitProgram('nothing here', STABLE)).toBeNull();
+  });
+});
+
+describe('createUserServiceManager restartRetargeted', () => {
+  const STABLE = '/home/linuxbrew/.linuxbrew/bin/mangostudio';
+  const VERSIONED: UserServiceDefinition = {
+    ...DEFINITION,
+    argv: ['/home/linuxbrew/.linuxbrew/Cellar/mangostudio/0.1.1/libexec/mangostudio', 'serve'],
+  };
+  const PLIST_PATH = '/home/test/Library/LaunchAgents/com.example.unit.plist';
+  const LAUNCHD_TARGET = 'gui/1000/com.example.unit';
+  const BOOTSTRAP = ['launchctl', 'bootstrap', 'gui/1000', PLIST_PATH];
+  const EIO_STDERR = 'Bootstrap failed: 5: Input/output error';
+
+  /**
+   * A darwin host whose `launchctl bootstrap`, `bootout` and `print` answer from
+   * the queued results, then succeed. A `print` that succeeds is a job launchd
+   * still has in its domain.
+   */
+  function darwinHost(
+    bootstrapResults: readonly UserServiceExecResult[] = [],
+    others: {
+      readonly bootout?: readonly UserServiceExecResult[];
+      readonly print?: readonly UserServiceExecResult[];
+    } = {}
+  ): FakeServiceHost {
+    const queues: Record<string, UserServiceExecResult[]> = {
+      bootstrap: [...bootstrapResults],
+      bootout: [...(others.bootout ?? [])],
+      print: [...(others.print ?? [])],
+    };
+    const host = new FakeServiceHost({
+      platform: 'darwin',
+      onExec: (argv) => queues[argv[1] ?? '']?.shift(),
+    });
+    host.files.set(PLIST_PATH, renderLaunchdPlistFile('com.example.unit', VERSIONED));
+    return host;
+  }
+
+  const eio = (): UserServiceExecResult => ({ exitCode: 5, stdout: '', stderr: EIO_STDERR });
+  const inProgress = (): UserServiceExecResult => ({
+    exitCode: 37,
+    stdout: '',
+    stderr: 'Boot-out failed: 37: Operation already in progress',
+  });
+  /** What `launchctl print` answers for a job that is not in the domain. */
+  const notLoaded = (): UserServiceExecResult => ({
+    exitCode: 113,
+    stdout: '',
+    stderr: 'Could not find service "com.example.unit" in domain for user gui: 1000',
+  });
+
+  it('on linux rewrites only the program and reloads systemd before the restart', async () => {
+    const host = new FakeServiceHost();
+    const unitPath = '/home/test/.config/systemd/user/example.service';
+    host.files.set(unitPath, renderSystemdUnitFile(VERSIONED));
+    const manager = createUserServiceManager(IDENTITY, host.deps());
+
+    expect(await manager.restartRetargeted(STABLE)).toBe(true);
+
+    const written = host.files.get(unitPath) ?? '';
+    expect(execPathFromUnitBody(written)).toBe(STABLE);
+    expect(written).toContain(`ExecStart=${STABLE} serve`);
+    expect(written).toContain('WorkingDirectory="/opt/My Apps"');
+    expect(written).toContain('StandardOutput=append:/home/test/logs/example.log');
+    expect(host.argv).toEqual([
+      ['systemctl', '--user', 'daemon-reload'],
+      ['systemctl', '--user', '--no-block', 'restart', 'example.service'],
+    ]);
+  });
+
+  it('on linux only restarts a unit that already runs the program', async () => {
+    const host = new FakeServiceHost();
+    const unitPath = '/home/test/.config/systemd/user/example.service';
+    const body = renderSystemdUnitFile({ ...VERSIONED, argv: [STABLE, 'serve'] });
+    host.files.set(unitPath, body);
+
+    expect(await createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)).toBe(
+      false
+    );
+    expect(host.files.get(unitPath)).toBe(body);
+    expect(host.argv).toEqual([
+      ['systemctl', '--user', '--no-block', 'restart', 'example.service'],
+    ]);
+  });
+
+  it('on linux writes nothing when no unit is installed', async () => {
+    const host = new FakeServiceHost();
+    expect(await createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)).toBe(
+      false
+    );
+    expect(host.files.size).toBe(0);
+  });
+
+  it('on darwin rewrites the plist, boots the job out, bootstraps it again and kicks it', async () => {
+    const host = darwinHost();
+
+    expect(await createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)).toBe(
+      true
+    );
+
+    expect(execPathFromUnitBody(host.files.get(PLIST_PATH) ?? '')).toBe(STABLE);
+    expect(host.argv).toEqual([
+      ['launchctl', 'bootout', LAUNCHD_TARGET],
+      BOOTSTRAP,
+      ['launchctl', 'kickstart', '-k', LAUNCHD_TARGET],
+    ]);
+  });
+
+  // A bootstrap right after a bootout often answers error 5 while the old job
+  // is still exiting. Tolerating it left the job out of the domain with the
+  // restart reported as done.
+  it('on darwin retries a bootstrap that answers error 5 and then kicks the job', async () => {
+    const host = darwinHost([eio(), eio()]);
+
+    expect(await createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)).toBe(
+      true
+    );
+
+    expect(host.argv.filter((argv) => argv[1] === 'bootstrap')).toHaveLength(3);
+    expect(host.argv.at(-1)).toEqual(['launchctl', 'kickstart', '-k', LAUNCHD_TARGET]);
+    // Each retry waits, and the waits grow.
+    expect(host.sleeps).toHaveLength(2);
+    expect(host.sleeps[1]).toBeGreaterThan(host.sleeps[0] ?? 0);
+  });
+
+  it('on darwin gives up on a bootstrap that keeps answering error 5, without a kickstart', async () => {
+    const host = darwinHost(Array.from({ length: 20 }, eio));
+
+    await expect(
+      createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)
+    ).rejects.toMatchObject({
+      phase: 'restart',
+      reason: `launchctl bootstrap failed (exit 5): ${EIO_STDERR}`,
+    });
+
+    // Bounded: a handful of attempts, not the twenty the host would answer.
+    const attempts = host.argv.filter((argv) => argv[1] === 'bootstrap').length;
+    expect(attempts).toBeGreaterThan(1);
+    expect(attempts).toBeLessThanOrEqual(6);
+    expect(host.argv.some((argv) => argv[1] === 'kickstart')).toBe(false);
+  });
+
+  it('on darwin does not retry a bootstrap refusal that is not error 5', async () => {
+    const host = darwinHost([{ exitCode: 1, stdout: '', stderr: 'Load failed: 1: bad plist' }]);
+
+    await expect(
+      createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)
+    ).rejects.toMatchObject({
+      reason: 'launchctl bootstrap failed (exit 1): Load failed: 1: bad plist',
+    });
+
+    expect(host.argv.filter((argv) => argv[1] === 'bootstrap')).toHaveLength(1);
+    expect(host.sleeps).toEqual([]);
+  });
+
+  // Error 5 also answers a bootstrap that failed for any other reason. Only a
+  // job launchd still lists is one that is exiting, which is the wait's reason.
+  it('on darwin gives up at once on error 5 when the job is no longer in the domain', async () => {
+    const host = darwinHost([eio()], { print: [notLoaded()] });
+
+    await expect(
+      createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)
+    ).rejects.toMatchObject({ reason: `launchctl bootstrap failed (exit 5): ${EIO_STDERR}` });
+
+    expect(host.argv.filter((argv) => argv[1] === 'bootstrap')).toHaveLength(1);
+    expect(host.sleeps).toEqual([]);
+  });
+
+  it('on darwin retries error 37 (operation in progress) while the job is still loaded', async () => {
+    const host = darwinHost([
+      { exitCode: 37, stdout: '', stderr: 'Bootstrap failed: 37: Operation already in progress' },
+    ]);
+
+    await createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE);
+
+    expect(host.argv.filter((argv) => argv[1] === 'bootstrap')).toHaveLength(2);
+    expect(host.argv.at(-1)).toEqual(['launchctl', 'kickstart', '-k', LAUNCHD_TARGET]);
+  });
+
+  it('on darwin retries on the exit code alone, not on an error text under another code', async () => {
+    const host = darwinHost([{ exitCode: 1, stdout: '', stderr: EIO_STDERR }]);
+
+    await expect(
+      createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)
+    ).rejects.toMatchObject({ reason: `launchctl bootstrap failed (exit 1): ${EIO_STDERR}` });
+
+    expect(host.argv.filter((argv) => argv[1] === 'bootstrap')).toHaveLength(1);
+  });
+
+  it('on darwin waits for a job that is still exiting when the bootout says it is in progress', async () => {
+    const stillLoaded = (): UserServiceExecResult => ({ exitCode: 0, stdout: '', stderr: '' });
+    const host = darwinHost([], {
+      bootout: [inProgress()],
+      print: [stillLoaded(), stillLoaded(), notLoaded()],
+    });
+
+    await createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE);
+
+    expect(host.argv.map((argv) => argv[1])).toEqual([
+      'bootout',
+      'print',
+      'print',
+      'print',
+      'bootstrap',
+      'kickstart',
+    ]);
+    expect(host.sleeps).toHaveLength(2);
+  });
+
+  it('on darwin names a bootout that failed with the job still loaded, without a bootstrap', async () => {
+    const host = darwinHost([], {
+      bootout: [{ exitCode: 1, stdout: '', stderr: 'Operation not permitted' }],
+    });
+
+    await expect(
+      createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)
+    ).rejects.toMatchObject({
+      reason: 'launchctl bootout failed (exit 1): Operation not permitted',
+    });
+
+    expect(host.argv.some((argv) => argv[1] === 'bootstrap')).toBe(false);
+  });
+
+  it('on darwin carries on past a bootout that failed because nothing was loaded', async () => {
+    const host = darwinHost([], {
+      bootout: [{ exitCode: 3, stdout: '', stderr: 'No such process' }],
+      print: [notLoaded()],
+    });
+
+    await createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE);
+
+    expect(host.argv.at(-1)).toEqual(['launchctl', 'kickstart', '-k', LAUNCHD_TARGET]);
+  });
+
+  it('on darwin only restarts a plist that already runs the program', async () => {
+    const host = darwinHost();
+    host.files.set(
+      PLIST_PATH,
+      renderLaunchdPlistFile('com.example.unit', { ...VERSIONED, argv: [STABLE, 'serve'] })
+    );
+
+    expect(await createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)).toBe(
+      false
+    );
+    expect(host.argv.some((argv) => argv[1] === 'bootout')).toBe(false);
+    expect(host.argv.at(-1)).toEqual(['launchctl', 'kickstart', '-k', LAUNCHD_TARGET]);
+  });
+
+  it('on darwin install retries a bootstrap that answers error 5 too', async () => {
+    const host = darwinHost([eio()]);
+
+    await createUserServiceManager(IDENTITY, host.deps()).install(DEFINITION);
+
+    expect(host.argv.filter((argv) => argv[1] === 'bootstrap')).toHaveLength(2);
+    expect(host.argv.at(-1)).toEqual(['launchctl', 'kickstart', '-k', LAUNCHD_TARGET]);
+  });
+
+  describe('failure phases', () => {
+    const LINUX_UNIT_PATH = '/home/test/.config/systemd/user/example.service';
+
+    function linuxHost(failing?: string): FakeServiceHost {
+      const host = new FakeServiceHost({
+        onExec: (argv) =>
+          failing !== undefined && argv.includes(failing)
+            ? { exitCode: 1, stdout: '', stderr: `${failing} refused` }
+            : undefined,
+      });
+      host.files.set(LINUX_UNIT_PATH, renderSystemdUnitFile(VERSIONED));
+      return host;
+    }
+
+    async function failureOf(manager: UserServiceManager): Promise<unknown> {
+      return await manager.restartRetargeted(STABLE).catch((error: unknown) => error);
+    }
+
+    it('on linux names the rewrite phase when systemd cannot reread the unit, without restarting', async () => {
+      const host = linuxHost('daemon-reload');
+
+      const failure = await failureOf(createUserServiceManager(IDENTITY, host.deps()));
+
+      expect(failure).toBeInstanceOf(RestartRetargetedError);
+      expect(failure).toMatchObject({ phase: 'rewrite', unitMoved: false });
+      expect(host.argv.some((argv) => argv.includes('restart'))).toBe(false);
+    });
+
+    it('on linux names the rewrite phase for a unit that names no program', async () => {
+      const host = new FakeServiceHost();
+      host.files.set(LINUX_UNIT_PATH, '[Service]\nType=simple\n');
+
+      const failure = await failureOf(createUserServiceManager(IDENTITY, host.deps()));
+
+      expect(failure).toMatchObject({ phase: 'rewrite', unitMoved: false });
+      expect((failure as Error).message).toContain('names no program to retarget');
+    });
+
+    it('on linux names the restart phase, with the unit already moved, when the restart fails', async () => {
+      const host = linuxHost('restart');
+
+      const failure = await failureOf(createUserServiceManager(IDENTITY, host.deps()));
+
+      expect(failure).toBeInstanceOf(RestartRetargetedError);
+      expect(failure).toMatchObject({ phase: 'restart', unitMoved: true });
+      expect((failure as Error).message).toContain(`updated to run ${STABLE}`);
+      expect((failure as Error).message).toContain('restart refused');
+      // The file stays moved, so a later start or restart runs the new program.
+      expect(execPathFromUnitBody(host.files.get(LINUX_UNIT_PATH) ?? '')).toBe(STABLE);
+    });
+
+    it('on linux names the restart phase without a move when the unit already ran the program', async () => {
+      const host = linuxHost('restart');
+      host.files.set(
+        LINUX_UNIT_PATH,
+        renderSystemdUnitFile({ ...VERSIONED, argv: [STABLE, 'serve'] })
+      );
+
+      await expect(
+        failureOf(createUserServiceManager(IDENTITY, host.deps()))
+      ).resolves.toMatchObject({ phase: 'restart', unitMoved: false });
+    });
+
+    it('on darwin names the rewrite phase for a plist that names no program, leaving the job loaded', async () => {
+      const host = darwinHost();
+      host.files.set(PLIST_PATH, '<plist><dict></dict></plist>');
+
+      const failure = await failureOf(createUserServiceManager(IDENTITY, host.deps()));
+
+      expect(failure).toMatchObject({ phase: 'rewrite', unitMoved: false });
+      // Nothing was rewritten, so nothing was booted out either.
+      expect(host.argv).toEqual([]);
+    });
+
+    it('on darwin names the restart phase, with the plist already moved, when the bootstrap gives up', async () => {
+      const host = darwinHost(Array.from({ length: 20 }, eio));
+
+      const failure = await failureOf(createUserServiceManager(IDENTITY, host.deps()));
+
+      expect(failure).toBeInstanceOf(RestartRetargetedError);
+      expect(failure).toMatchObject({ phase: 'restart', unitMoved: true });
+      expect((failure as Error).message).toContain('launchctl bootstrap failed (exit 5)');
+      expect(execPathFromUnitBody(host.files.get(PLIST_PATH) ?? '')).toBe(STABLE);
+    });
+
+    it('on darwin names the restart phase without a move when the kickstart of an unchanged plist fails', async () => {
+      const host = new FakeServiceHost({
+        platform: 'darwin',
+        onExec: (argv) =>
+          argv[1] === 'kickstart' ? { exitCode: 113, stdout: '', stderr: 'no service' } : undefined,
+      });
+      host.files.set(
+        PLIST_PATH,
+        renderLaunchdPlistFile('com.example.unit', { ...VERSIONED, argv: [STABLE, 'serve'] })
+      );
+
+      await expect(
+        failureOf(createUserServiceManager(IDENTITY, host.deps()))
+      ).resolves.toMatchObject({ phase: 'restart', unitMoved: false });
+    });
+  });
+
+  describe('on win32', () => {
+    const OLD_PROGRAM = 'C:\\Users\\me\\scoop\\apps\\mangostudio\\0.1.1\\mangostudio.exe';
+    const NEW_PROGRAM = "C:\\Users\\it's me\\scoop\\apps\\mangostudio\\current\\mangostudio.exe";
+    const WINDOWS_DEFINITION: UserServiceDefinition = {
+      description: 'Example (serve)',
+      argv: [OLD_PROGRAM, 'serve', '--port', '4100'],
+      workingDirectory: 'C:\\Users\\me',
+      env: { EXAMPLE_LOG: 'C:\\logs\\it.log' },
+      logFile: 'C:\\logs\\example.log',
+    };
+
+    /** The `-Argument` Register-ScheduledTask records for `definition`. */
+    function taskArgumentsFor(definition: UserServiceDefinition): string {
+      const encoded = Buffer.from(renderScheduledTaskRunnerScript(definition), 'utf16le').toString(
+        'base64'
+      );
+      return `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ${encoded}`;
+    }
+
+    function runnerOf(taskArguments: string): string {
+      return (
+        decodePowerShellArgv(['-EncodedCommand', taskArguments.split(/\s+/).at(-1) ?? '']) ?? ''
+      );
+    }
+
+    /** A host that answers the status script with `taskArguments` and records every script. */
+    function hostWithTask(
+      taskArguments: string | null,
+      setExit = 0,
+      startExit = 0
+    ): FakeServiceHost {
+      return new FakeServiceHost({
+        platform: 'win32',
+        onExec: (argv) => {
+          const script = decodePowerShellArgv(argv) ?? '';
+          if (script.includes('ConvertTo-Json')) {
+            return {
+              exitCode: 0,
+              stdout: `${JSON.stringify(
+                taskArguments === null
+                  ? { installed: false }
+                  : {
+                      installed: true,
+                      state: 3,
+                      enabled: true,
+                      execute: 'powershell.exe',
+                      arguments: taskArguments,
+                    }
+              )}\r\n`,
+              stderr: '',
+            };
+          }
+          if (script.includes('Set-ScheduledTask') && setExit !== 0) {
+            return { exitCode: setExit, stdout: '', stderr: 'Access is denied' };
+          }
+          if (script.includes('Start-ScheduledTask') && startExit !== 0) {
+            return { exitCode: startExit, stdout: '', stderr: 'The task is disabled' };
+          }
+          return { exitCode: 0, stdout: '', stderr: '' };
+        },
+      });
+    }
+
+    function scriptsRun(host: FakeServiceHost): string[] {
+      return host.argv.map((argv) => decodePowerShellArgv(argv) ?? '');
+    }
+
+    it('swaps the program in the runner script and keeps everything else in it', async () => {
+      const host = hostWithTask(taskArgumentsFor(WINDOWS_DEFINITION));
+
+      expect(
+        await createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(NEW_PROGRAM)
+      ).toBe(true);
+
+      const scripts = scriptsRun(host);
+      // Retarget first, then the restart that starts what was written.
+      expect(scripts.findIndex((script) => script.includes('Set-ScheduledTask'))).toBeLessThan(
+        scripts.findIndex((script) => script.includes('Start-ScheduledTask'))
+      );
+      const setScript = scripts.find((script) => script.includes('Set-ScheduledTask'));
+      expect(setScript).toContain("Set-ScheduledTask -TaskName 'Example Unit' -Action $action");
+      expect(setScript).not.toContain('Register-ScheduledTask');
+      // The new argument is computed here and handed over whole; the script
+      // does not decode, rewrite or re-encode anything.
+      expect(setScript).not.toContain('FromBase64String');
+      const newArgument = /\$action\.Arguments = '((?:[^']|'')*)'/
+        .exec(setScript ?? '')?.[1]
+        ?.replaceAll("''", "'");
+      expect(newArgument).toBe(
+        taskArgumentsFor({ ...WINDOWS_DEFINITION, argv: [NEW_PROGRAM, 'serve', '--port', '4100'] })
+      );
+      expect(programFromTaskAction('powershell.exe', newArgument ?? null)).toBe(NEW_PROGRAM);
+    });
+
+    it('only restarts when the task is absent or already runs the program', async () => {
+      const absent = hostWithTask(null);
+      expect(
+        await createUserServiceManager(IDENTITY, absent.deps()).restartRetargeted('C:\\x.exe')
+      ).toBe(false);
+      const current = hostWithTask(taskArgumentsFor(WINDOWS_DEFINITION));
+      expect(
+        await createUserServiceManager(IDENTITY, current.deps()).restartRetargeted(OLD_PROGRAM)
+      ).toBe(false);
+      for (const host of [absent, current]) {
+        const scripts = scriptsRun(host);
+        expect(scripts.filter((script) => script.includes('Set-ScheduledTask'))).toEqual([]);
+        expect(scripts.some((script) => script.includes('Start-ScheduledTask'))).toBe(true);
+      }
+    });
+
+    it('refuses a task that does not run an encoded runner script, without restarting', async () => {
+      const host = hostWithTask('-NoProfile -File C:\\other.ps1');
+      await expect(
+        createUserServiceManager(IDENTITY, host.deps()).restartRetargeted('C:\\x.exe')
+      ).rejects.toMatchObject({
+        message: expect.stringContaining('does not run an encoded runner script'),
+      });
+      expect(scriptsRun(host).some((script) => script.includes('Start-ScheduledTask'))).toBe(false);
+    });
+
+    it('refuses a program that pushes the argument over what Task Scheduler accepts, before writing', async () => {
+      const host = hostWithTask(taskArgumentsFor(WINDOWS_DEFINITION));
+      const tooLong = `C:\\${'long\\'.repeat(1_200)}mangostudio.exe`;
+
+      const failure = await createUserServiceManager(IDENTITY, host.deps())
+        .restartRetargeted(tooLong)
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(RuntimeServiceManagementError);
+      expect((failure as Error).message).toMatch(/is \d+ characters, over the 8192 Task Scheduler/);
+      const scripts = scriptsRun(host);
+      expect(scripts.filter((script) => script.includes('Set-ScheduledTask'))).toEqual([]);
+      expect(scripts.some((script) => script.includes('Start-ScheduledTask'))).toBe(false);
+    });
+
+    it('names the cmdlet and exit code when Task Scheduler refuses the write', async () => {
+      const host = hostWithTask(taskArgumentsFor(WINDOWS_DEFINITION), 1);
+      await expect(
+        createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(NEW_PROGRAM)
+      ).rejects.toMatchObject({
+        phase: 'rewrite',
+        reason: 'Set-ScheduledTask failed (exit 1): Access is denied',
+      });
+      // A task left as it was is not started as if it had been moved.
+      expect(scriptsRun(host).some((script) => script.includes('Start-ScheduledTask'))).toBe(false);
+    });
+
+    it('names the restart phase, with the task already moved, when Start-ScheduledTask fails', async () => {
+      const host = hostWithTask(taskArgumentsFor(WINDOWS_DEFINITION), 0, 1);
+
+      const failure = await createUserServiceManager(IDENTITY, host.deps())
+        .restartRetargeted(NEW_PROGRAM)
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(RestartRetargetedError);
+      expect(failure).toMatchObject({ phase: 'restart', unitMoved: true });
+      expect((failure as Error).message).toContain('The service unit was updated to run');
+      expect((failure as Error).message).toContain('The task is disabled');
+    });
+
+    it('names the rewrite phase, with the task untouched, when Set-ScheduledTask fails', async () => {
+      const host = hostWithTask(taskArgumentsFor(WINDOWS_DEFINITION), 1);
+
+      const failure = await createUserServiceManager(IDENTITY, host.deps())
+        .restartRetargeted(NEW_PROGRAM)
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(RestartRetargetedError);
+      expect(failure).toMatchObject({ phase: 'rewrite', unitMoved: false });
+    });
+
+    it('names the restart phase without a move when the task already ran the program', async () => {
+      const host = hostWithTask(taskArgumentsFor(WINDOWS_DEFINITION), 0, 1);
+
+      await expect(
+        createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(OLD_PROGRAM)
+      ).rejects.toMatchObject({ phase: 'restart', unitMoved: false });
+    });
+
+    it('replaces only the first program line of the runner script', () => {
+      const runner = `& 'C:\\old.exe' serve\n& 'C:\\decoy.exe' tail\nexit 0`;
+      const updated = retargetScheduledTaskArguments(
+        'Example Unit',
+        `-NoProfile -EncodedCommand ${Buffer.from(runner, 'utf16le').toString('base64')}`,
+        'C:\\new.exe'
+      );
+      expect(runnerOf(updated ?? '')).toBe(`& 'C:\\new.exe' serve\n& 'C:\\decoy.exe' tail\nexit 0`);
+    });
+
+    it('does not read a `$` in the program as a replacement pattern', () => {
+      const updated = retargetScheduledTaskArguments(
+        'Example Unit',
+        taskArgumentsFor(WINDOWS_DEFINITION),
+        'C:\\$&\\$1\\new.exe'
+      );
+      expect(programFromTaskAction('powershell.exe', updated)).toBe('C:\\$&\\$1\\new.exe');
+    });
   });
 });
 

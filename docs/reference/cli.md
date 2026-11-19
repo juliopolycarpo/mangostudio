@@ -104,10 +104,23 @@ The unit runs `serve` through whichever program survives an upgrade:
   on Windows — the junction, never the `bin` shim: a `.cmd` would make the
   supervisor supervise `cmd.exe`), so a new version is picked up without
   touching the unit.
-- **Package manager** — the resolved executable, wherever the manager put it.
-  Not the manager's own launcher: the npm wrapper and the Cargo shim on Windows
-  spawn the binary as a child, so a supervisor pointed at one would track the
-  wrapper and not the hub.
+- **Package manager** — the path the manager keeps pointing at the installed
+  build, so the unit follows its upgrades: Homebrew's `<prefix>/bin/mangostudio`,
+  pnpm's shim in the pnpm home (POSIX), Scoop's `current` directory. npm and bun
+  put no version in the resolved executable's path, so it is used as is. Never
+  the npm wrapper, which is a `.js` file. A unit written by an earlier release
+  with a versioned path is moved onto the launcher by `mangostudio restart`, by
+  an upgrade's restart and by the machine page's restart, keeping its
+  environment and arguments. If the rewrite fails the unit is restarted as it was
+  and a warning names `mangostudio service install` as the repair. If the unit
+  was rewritten and its restart fails, that error is reported as it is, saying
+  the unit was updated; there is no second restart. On macOS the machine page's
+  restart cannot do this from inside the hub, whose own launchd job the bootout
+  ends, so it loads a one-shot LaunchAgent (`com.mangostudio.hub.retarget`) that
+  runs `mangostudio restart` and removes itself at the end, logging to
+  `~/.mango/logs/service-retarget.log`; the next hub start removes one that never
+  got there. Its plist lives in `~/.mango/run`, not `~/Library/LaunchAgents`, so
+  a missed cleanup can never run `restart` at login. If that agent cannot be loaded the unit is kicked in place.
 - **Source checkout** — the workspace entry through Bun, with the directory
   `install` was run from as the unit's working directory.
 - **Installer layout with no launcher yet** — this version's own directory. The

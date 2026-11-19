@@ -301,6 +301,26 @@ function derivedLauncher(manager: InstallManager, probe: RestartLauncherProbe): 
 }
 
 /**
+ * The launcher a versioned executable path belongs to, whichever manager laid
+ * it out. A service unit written before it named the launcher records the
+ * versioned path and nothing about its manager, so the layout is all there is
+ * to go on. Unlike {@link restartLauncher} it does not require the executable
+ * to exist: the manager may already have removed that version.
+ * // Usage: launcherForVersionedPath('/opt/homebrew/Cellar/mangostudio/0.1.1/libexec/mangostudio', probe) → '/opt/homebrew/bin/mangostudio'
+ */
+export function launcherForVersionedPath(
+  executable: string,
+  probe: Pick<RestartLauncherProbe, 'platform' | 'pathExists'>
+): string | undefined {
+  const layout: RestartLauncherProbe = { ...probe, execPath: executable };
+  for (const manager of ['homebrew', 'pnpm', 'scoop'] as const) {
+    const launcher = derivedLauncher(manager, layout);
+    if (launcher !== undefined && probe.pathExists(launcher)) return launcher;
+  }
+  return undefined;
+}
+
+/**
  * `InstalledVia` cut to the wire caps — a launcher path or dist root can be
  * arbitrarily long. Shared by the machine API's `GET /machine/update` and
  * the upgrade engine's report, so the two surfaces cannot disagree about how

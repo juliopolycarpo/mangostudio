@@ -18,12 +18,16 @@ import {
   buildHubServiceDefinition,
   createHubServiceManager,
   currentHubExecutable,
+  currentLauncherPath,
   hubServiceLogPath,
   type HubServiceTarget,
   hubServiceTargetFor,
   isAuthSecretPersisted,
 } from '../../modules/machine/application/hub-service';
-import type { HubExecutable } from '../../modules/machine/domain/hub-executable';
+import {
+  type HubExecutable,
+  withStableLauncher,
+} from '../../modules/machine/domain/hub-executable';
 import { hubServiceUnitName } from '../../modules/machine/domain/hub-service-identity';
 import { assertValidPort, type ServiceArgs } from '../args';
 import { ensureServeAuthSecret } from '../auth-secret-setup';
@@ -52,6 +56,8 @@ export interface ServiceDeps {
   assertServeConfig: () => void;
   ensureDirs: () => Promise<void>;
   executable: () => HubExecutable;
+  /** The package manager's launcher that follows its upgrades, when this install has one. */
+  launcherPath: () => string | undefined;
   logFile: () => string;
   platform: NodeJS.Platform;
   env: NodeJS.ProcessEnv;
@@ -113,7 +119,9 @@ async function install(args: ServiceArgs, unit: string, d: Required<ServiceDeps>
   await d.ensureDirs();
 
   const predecessor = await liveInstance(d);
-  const executable = d.executable();
+  // A unit written from this process's own path would record the build's
+  // versioned directory; see `withStableLauncher`.
+  const executable = withStableLauncher(d.executable(), d.launcherPath());
   const target = resolveInstallTarget(args, predecessor, d);
   const definition = buildHubServiceDefinition({
     executable,
@@ -230,6 +238,7 @@ function resolveDeps(deps: Partial<ServiceDeps>): Required<ServiceDeps> {
     assertServeConfig: deps.assertServeConfig ?? assertServeConfig,
     ensureDirs: deps.ensureDirs ?? ensureRuntimeDirs,
     executable: deps.executable ?? (() => currentHubExecutable()),
+    launcherPath: deps.launcherPath ?? currentLauncherPath,
     logFile: deps.logFile ?? hubServiceLogPath,
     platform: deps.platform ?? process.platform,
     env: deps.env ?? process.env,

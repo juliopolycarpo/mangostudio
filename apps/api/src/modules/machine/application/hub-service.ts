@@ -9,6 +9,7 @@ import { join } from 'node:path';
 
 import {
   createUserServiceManager,
+  RestartRetargetedError,
   type UserServiceDefinition,
   type UserServiceExecDeps,
   type UserServiceManager,
@@ -22,12 +23,13 @@ import {
   type MangoConfig,
   RUNTIME_CONFIG_ENV_KEYS,
 } from '../../../lib/config';
-import { getLogsDir } from '../../../lib/mango-paths';
+import { getLogsDir, getRunDir } from '../../../lib/mango-paths';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
 import { readTomlDocument } from '../../../lib/toml';
 import {
   detectInstallOrigin,
   type InstallOriginProbe,
+  launcherForVersionedPath,
   restartLauncher,
 } from '../../updates/domain/install-origin';
 import {
@@ -239,6 +241,96 @@ export function currentLauncherPath(): string | undefined {
   });
 }
 
+export interface StaleUnitProbe {
+  readonly platform: NodeJS.Platform;
+  readonly pathExists: (path: string) => boolean;
+}
+
+/** A unit's recorded program and the launcher it should run instead. */
+export interface RetargetedUnit {
+  readonly from: string;
+  readonly to: string;
+}
+
+/**
+ * The move a unit written before it named the manager's launcher needs, or
+ * null when it needs none. Such a unit records the versioned path the install
+ * had when `service install` ran (Homebrew's Cellar entry, pnpm's `.pnpm`
+ * directory, Scoop's version directory), so a restart after an upgrade starts
+ * the replaced build, or fails once the manager removed that directory. Only a
+ * unit whose program is a versioned path of the same layout as `launcherPath`
+ * qualifies; one the operator pointed somewhere else does not. Reads the unit,
+ * changes nothing.
+ * // Usage: const stale = await staleHubServiceMove(manager, currentLauncherPath())
+ */
+export async function staleHubServiceMove(
+  manager: UserServiceManager,
+  launcherPath: string | undefined,
+  probe: StaleUnitProbe = {
+    platform: process.platform,
+    pathExists: currentHubExecutableProbe().pathExists,
+  }
+): Promise<RetargetedUnit | null> {
+  if (!launcherPath) return null;
+  const { installed, execPath } = await manager.status();
+  if (!installed || !execPath) return null;
+  const sameFile = (a: string, b: string): boolean =>
+    probe.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+  if (sameFile(execPath, launcherPath)) return null;
+  const owner = launcherForVersionedPath(execPath, probe);
+  if (owner === undefined || !sameFile(owner, launcherPath)) return null;
+  return { from: execPath, to: launcherPath };
+}
+
+export interface RestartHubServiceOptions {
+  /** Bring up a stopped unit instead of bouncing a running one. */
+  readonly start?: boolean;
+  readonly probe?: StaleUnitProbe;
+  /** Where the warning for a failed move goes; defaults to stderr. */
+  readonly warn?: (message: string) => void;
+}
+
+/**
+ * Bring the hub's unit up, first moving a stale one onto the launcher as part
+ * of the same supervisor operation (see `UserServiceManager.restartRetargeted`).
+ * The move is a repair, not the point of the call: when the rewrite fails the
+ * unit is brought up as installed after a warning that names the stale path and
+ * the command that rewrites the unit, so an upgrade or a restart never ends
+ * with the hub down because a unit file could not be rewritten.
+ *
+ * A failure after the rewrite is a different thing: the unit is already moved
+ * and its restart failed, so a second restart as installed would only meet the
+ * same refusal. That error is thrown as it is, saying the unit was updated.
+ * Returns the move it made, if any.
+ * // Usage: const moved = await restartHubService(manager, currentLauncherPath())
+ */
+export async function restartHubService(
+  manager: UserServiceManager,
+  launcherPath: string | undefined,
+  options: RestartHubServiceOptions = {}
+): Promise<RetargetedUnit | null> {
+  const stale = await staleHubServiceMove(manager, launcherPath, options.probe);
+  if (stale) {
+    try {
+      await manager.restartRetargeted(stale.to);
+      return stale;
+    } catch (error) {
+      if (error instanceof RestartRetargetedError && error.phase === 'restart') throw error;
+      const reason =
+        error instanceof RestartRetargetedError
+          ? error.reason
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      (options.warn ?? ((message) => process.stderr.write(`mangostudio: ${message}\n`)))(
+        `Could not move the service unit off ${stale.from} onto ${stale.to} (${reason}); starting it as installed. Run "mangostudio service install" to repair the unit.`
+      );
+    }
+  }
+  await (options.start ? manager.start() : manager.restart());
+  return null;
+}
+
 /**
  * The install-origin probe for this process, sharing the platform/execPath/
  * home/localAppData facts {@link currentHubExecutableProbe} already gathers —
@@ -299,7 +391,11 @@ export function isAuthSecretPersisted(config: MangoConfig = getConfig()): boolea
   }
 }
 
-/** The manager for the hub's unit. // Usage: createHubServiceManager().status() */
+/**
+ * The manager for the hub's unit. The launchd retarget helper's plist lives in
+ * the hub's run directory, not in LaunchAgents, so a leftover never runs at login.
+ * // Usage: createHubServiceManager().status()
+ */
 export function createHubServiceManager(deps?: UserServiceExecDeps): UserServiceManager {
-  return createUserServiceManager(HUB_SERVICE_IDENTITY, deps);
+  return createUserServiceManager(HUB_SERVICE_IDENTITY, deps, { retargetHelperDir: getRunDir() });
 }
