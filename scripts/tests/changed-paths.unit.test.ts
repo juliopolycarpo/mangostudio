@@ -296,10 +296,10 @@ describe('relevance policy parity', () => {
   test.each([
     ['build', 'build'],
     ['distribution-build', 'prepare'],
-    ['distribution-build', 'runtime-version'],
     ['distribution-build', 'hub'],
     ['distribution-build', 'build'],
     ['runtime-build', 'runtime'],
+    ['runtime-probe', 'probe'],
     ['smoke-binary', 'binary'],
     ['smoke-container', 'container'],
     ['release-dry-run', 'dry-run-linux'],

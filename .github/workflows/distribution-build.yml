@@ -77,85 +77,96 @@ permissions:
   contents: read
 
 jobs:
+  # The cargo runtime for every target, built on the OS family that can link
+  # it; the packaging job below stages these bytes beside each Bun-compiled hub.
+  # The three cross-linked hosts get a call each, followed by a version probe
+  # that needs only that call, so a probe starts when its own legs finish
+  # rather than after the slowest leg of all eight. A matrix job cannot be
+  # waited on per leg, which is why the platforms split across calls. Together
+  # the four calls cover every release target; the runtime tests pin that.
   runtime:
-    # The cargo runtime for every target, built on the OS family that can link
-    # it; the packaging job below stages these bytes beside each Bun-compiled hub.
     name: Runtime
     uses: $/.github/workflows/runtime-build.yml
     with:
       version: ${{ inputs.version }}
       source_sha: ${{ inputs.source_sha }}
+      platforms: '["linux-x64","linux-x64-musl","darwin-arm64","windows-x64"]'
       artifact_prefix: runtime-${{ inputs.source_sha }}
       profile: ${{ inputs.runtime_profile }}
       record_receipts: true
       cache: ${{ inputs.cache }}
 
-  runtime-version:
-    # The runtime producers cross-link these targets. Execute --version on
-    # their matching hosts and bind the result to the same runtime bytes.
-    # One job per host: both Linux ARM64 targets run on the same ARM64 runner,
-    # so one job probes the gnu and the musl runtime.
-    name: Verify runtime version ${{ matrix.host }}
-    needs: [runtime]
-    runs-on: ${{ matrix.runner }}
-    # Bun setup can wait four minutes; the checkout, download and probe follow it.
-    timeout-minutes: 12
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - host: linux-arm64
-            platforms: linux-arm64 linux-arm64-musl
-            runner: ubuntu-24.04-arm
-          - host: darwin-x64
-            platforms: darwin-x64
-            runner: macos-15-intel
-          - host: windows-arm64
-            platforms: windows-arm64
-            runner: windows-11-arm
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ inputs.source_sha }}
-      - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
-        timeout-minutes: 1
-      - uses: ./.github/actions/setup-bun # zizmor: ignore[self-repository] load the action from the selected source checkout
-      # The host id is a prefix of exactly the platforms this job probes:
-      # `linux-arm64*` selects the gnu and musl runtimes, the other two one each.
-      - name: Download the matching Rust runtimes
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: runtime-${{ inputs.source_sha }}-${{ matrix.host }}*
-          merge-multiple: true
-          path: .mango/runtime-prebuilt
-      - name: Verify each runtime version on the target host
-        shell: bash
-        env:
-          PLATFORMS: ${{ matrix.platforms }}
-          SOURCE_SHA: ${{ inputs.source_sha }}
-          VERSION: ${{ inputs.version }}
-          RUNTIME_PROFILE: ${{ inputs.runtime_profile }}
-        # Every platform is probed even after one fails, so a single run names
-        # each broken runtime.
-        run: |
-          set -uo pipefail
-          failed=0
-          for platform in $PLATFORMS; do
-            PLATFORM="$platform" bun --no-install ./scripts/release/verify-native-runtime.ts || failed=1
-          done
-          exit "$failed"
-      - name: Upload the native runtime version receipts
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: runtime-version-${{ inputs.source_sha }}-${{ matrix.host }}
-          # One `<platform>.json` per probed platform at the artifact root.
-          path: .mango/runtime-versions/*.json
-          include-hidden-files: true
-          retention-days: 1
-          # A retried probe may already have uploaded this source and host receipts.
-          overwrite: true
-          if-no-files-found: error
+  runtime-linux-arm64:
+    name: Runtime
+    uses: $/.github/workflows/runtime-build.yml
+    with:
+      version: ${{ inputs.version }}
+      source_sha: ${{ inputs.source_sha }}
+      platforms: '["linux-arm64","linux-arm64-musl"]'
+      artifact_prefix: runtime-${{ inputs.source_sha }}
+      profile: ${{ inputs.runtime_profile }}
+      record_receipts: true
+      cache: ${{ inputs.cache }}
+
+  runtime-version-linux-arm64:
+    name: Verify runtime version linux-arm64
+    needs: [runtime-linux-arm64]
+    uses: $/.github/workflows/runtime-probe.yml
+    with:
+      host: linux-arm64
+      platforms: linux-arm64 linux-arm64-musl
+      runner: ubuntu-24.04-arm
+      version: ${{ inputs.version }}
+      source_sha: ${{ inputs.source_sha }}
+      profile: ${{ inputs.runtime_profile }}
+
+  runtime-darwin-x64:
+    name: Runtime
+    uses: $/.github/workflows/runtime-build.yml
+    with:
+      version: ${{ inputs.version }}
+      source_sha: ${{ inputs.source_sha }}
+      platforms: '["darwin-x64"]'
+      artifact_prefix: runtime-${{ inputs.source_sha }}
+      profile: ${{ inputs.runtime_profile }}
+      record_receipts: true
+      cache: ${{ inputs.cache }}
+
+  runtime-version-darwin-x64:
+    name: Verify runtime version darwin-x64
+    needs: [runtime-darwin-x64]
+    uses: $/.github/workflows/runtime-probe.yml
+    with:
+      host: darwin-x64
+      platforms: darwin-x64
+      runner: macos-15-intel
+      version: ${{ inputs.version }}
+      source_sha: ${{ inputs.source_sha }}
+      profile: ${{ inputs.runtime_profile }}
+
+  runtime-windows-arm64:
+    name: Runtime
+    uses: $/.github/workflows/runtime-build.yml
+    with:
+      version: ${{ inputs.version }}
+      source_sha: ${{ inputs.source_sha }}
+      platforms: '["windows-arm64"]'
+      artifact_prefix: runtime-${{ inputs.source_sha }}
+      profile: ${{ inputs.runtime_profile }}
+      record_receipts: true
+      cache: ${{ inputs.cache }}
+
+  runtime-version-windows-arm64:
+    name: Verify runtime version windows-arm64
+    needs: [runtime-windows-arm64]
+    uses: $/.github/workflows/runtime-probe.yml
+    with:
+      host: windows-arm64
+      platforms: windows-arm64
+      runner: windows-11-arm
+      version: ${{ inputs.version }}
+      source_sha: ${{ inputs.source_sha }}
+      profile: ${{ inputs.runtime_profile }}
 
   prepare:
     name: Prepare frontend and binary smoke harness
@@ -303,7 +314,19 @@ jobs:
 
   build:
     name: Build immutable distribution
-    needs: [hub, runtime, runtime-version]
+    # Every runtime call and every version probe gates the aggregate, so a
+    # failed probe keeps this job from running.
+    needs:
+      [
+        hub,
+        runtime,
+        runtime-linux-arm64,
+        runtime-darwin-x64,
+        runtime-windows-arm64,
+        runtime-version-linux-arm64,
+        runtime-version-darwin-x64,
+        runtime-version-windows-arm64,
+      ]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:

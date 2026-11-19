@@ -62,6 +62,37 @@ interface WorkflowRunStep {
   readonly env: ReadonlySet<string>;
 }
 
+interface RuntimeCall {
+  readonly uses: string;
+  readonly needs?: unknown;
+  readonly with: Record<string, string>;
+}
+
+/**
+ * Every job of distribution-build.yml that calls the given reusable workflow,
+ * by job id. The runtime matrix is split across several runtime-build.yml calls
+ * so each native-host version probe (a runtime-probe.yml call) waits only on
+ * its own targets.
+ *
+ * @example distributionCalls('runtime-probe.yml')['runtime-version-darwin-x64'].with.host // 'darwin-x64'
+ */
+function distributionCalls(reusable: string): Record<string, RuntimeCall> {
+  const parsed = Bun.YAML.parse(readText('.github/workflows/distribution-build.yml')) as {
+    jobs: Record<string, RuntimeCall>;
+  };
+  return Object.fromEntries(
+    Object.entries(parsed.jobs).filter(([, job]) => job.uses?.endsWith(`/${reusable}`))
+  );
+}
+
+function distributionRuntimeCalls(): Record<string, RuntimeCall> {
+  return distributionCalls('runtime-build.yml');
+}
+
+function distributionProbeCalls(): Record<string, RuntimeCall> {
+  return distributionCalls('runtime-probe.yml');
+}
+
 function parseNeeds(block: string): string[] {
   return (/\n {4}needs: \[([^\]]*)\]/.exec(block)?.[1] ?? '')
     .split(',')
@@ -458,7 +489,10 @@ describe('release workflow binary gate', () => {
     const prepare = extractJobBlock(workflow, 'prepare');
     const hub = extractJobBlock(workflow, 'hub');
     const build = extractJobBlock(workflow, 'build');
-    const runtimeVersion = extractJobBlock(workflow, 'runtime-version');
+    const runtimeVersion = extractJobBlock(
+      readText('.github/workflows/runtime-probe.yml'),
+      'probe'
+    );
     expect(prepare).toContain('bun run build --frontend');
     expect(prepare).toContain('bun ./scripts/release/bundle-binary-smoke.ts');
     expect(prepare).toContain('include-hidden-files: true');
@@ -509,11 +543,22 @@ describe('release workflow binary gate', () => {
     );
     expect(hub).toContain('oven/bun:$' + '{BUN_CHANNEL}-alpine');
     expect(hub).toContain('bun install --frozen-lockfile');
-    expect(build).toContain('needs: [hub, runtime, runtime-version]');
+    // Every runtime call and every version probe gates the aggregate build,
+    // so a failed probe keeps it from running.
+    const buildNeeds = (Bun.YAML.parse(workflow) as { jobs: { build: { needs: string[] } } }).jobs
+      .build.needs;
+    expect([...buildNeeds].sort()).toEqual(
+      [
+        'hub',
+        ...Object.keys(distributionRuntimeCalls()),
+        ...Object.keys(distributionProbeCalls()),
+      ].sort()
+    );
     expect(build).toContain('path: .mango/runtime-prebuilt');
     expect(build).toContain('path: .mango/runtime-versions');
-    expect(extractJobBlock(workflow, 'runtime')).toContain('record_receipts: true');
-    expect(runtimeVersion).toContain('needs: [runtime]');
+    for (const job of Object.keys(distributionRuntimeCalls())) {
+      expect(extractJobBlock(workflow, job), job).toContain('record_receipts: true');
+    }
     expect(runtimeVersion).toContain('bun --no-install ./scripts/release/verify-native-runtime.ts');
     const crossTargets = [
       'linux-arm64',
@@ -521,17 +566,15 @@ describe('release workflow binary gate', () => {
       'darwin-x64',
       'windows-arm64',
     ] as const;
-    // One probe job per native host; the hosts and the platforms each probes
-    // are pinned by the dedicated probe test below.
-    const probed = [...runtimeVersion.matchAll(/^ {12}platforms: (.+)$/gm)].flatMap((match) =>
-      (match[1] as string).split(' ')
+    // One probe per native host, running on that host; the hosts and the
+    // platforms each probes are pinned by the dedicated probe test below.
+    const probed = Object.values(distributionProbeCalls()).flatMap((call) =>
+      call.with.platforms.split(' ')
     );
     expect(probed).toEqual([...crossTargets]);
-    for (const platform of crossTargets) {
-      expect(
-        runtimeVersion,
-        `expected a ${runners[platform]} probe host for ${platform}`
-      ).toContain(`runner: ${runners[platform]}`);
+    for (const call of Object.values(distributionProbeCalls())) {
+      const platform = call.with.host as keyof typeof runners;
+      expect(call.with.runner, `expected a probe runner for ${platform}`).toBe(runners[platform]);
     }
     const preparedInputs = extractStepBlocks(build).find((step) =>
       step.includes('name: Download prepared frontend')
@@ -587,33 +630,59 @@ describe('release workflow binary gate', () => {
   });
 
   test('a matching-host runtime probe can replace its receipt on a job retry', () => {
-    const workflow = readText('.github/workflows/distribution-build.yml');
-    const probe = extractJobBlock(workflow, 'runtime-version');
+    const workflow = readText('.github/workflows/runtime-probe.yml');
+    const probe = extractJobBlock(workflow, 'probe');
     const upload = extractStepBlocks(probe).find((step) =>
       step.includes('name: Upload the native runtime version receipts')
     );
     expect(upload, 'expected the runtime version receipt upload').toBeDefined();
     expect(upload).toContain('uses: actions/upload-artifact@');
     expect(upload).toContain(
-      'name: runtime-version-$' + '{{ inputs.source_sha }}-$' + '{{ matrix.host }}'
+      'name: runtime-version-$' + '{{ inputs.source_sha }}-$' + '{{ inputs.host }}'
     );
     expect(upload, 'expected the source-and-host receipts to be replaceable on retry').toContain(
       'overwrite: true'
     );
   });
 
-  test('one probe job per native host covers every cross-linked runtime target', () => {
-    const probe = extractJobBlock(
-      readText('.github/workflows/distribution-build.yml'),
-      'runtime-version'
+  test('the runtime calls split the matrix so each probe waits only on its own targets', () => {
+    const calls = distributionRuntimeCalls();
+    expect(Object.keys(calls)).toEqual([
+      'runtime',
+      'runtime-linux-arm64',
+      'runtime-darwin-x64',
+      'runtime-windows-arm64',
+    ]);
+    // Between them the calls build every release target exactly once.
+    const built = Object.values(calls).flatMap(
+      (call) => JSON.parse(call.with.platforms) as string[]
     );
-    const hosts = [...probe.matchAll(/- host: (\S+)\n\s+platforms: (.+)\n\s+runner: (\S+)/g)].map(
-      (match) => ({
-        host: match[1] as string,
-        platforms: (match[2] as string).split(' '),
-        runner: match[3] as string,
-      })
-    );
+    expect(
+      [...built].sort(),
+      'expected the runtime calls to build each release target once'
+    ).toEqual(ALL_BINARY_TARGETS.map((target): string => target.arch).sort());
+    for (const [job, call] of Object.entries(calls)) {
+      expect(call.needs, `${job} must not wait on a sibling runtime call`).toBeUndefined();
+    }
+    // Each probe needs the one runtime call that builds the platforms it runs,
+    // never the whole set, which is what let the slowest leg delay every probe.
+    for (const [job, probe] of Object.entries(distributionProbeCalls())) {
+      const runtimeJob = `runtime-${probe.with.host}`;
+      expect(probe.needs, `${job} must need only ${runtimeJob}`).toEqual([runtimeJob]);
+      expect(
+        probe.with.platforms.split(' '),
+        `expected ${job} to probe the platforms ${runtimeJob} builds`
+      ).toEqual(JSON.parse(calls[runtimeJob]?.with.platforms ?? '[]') as string[]);
+    }
+  });
+
+  test('one probe per native host covers every cross-linked runtime target', () => {
+    const probe = extractJobBlock(readText('.github/workflows/runtime-probe.yml'), 'probe');
+    const hosts = Object.values(distributionProbeCalls()).map((call) => ({
+      host: call.with.host as string,
+      platforms: call.with.platforms.split(' '),
+      runner: call.with.runner as string,
+    }));
     expect(hosts).toEqual([
       {
         host: 'linux-arm64',
@@ -635,8 +704,9 @@ describe('release workflow binary gate', () => {
       ).toEqual(platforms);
     }
     expect(probe).toContain(
-      'pattern: runtime-$' + '{{ inputs.source_sha }}-$' + '{{ matrix.host }}*'
+      'pattern: runtime-$' + '{{ inputs.source_sha }}-$' + '{{ inputs.host }}*'
     );
+    expect(probe).toContain('PLATFORMS: $' + '{{ inputs.platforms }}');
     expect(probe).toContain('for platform in $PLATFORMS; do');
     expect(probe).toContain('path: .mango/runtime-versions/*.json');
   });
@@ -698,7 +768,9 @@ describe('release workflow binary gate', () => {
     // Release bytes never start from restored build state: the release path,
     // and the distribution build it shares, never opt in.
     const distribution = readText('.github/workflows/distribution-build.yml');
-    expect(extractJobBlock(distribution, 'runtime')).toContain('cache: $' + '{{ inputs.cache }}');
+    for (const job of Object.keys(distributionRuntimeCalls())) {
+      expect(extractJobBlock(distribution, job), job).toContain('cache: $' + '{{ inputs.cache }}');
+    }
     expect(extractOnBlock(distribution), 'distribution-build.yml cache input').toMatch(
       /\n {6}cache:\n(?: {8}.*\n)*? {8}default: false\n/
     );

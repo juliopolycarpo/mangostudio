@@ -308,7 +308,10 @@ no effect. `.bun-version` stays on the floating `canary` channel.
 Each Rust producer records the source SHA, version, Cargo profile, and
 executable digest. When a producer cross-links a runtime, a separate job on
 the matching host runs that runtime's `--version` and records the result
-against the same digest.
+against the same digest. The distribution build calls `runtime-build.yml` once
+per cross-linked host plus once for the rest, and each host's probe
+(`runtime-probe.yml`) needs only its own call, so it starts when its targets are built instead of after the
+slowest of the eight.
 
 The aggregation job downloads both artifact sets, verifies the complete
 target inventory and both receipts for each pair, and checks the executable

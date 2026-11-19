@@ -344,7 +344,7 @@ describe('setup-bun composite action', () => {
     // after a recovered setup, so each keeps its former budget on top of the
     // four minutes of waits.
     const floors: Record<string, number> = {
-      'workflows/distribution-build.yml#runtime-version': 12,
+      'workflows/runtime-probe.yml#probe': 12,
       'workflows/test.yml#frontend': 14,
     };
     for (const file of githubYamlFiles().filter((name) => name.startsWith('workflows/'))) {
