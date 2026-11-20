@@ -7,6 +7,7 @@ import {
   fakeCliEnvironment,
   installCompiledFakeCli,
   installFakeCli,
+  prepareFakeCli,
   removeFakeCliDirectory,
 } from './fake-cli';
 
@@ -59,6 +60,20 @@ test.skipIf(process.platform !== 'linux')('reports a signaled launcher child as 
   } finally {
     removeFakeCliDirectory(directory);
   }
+});
+
+test('prepareFakeCli has nothing to compile off Windows', () => {
+  expect(prepareFakeCli('linux')).toBeUndefined();
+  expect(prepareFakeCli('darwin')).toBeUndefined();
+});
+
+test('prepareFakeCli compiles the Windows launcher once and reuses it', () => {
+  const launcher = prepareFakeCli('win32');
+  expect(
+    launcher !== undefined && existsSync(launcher),
+    `(fake cli): expected a compiled launcher | received: ${launcher}`
+  ).toBe(true);
+  expect(prepareFakeCli('win32')).toBe(launcher);
 });
 
 test('removeFakeCliDirectory removes the tree and accepts one that is already gone', () => {
