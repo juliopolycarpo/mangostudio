@@ -26,9 +26,14 @@ import {
   compileWithAotOrder,
   type DeadlineTimer,
   parseAotOrder,
+  parsePsProcessTable,
   placeRuntimeBeside,
+  type ProcessRow,
+  procfsProcessLister,
+  psProcessLister,
   recordAotOrder,
   runtimeChildPids,
+  systemProcessLister,
 } from '../lib/aot-order';
 
 const FAKE_HUB = join(import.meta.dir, 'support', 'fake-recording-hub.ts');
@@ -167,13 +172,17 @@ describe('runtimeChildPids', () => {
     fakeProcess(102, 'git', 100, ['/usr/bin/git', 'status']);
     fakeProcess(103, 'mangostudio-run', 999, ['/opt/mangostudio-runtime', '--stdio']);
 
-    expect(runtimeChildPids(100, 'mangostudio-runtime', procRoot)).toEqual([101]);
+    expect(runtimeChildPids(100, 'mangostudio-runtime', procfsProcessLister(procRoot))).toEqual([
+      101,
+    ]);
   });
 
   test('reads the parent after the last parenthesis and finds a runtime started through an interpreter', () => {
     fakeProcess(201, 'my (odd) name', 200, ['bun', '/opt/mangostudio-runtime', '--stdio']);
 
-    expect(runtimeChildPids(200, 'mangostudio-runtime', procRoot)).toEqual([201]);
+    expect(runtimeChildPids(200, 'mangostudio-runtime', procfsProcessLister(procRoot))).toEqual([
+      201,
+    ]);
   });
 
   test('skips non-process entries and a process that ended while being read', () => {
@@ -181,8 +190,69 @@ describe('runtimeChildPids', () => {
     // A numeric entry with no stat file: the process exited between the listing and the read.
     mkdirSync(join(procRoot, '300'));
 
-    expect(runtimeChildPids(1, 'mangostudio-runtime', procRoot)).toEqual([]);
+    expect(runtimeChildPids(1, 'mangostudio-runtime', procfsProcessLister(procRoot))).toEqual([]);
   });
+});
+
+/** A process table held in memory, the way a host without procfs reports it. */
+class FakePsProcessTable {
+  constructor(private readonly rows: readonly ProcessRow[]) {}
+  readonly list = (): readonly ProcessRow[] => this.rows;
+}
+
+describe('runtimeChildPids on a host without procfs', () => {
+  test('finds the runtime among the hub children from a process table with no /proc', () => {
+    const table = new FakePsProcessTable([
+      { pid: 100, ppid: 1, argv: ['/opt/mangostudio', 'serve', '3001'] },
+      { pid: 101, ppid: 100, argv: ['/opt/mangostudio-runtime', '--stdio'] },
+      { pid: 102, ppid: 100, argv: ['/usr/bin/git', 'status'] },
+      { pid: 103, ppid: 999, argv: ['/opt/mangostudio-runtime', '--stdio'] },
+    ]);
+
+    expect(runtimeChildPids(100, 'mangostudio-runtime', table.list)).toEqual([101]);
+  });
+
+  test('parses ps output into pid, parent and command words', () => {
+    const output = [
+      '    1     0 /sbin/launchd',
+      '  100     1 /opt/mangostudio serve 3001',
+      '  101   100 bun /opt/my dir/mangostudio-runtime --stdio',
+      'not a row',
+      '',
+    ].join('\n');
+
+    expect(parsePsProcessTable(output)).toEqual([
+      { pid: 1, ppid: 0, argv: ['/sbin/launchd'] },
+      { pid: 100, ppid: 1, argv: ['/opt/mangostudio', 'serve', '3001'] },
+      { pid: 101, ppid: 100, argv: ['bun', '/opt/my', 'dir/mangostudio-runtime', '--stdio'] },
+    ]);
+    // A path with a space still names the runtime through its last word.
+    expect(runtimeChildPids(100, 'mangostudio-runtime', () => parsePsProcessTable(output))).toEqual(
+      [101]
+    );
+  });
+
+  test('picks procfs on linux, ps on darwin, and refuses win32 by name', () => {
+    expect(systemProcessLister('darwin')).toBe(psProcessLister);
+    expect(systemProcessLister('freebsd')).toBe(psProcessLister);
+    expect(typeof systemProcessLister('linux')).toBe('function');
+    expect(systemProcessLister('linux')).not.toBe(psProcessLister);
+    expect(() => systemProcessLister('win32')).toThrow(
+      'expected a Linux or POSIX host to list child processes | received: win32, where AOT order recording is not supported'
+    );
+  });
+
+  test.skipIf(process.platform === 'win32')(
+    'lists this very process with ps, as its own child of the test runner',
+    () => {
+      const rows = psProcessLister();
+      const self = rows.find((row) => row.pid === process.pid);
+      expect(
+        self?.ppid,
+        `expected ps to list pid ${process.pid} with parent ${process.ppid} | received: ${JSON.stringify(self)}`
+      ).toBe(process.ppid);
+    }
+  );
 });
 
 describe('aotOrderWarning', () => {
