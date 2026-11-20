@@ -41,6 +41,7 @@ import {
 import { RuntimeDiscoveryCache } from '../../../src/services/runtime-client/runtime-discovery-cache';
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import { useLocalConnectDeadlines } from '../../support/local-connect-deadlines';
+import { LocalRuntimeLossWatch } from '../../support/local-runtime-loss-watch';
 import { moduleMockerFor } from '../../support/mocks/module-mocks';
 import { RecordingDiagnosticLogger } from '../../support/mocks/recording-diagnostic-logger';
 import { connectTestRuntime, type TestRuntime } from '../../support/runtime-fixture';
@@ -1980,6 +1981,33 @@ describe('RuntimeConnectionManager', () => {
   function outlastChainDeadline(): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, 30));
   }
+
+  // #2662: a second user's Local connect closes the first user's attested
+  // connection, which its caller sees as `closed with 4000` and no reason.
+  it('logs which users lost their attestation, and to whom, when a second owner connects', async () => {
+    const opens = scriptedLocalOpen();
+    const connector = createLocalRuntimeConnector({ open: opens.open });
+    const watch = new LocalRuntimeLossWatch();
+    watch.start();
+    try {
+      const first = connector(localDefinition('user-1'), () => undefined, connectContext());
+      (await opens.waitForCall(0)).succeed();
+      const firstConnection = await first;
+      expect(firstConnection.identityAttested).toBe(true);
+
+      const second = connector(localDefinition('user-2'), () => undefined, connectContext());
+      (await opens.waitForCall(1)).succeed();
+      const secondConnection = await second;
+
+      const explanation = watch.explain();
+      expect(explanation, explanation).toContain('"event":"attestation_withdrawn"');
+      expect(explanation).toContain('"arrivingUserId":"user-2"');
+      expect(explanation).toContain('"closedUserIds":["user-1"]');
+      await secondConnection.close();
+    } finally {
+      watch.stop();
+    }
+  });
 
   // #925: before claims were reserved ahead of `open`, a second user arriving
   // while the first user's open was still pending read the owner binding as

@@ -18,7 +18,12 @@
 import { statSync } from 'node:fs';
 
 import { RemoteError, RESERVED_ERROR_CODES, type SessionClosure } from '@mangostudio/protocol';
-import { type LaunchedPeer, type SpawnOptions, spawnPort } from '@mangostudio/protocol/spawn';
+import {
+  type ExitStatus,
+  type LaunchedPeer,
+  type SpawnOptions,
+  spawnPort,
+} from '@mangostudio/protocol/spawn';
 import { sanitizeShellEnv } from '@mangostudio/shared/process';
 import type { HubExternalAgentIsolation } from '@mangostudio/shared/runtime-contract';
 
@@ -246,7 +251,19 @@ export async function spawnRuntimeChild(
     // runtime is asked to unwind; the launcher's escalation covers one that
     // will not.
     hub.close();
-    exited = terminatePeer(peer, launch.command, options.environmentId);
+    exited = terminatePeer(peer, launch.command, options.environmentId).then((status) => {
+      // The one line that separates "the hub let go" from "the child died":
+      // both reach a caller as `closed with 4000` and no reason. Logged on
+      // every release, because a hub-initiated one writes no `connection_lost`.
+      logger.info('child_ended', {
+        environmentId: options.environmentId,
+        reason,
+        initiatedBy: notify ? 'child-or-pipe' : 'hub',
+        exitCode: status.code,
+        signal: status.signal,
+        stderr: excerpt(peer.stderrTail()),
+      });
+    });
     if (notify) options.onClosed();
     return exited;
   };
@@ -270,11 +287,12 @@ async function terminatePeer(
   peer: LaunchedPeer,
   command: string,
   environmentId: string
-): Promise<void> {
+): Promise<ExitStatus> {
   const status = await peer.terminate();
   if (status === undefined) {
     throw new RuntimeTerminationIncompleteError(command, environmentId);
   }
+  return status;
 }
 
 /**

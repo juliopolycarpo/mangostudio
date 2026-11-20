@@ -20,6 +20,7 @@ import {
 } from '../../../src/services/runtime-client/runtime-connection-manager';
 import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';
 import { insertTestChat, insertTestUser } from '../../support/factories';
+import { LocalRuntimeLossWatch } from '../../support/local-runtime-loss-watch';
 import { DeferredSpawnPort } from '../../support/mocks/deferred-spawn-port';
 import { TEST_RUNTIME_MANIFEST } from '../../support/runtime-fixture';
 
@@ -311,6 +312,59 @@ describe('spawnRuntimeChild — incomplete termination', () => {
     expect((first as Error).message).toContain('fake-runtime');
     expect(await connection.close().catch((error: unknown) => error)).toBe(first);
     expect(fake.terminationCalls).toBe(1);
+  });
+});
+
+describe('spawnRuntimeChild — child_ended log', () => {
+  /** Opens a connection on a fake peer, with the loss watch recording the hub log. */
+  async function openWatched(watch: LocalRuntimeLossWatch) {
+    const fake = new DeferredSpawnPort();
+    const closed = Promise.withResolvers<void>();
+    const connecting = spawnRuntimeChild(
+      {
+        environmentId: 'devbox',
+        launch: { command: 'fake-runtime', args: [] },
+        workspaceBinding: null,
+        hubVersion: 'hub-test',
+        onClosed: closed.resolve,
+      },
+      { spawnPort: fake.spawnPort }
+    );
+    const runtime = fake.release();
+    if (!runtime) throw new Error('expected runtime session | received: none');
+    watch.start();
+    return { runtime, connection: await connecting, closed: closed.promise };
+  }
+
+  it('says the hub ended the connection, with the exit status', async () => {
+    const watch = new LocalRuntimeLossWatch();
+    try {
+      const { connection } = await openWatched(watch);
+      await connection.close();
+
+      const explanation = watch.explain();
+      expect(explanation, explanation).toContain('"event":"child_ended"');
+      expect(explanation).toContain('"initiatedBy":"hub"');
+      expect(explanation).toContain('"signal":"SIGTERM"');
+    } finally {
+      watch.stop();
+    }
+  });
+
+  it('says the child or its pipe ended the connection when the runtime side closes first', async () => {
+    const watch = new LocalRuntimeLossWatch();
+    try {
+      const { runtime, closed } = await openWatched(watch);
+      await runtime.close();
+      await closed;
+      await Promise.resolve();
+
+      const explanation = watch.explain();
+      expect(explanation, explanation).toContain('"event":"child_ended"');
+      expect(explanation).toContain('"initiatedBy":"child-or-pipe"');
+    } finally {
+      watch.stop();
+    }
   });
 });
 
