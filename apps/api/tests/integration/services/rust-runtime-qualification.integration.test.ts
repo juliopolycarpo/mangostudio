@@ -59,7 +59,7 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import { spawnPort } from '@mangostudio/protocol/spawn';
+import { type LaunchedPeer, spawnPort } from '@mangostudio/protocol/spawn';
 import {
   RUNTIME_CONSENT_PRESETS,
   runtimeSlotCurrentBinaryPath,
@@ -84,6 +84,7 @@ import { RuntimeDiscoveryCache } from '../../../src/services/runtime-client/runt
 import { setRuntimeTokenStoreForTests } from '../../../src/services/runtime-client/runtime-token-secrets';
 import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';
 import { insertTestUser } from '../../support/factories';
+import { describeInstallStall, stallProbeLogPath } from '../../support/install-stall-probe';
 import { InMemorySecretStore } from '../../support/mocks/mock-secret-store';
 import { expectRuntimeChildAlive } from '../../support/runtime-child-liveness';
 import {
@@ -104,6 +105,7 @@ import {
 } from '../../support/rust-runtime-binary';
 import {
   expectAppliedOnce,
+  type FakeInstaller,
   processGone,
   startRelayedInstall,
   waitUntil,
@@ -112,6 +114,25 @@ import {
 import { connectUntilListening, reserveEphemeralPort } from '../../support/rust-serve-dial';
 
 const binary = resolveRustRuntimeBinary();
+
+/** What a timed-out `waitForLine` appends about the runtime and the installer (#1311). */
+function stallDiagnosis(
+  client: RuntimeClient,
+  installer: FakeInstaller,
+  runId: string,
+  peer: () => LaunchedPeer | undefined
+): () => Promise<string> {
+  const startedAt = Date.now();
+  return () =>
+    describeInstallStall({
+      runtime: client,
+      runtimePid: () => peer()?.pid,
+      runtimeStderr: () => peer()?.stderrTail() ?? '',
+      runId,
+      startedAt,
+      probeLogPath: stallProbeLogPath(installer.logPath),
+    });
+}
 
 async function setRustRuntimeProfile(mangoHome: string, profile: 'full' | 'none'): Promise<void> {
   const setup = Bun.spawn({
@@ -529,15 +550,19 @@ describe('Real Rust runtime qualification', () => {
         mangoHome = await scratchMangoHome('stdio-install');
         previousMangoHome = process.env.MANGO_HOME;
         process.env.MANGO_HOME = mangoHome;
-        const connection = await spawnRuntimeChild({
-          environmentId: 'rust-stdio-install',
-          launch: resolveRuntimeLaunchCommand(undefined, {
-            MANGOSTUDIO_RUNTIME_BINARY: binary.path,
-          }),
-          workspaceBinding: null,
-          hubVersion: runtimeVersion,
-          onClosed: () => undefined,
-        });
+        let peer: LaunchedPeer | undefined;
+        const connection = await spawnRuntimeChild(
+          {
+            environmentId: 'rust-stdio-install',
+            launch: resolveRuntimeLaunchCommand(undefined, {
+              MANGOSTUDIO_RUNTIME_BINARY: binary.path,
+            }),
+            workspaceBinding: null,
+            hubVersion: runtimeVersion,
+            onClosed: () => undefined,
+          },
+          { spawnPort: (options) => (peer = spawnPort(options)) }
+        );
         const scratchRoot = await realpath(await scratchMangoHome('stdio-install-dir'));
         const scratch = join(scratchRoot, "O'Brien O’Brien café 雪");
         try {
@@ -560,6 +585,7 @@ describe('Real Rust runtime qualification', () => {
           const run = startRelayedInstall(client, installer, {
             runId: 'rust-install-cancel',
             signal: abort.signal,
+            diagnose: stallDiagnosis(client, installer, 'rust-install-cancel', () => peer),
           });
           await run.waitForLine('stdout', 'waiting');
           await run.waitForLine('stderr', 'warn');
@@ -611,15 +637,19 @@ describe('Real Rust runtime qualification', () => {
         mangoHome = await scratchMangoHome('stdio-install-hub-loss');
         previousMangoHome = process.env.MANGO_HOME;
         process.env.MANGO_HOME = mangoHome;
-        const connection = await spawnRuntimeChild({
-          environmentId: 'rust-stdio-install-hub-loss',
-          launch: resolveRuntimeLaunchCommand(undefined, {
-            MANGOSTUDIO_RUNTIME_BINARY: binary.path,
-          }),
-          workspaceBinding: null,
-          hubVersion: runtimeVersion,
-          onClosed: () => undefined,
-        });
+        let peer: LaunchedPeer | undefined;
+        const connection = await spawnRuntimeChild(
+          {
+            environmentId: 'rust-stdio-install-hub-loss',
+            launch: resolveRuntimeLaunchCommand(undefined, {
+              MANGOSTUDIO_RUNTIME_BINARY: binary.path,
+            }),
+            workspaceBinding: null,
+            hubVersion: runtimeVersion,
+            onClosed: () => undefined,
+          },
+          { spawnPort: (options) => (peer = spawnPort(options)) }
+        );
         const scratch = await realpath(await scratchMangoHome('stdio-install-hub-loss-dir'));
         try {
           const client = new RuntimeClient(
@@ -628,7 +658,10 @@ describe('Real Rust runtime qualification', () => {
             'rust-stdio-install-hub-loss'
           );
           const installer = await writeFakeInstaller(scratch, 'waits', 'hub-loss');
-          const run = startRelayedInstall(client, installer, { runId: 'rust-install-hub-loss' });
+          const run = startRelayedInstall(client, installer, {
+            runId: 'rust-install-hub-loss',
+            diagnose: stallDiagnosis(client, installer, 'rust-install-hub-loss', () => peer),
+          });
           await run.waitForLine('stdout', 'waiting');
 
           // Closing the session marks the chain stopping. The active step
