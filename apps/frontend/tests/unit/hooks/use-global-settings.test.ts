@@ -1430,6 +1430,9 @@ describe('useGlobalSettings when a refetch lands mid-burst', () => {
       mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r2"', globalImageQuality: '4K' })
     );
     await refetchAppSettings(result.current.queryClient);
+    // The hook re-anchors the burst on r2 in an effect after the refetch
+    // renders. An edit before that still sends r1, which a slow runner hit.
+    await waitFor(() => expect(result.current.settings.globalImageQuality).toBe('4K'));
     act(() => result.current.settings.setMaxToolIterations(TOOL_ITERATIONS_B));
 
     // Yet another write lands before this flush, so r2 is rejected.
