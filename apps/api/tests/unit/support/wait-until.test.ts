@@ -89,10 +89,12 @@ describe('waitUntil', () => {
   it('fails an unsatisfied condition with the expectation and timeout', async () => {
     const condition = new FakeCondition(Infinity);
 
-    await expect(waitUntil(condition.matches, 'the child PID marker', 10)).rejects.toThrow(
-      'expected the child PID marker | received: nothing within 10ms'
+    // Several 20 ms polls wide. A 10 ms budget gave one check whenever the
+    // first one or a Windows clock tick (about 15.6 ms) used it all up.
+    await expect(waitUntil(condition.matches, 'the child PID marker', 100)).rejects.toThrow(
+      'expected the child PID marker | received: nothing within 100ms'
     );
-    expect(condition.checks).toBeGreaterThan(1);
+    expect(condition.checks, `received: ${condition.checks} checks`).toBeGreaterThan(1);
   });
 
   it('includes the last observation when readiness times out', async () => {
