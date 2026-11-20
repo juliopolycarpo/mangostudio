@@ -170,15 +170,19 @@ function joinOutputStreams(stdout: string, stderr: string): string {
   return `${stdout}\n${stderr}`;
 }
 
-function runCheck(root: string, workspace: string): CheckRun {
+function requiredCheckCommand(workspace: string): string[] {
   // The protocol lane runs its cycle scan as its own task, outside Turbo.
   const protocolTask = protocolCheckTasks(['--ts-only'], { cargo: false, cargoHack: false }).find(
     (task) => task.label === 'protocol:cycles'
   );
   const command = workspace.startsWith('apps/')
     ? ['bun', 'run', 'check', `--${workspace.slice(5)}`]
-    : (protocolTask?.cmd ?? []);
-  const result = Bun.spawnSync(command, {
+    : [...(protocolTask?.cmd ?? [])];
+  return command;
+}
+
+function runCheck(root: string, workspace: string): CheckRun {
+  const result = Bun.spawnSync(requiredCheckCommand(workspace), {
     cwd: root,
     stdout: 'pipe',
     stderr: 'pipe',
@@ -187,6 +191,21 @@ function runCheck(root: string, workspace: string): CheckRun {
     exitCode: result.exitCode,
     output: joinOutputStreams(result.stdout.toString(), result.stderr.toString()),
   };
+}
+
+/** The required check without blocking the event loop, so batch scans can overlap. */
+async function runCheckAsync(root: string, workspace: string): Promise<CheckRun> {
+  const child = Bun.spawn(requiredCheckCommand(workspace), {
+    cwd: root,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    child.stdout.text(),
+    child.stderr.text(),
+    child.exited,
+  ]);
+  return { exitCode, output: joinOutputStreams(stdout, stderr) };
 }
 
 /**
@@ -218,12 +237,15 @@ async function scanCycles(
 async function scanCheckedCycles(
   root: string,
   workspace: string,
-  commands: { runCheck: typeof runCheck; scanCycles: typeof scanCycles } = {
-    runCheck,
+  commands: {
+    runCheck: (root: string, workspace: string) => CheckRun | Promise<CheckRun>;
+    scanCycles: typeof scanCycles;
+  } = {
+    runCheck: runCheckAsync,
     scanCycles,
   }
 ) {
-  const required = commands.runCheck(root, workspace);
+  const required = await commands.runCheck(root, workspace);
   try {
     const counted = await commands.scanCycles(root, [workspace]);
     return { required, circularDeps: counted.circularDeps, output: counted.output };
@@ -323,16 +345,43 @@ function expectCaseReported(
  * @example
  * defineBatch('apps/api rejects', cases, () => scanWorkspaceCases('apps/api', cases), assertFails);
  */
+/** Scans registered by `defineBatch`, started together by the file-level hook. */
+const batchScans: Array<() => Promise<unknown>> = [];
+const SCAN_CONCURRENCY = 4;
+
+/**
+ * Run every registered batch scan, a few at a time. The scans are separate
+ * processes over separate fixtures and `scanCheckedCycles` waits on them
+ * without blocking, so they overlap instead of queueing one hook after another.
+ * Each result is kept for its batch, and a failed scan fails only that batch.
+ */
+async function startBatchScans(): Promise<void> {
+  const queue = [...batchScans];
+  const worker = async (): Promise<void> => {
+    for (let next = queue.shift(); next; next = queue.shift()) {
+      await next().catch(() => undefined);
+    }
+  };
+  await Promise.all(Array.from({ length: SCAN_CONCURRENCY }, worker));
+}
+
 function defineBatch<Scan extends { readonly output: string; readonly required?: CheckRun }>(
   title: string,
   cases: readonly CycleCase[],
   scan: () => Scan | Promise<Scan>,
   assertWhole: (scan: Scan) => void
 ): void {
+  let started: Promise<Scan> | undefined;
+  batchScans.push(() => (started = Promise.resolve().then(scan)));
   describe(title, () => {
     let result: Scan;
     beforeAll(async () => {
-      result = await scan();
+      if (!started) {
+        throw new Error(
+          `${title}: expected the file-level beforeAll to start this scan | received no started scan`
+        );
+      }
+      result = await started;
     });
     test(`rejects all ${cases.length} cases together`, () => assertWhole(result));
     for (const batchCase of cases) {
@@ -780,8 +829,9 @@ describe('checked cycle evidence', () => {
   });
 });
 
-beforeAll(() => {
+beforeAll(async () => {
   baseFixture = buildBaseFixture();
+  await startBatchScans();
 });
 
 afterEach(removeFixtures);
@@ -842,6 +892,20 @@ describe('import cycle checks', () => {
     () => scanKinds(KIND_CASES),
     (scan) => expectCycleCount(scan.circularDeps, KIND_CASES.length, 'apps/api cycle kinds')
   );
+
+  test('runs the required check without blocking and reports the same verdict as the blocking run', async () => {
+    const root = createFixture();
+    const clean = await runCheckAsync(root, 'apps/api');
+    expectCheck(clean, 'pass', 'apps/api async check of a clean fixture');
+    injectCycle(root, 'apps/api/src', TYPE_CYCLE);
+    const cyclic = await runCheckAsync(root, 'apps/api');
+    expectCheck(
+      cyclic,
+      'fail',
+      'apps/api async check with src/a.ts and src/b.ts importing each other'
+    );
+    expect(cyclic.output).toContain(NO_IMPORT_CYCLES);
+  });
 
   test('rejects an ignored cycle introduced after a clean required workspace check', async () => {
     const root = createFixture();
