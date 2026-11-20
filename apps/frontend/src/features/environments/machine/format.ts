@@ -55,7 +55,10 @@ export function supervisorLabel(t: CoreMessages, platform: UserServicePlatform):
  * and services; a guard reason the machine page has no sentence for falls back
  * to the install wording, which at least names the check.
  */
-export function machineGuardReasonLabel(t: CoreMessages, reason: InstallGuardReason): string {
+export function machineGuardReasonLabel(
+  t: LoadedMessages<'environments'>,
+  reason: InstallGuardReason
+): string {
   const specific = t.environments.machine.actions.guard as Partial<
     Record<InstallGuardReason, string>
   >;
@@ -73,7 +76,7 @@ function actionReasonLabel(t: CoreMessages, reason: MachineActionReason): string
  * stays with the caller.
  */
 function refusalLines(
-  t: CoreMessages,
+  t: LoadedMessages<'environments'>,
   reason: MachineActionReason | null,
   guardReasons: readonly InstallGuardReason[]
 ): string[] {
@@ -90,7 +93,7 @@ function refusalLines(
  * // Usage: refusalMessage(t, { reason: 'foreground', reasons: [] })
  */
 export function refusalMessage(
-  t: CoreMessages,
+  t: LoadedMessages<'environments'>,
   refusal: {
     readonly reason: MachineActionReason | null;
     readonly reasons: readonly InstallGuardReason[];
@@ -109,7 +112,7 @@ export function refusalMessage(
  * available action has nothing to explain, so the list is empty.
  */
 export function actionRefusalLines(
-  t: CoreMessages,
+  t: LoadedMessages<'environments'>,
   status: Pick<MachineStatus, 'actions'>,
   action: keyof Omit<MachineStatus['actions'], 'guard'>
 ): string[] {

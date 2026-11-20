@@ -17,6 +17,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
 
+import { environmentsMessages } from '../environments-i18n';
 import { formatDuration } from '../format';
 import type { InstallStreamState } from '../hooks/use-install-stream';
 
@@ -38,7 +39,7 @@ const STREAM_STYLES = {
 } as const;
 
 export function InstallConsole({ stream, stepLabel, onCancel, onClose }: InstallConsoleProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const s = t.environments.install;
   const logRef = useRef<HTMLDivElement>(null);
   const [autoscroll, setAutoscroll] = useState(true);

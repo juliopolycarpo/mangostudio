@@ -18,6 +18,8 @@ import { useI18n } from '@/hooks/use-i18n';
 import { getApiBaseUrl } from '@/lib/api-base-url';
 import { readSseChunks, SseFrameTooLongError } from '@/lib/sse';
 
+import { environmentsMessages } from '../environments-i18n';
+
 /**
  * Roughly the server's 1 MiB output budget at a typical line length. The cap is
  * a correctness requirement, not a polish item: installers emit progress bars
@@ -98,7 +100,7 @@ export function useInstallStream({
   // could leave behind, and no commit-order gap an effect-synced ref would open.
   const emitProbe = useEffectEvent((event: InstallProbeEvent) => onProbe?.(event));
   const emitExit = useEffectEvent((event: InstallExitEvent) => onExit?.(event));
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const frameTooLongMessage = useEffectEvent(() => t.environments.install.streamFrameTooLong);
 
   useEffect(() => {

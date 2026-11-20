@@ -23,7 +23,7 @@ import type {
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
 import { TOOLCHAIN_RUNTIME_IDS } from '@mangostudio/shared/environments/values';
-import type { CoreMessages } from '@mangostudio/shared/i18n';
+import type { CoreMessages, LoadedMessages } from '@mangostudio/shared/i18n';
 import type { ToolIdentityKind } from '@mangostudio/shared/tool-identity';
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
 
@@ -108,7 +108,10 @@ export function prefixedVersionLabel(t: CoreMessages, version: string | null): s
   return version === null ? value : `${t.environments.agents.versionLabel} ${value}`;
 }
 
-export function guardReasonLabel(t: CoreMessages, reason: InstallGuardReason): string {
+export function guardReasonLabel(
+  t: LoadedMessages<'environments'>,
+  reason: InstallGuardReason
+): string {
   return t.environments.install.guardBlocked[reason];
 }
 
@@ -479,7 +482,7 @@ export function runtimeNameList(resolve: IdentityResolver, ids: readonly string[
  * `index` is zero-based; what the user reads is not.
  */
 export function chainStepLabel(
-  t: CoreMessages,
+  t: LoadedMessages<'environments'>,
   index: number,
   count: number,
   name: string

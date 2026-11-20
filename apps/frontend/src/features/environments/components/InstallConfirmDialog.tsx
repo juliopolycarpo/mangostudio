@@ -21,6 +21,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 
+import { environmentsMessages } from '../environments-i18n';
 import { chainStepLabel, formatBytes } from '../format';
 import { useToolIdentities } from '../identity/use-tool-identities';
 import type { InstallChainStep } from '../install-chain';
@@ -41,7 +42,7 @@ export function InstallConfirmDialog({
   onConfirm,
   onCancel,
 }: InstallConfirmDialogProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const s = t.environments.install;
   const { resolve } = useToolIdentities();
 
@@ -124,7 +125,7 @@ export function InstallConfirmDialog({
 }
 
 function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const s = t.environments.install;
   // A resolved uninstall target replaces the declared (assumed) paths; a
   // refused one deletes nothing, so it lists nothing.

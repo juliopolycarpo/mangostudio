@@ -42,7 +42,6 @@ interface EagerFeatureKeys {
     | 'status'
     | 'versionUnknown'
     | 'agents'
-    | 'install'
     | 'findings'
     | 'pathSources'
     | 'runtimes'
@@ -68,6 +67,8 @@ interface EagerNestedFeatureKeys {
       | 'toolchainSummaryBun'
       | 'toolchainSummaryMissing';
     machine: 'service' | 'actions' | 'update';
+    /** Read only by the install flow's lazily loaded components. */
+    install: never;
   };
 }
 
