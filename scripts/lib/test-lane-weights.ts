@@ -55,6 +55,68 @@ const ROOT_LANE_WEIGHTS: FileWeights = {
   'scripts/tests/watchdog-attempts-receipt.unit.test.ts': 5,
 };
 
+/**
+ * Root lane on Windows, from the JUnit `time` of each file in native qualification
+ * run 44730340513 (one process per file, two workers). The order is not Linux's:
+ * the install layout tests, `check-cache` and the watchdog tests spawn a process per
+ * step, which costs seconds there and milliseconds on Linux. `check-cache` is the
+ * figure of that run (226 s) scaled by the shared warm pass (about 0.86).
+ */
+const ROOT_LANE_WINDOWS_WEIGHTS: FileWeights = {
+  'apps/api/tests/unit/modules/environments/runtime-slot-scripts.test.ts': 6,
+  'scripts/protocol/versions.test.ts': 15,
+  'scripts/qa-gate/collect/capture-process.unit.test.ts': 3,
+  'scripts/qa-gate/render-report.unit.test.ts': 15,
+  'scripts/tests/api-lanes-hermetic.unit.test.ts': 15,
+  'scripts/tests/api-response-map-guard.unit.test.ts': 6,
+  'scripts/tests/archive-assets.unit.test.ts': 7,
+  'scripts/tests/archive-creation.unit.test.ts': 7,
+  'scripts/tests/benchmark-cancel-barrier.unit.test.ts': 7,
+  'scripts/tests/binary-compile-autoload.integration.test.ts': 6,
+  'scripts/tests/build.unit.test.ts': 10,
+  'scripts/tests/bun-lint.integration.test.ts': 8,
+  'scripts/tests/canary-approval-preparation.unit.test.ts': 10,
+  'scripts/tests/canary-approval.unit.test.ts': 20,
+  'scripts/tests/canary-promotion-source.unit.test.ts': 9,
+  'scripts/tests/canary-tags.unit.test.ts': 4,
+  'scripts/tests/canary-validation.unit.test.ts': 4,
+  'scripts/tests/changed-paths.unit.test.ts': 7,
+  'scripts/tests/check-cache.unit.test.ts': 195,
+  'scripts/tests/check-report.unit.test.ts': 9,
+  'scripts/tests/distribution-artifact.unit.test.ts': 3,
+  'scripts/tests/fixture-command.unit.test.ts': 7,
+  'scripts/tests/frontend-compiler-cache.unit.test.ts': 7,
+  'scripts/tests/git.unit.test.ts': 4,
+  'scripts/tests/i18n-import-boundary.unit.test.ts': 3,
+  'scripts/tests/import-cycles.unit.test.ts': 60,
+  'scripts/tests/install-ps1-layout.unit.test.ts': 60,
+  'scripts/tests/install-sh-layout.unit.test.ts': 55,
+  'scripts/tests/merge-test-shards.unit.test.ts': 5,
+  'scripts/tests/native-bun-qualification-process.unit.test.ts': 9,
+  'scripts/tests/native-bun-qualification.unit.test.ts': 50,
+  'scripts/tests/native-command-machine-output.unit.test.ts': 7,
+  'scripts/tests/nightly-npm-doctor.unit.test.ts': 6,
+  'scripts/tests/patch-cache.unit.test.ts': 4,
+  'scripts/tests/protocol-changelog.unit.test.ts': 4,
+  'scripts/tests/protocol-check-entrypoints.unit.test.ts': 3,
+  'scripts/tests/protocol-lanes.unit.test.ts': 9,
+  'scripts/tests/publish-release.unit.test.ts': 6,
+  'scripts/tests/push-dist-repo.unit.test.ts': 5,
+  'scripts/tests/release-prerelease.unit.test.ts': 5,
+  'scripts/tests/root-lane-workers.unit.test.ts': 5,
+  'scripts/tests/run-tests-watchdog.unit.test.ts': 50,
+  'scripts/tests/runtime-handshake.unit.test.ts': 5,
+  'scripts/tests/shared-root-import-boundary.unit.test.ts': 15,
+  'scripts/tests/source-scan-stamp.unit.test.ts': 25,
+  'scripts/tests/standalone-runners.unit.test.ts': 10,
+  'scripts/tests/supervision-fixtures.unit.test.ts': 40,
+  'scripts/tests/typecheck-graph.unit.test.ts': 10,
+  'scripts/tests/unit-cache-graph.unit.test.ts': 10,
+  'scripts/tests/verify-release-tag.unit.test.ts': 9,
+  'scripts/tests/watchdog-attempts-receipt.unit.test.ts': 10,
+  'scripts/tests/windows-user-path.unit.test.ts': 5,
+};
+
 /** Api integration lane (`tests/integration`, run from `apps/api`): paths are workspace-relative. */
 const API_INTEGRATION_LANE_WEIGHTS: FileWeights = {
   'tests/integration/cli/runtime-binary-probe.integration.test.ts': 6,
@@ -86,3 +148,25 @@ export const LANE_WEIGHTS: Readonly<Partial<Record<TestLaneId, FileWeights>>> = 
   root: ROOT_LANE_WEIGHTS,
   'api-integration': API_INTEGRATION_LANE_WEIGHTS,
 };
+
+/**
+ * Lanes whose Windows timings differ enough from `LANE_WEIGHTS` to need a table of
+ * their own. A lane absent here uses its `LANE_WEIGHTS` entry on Windows too.
+ */
+export const WINDOWS_LANE_WEIGHTS: Readonly<Partial<Record<TestLaneId, FileWeights>>> = {
+  root: ROOT_LANE_WINDOWS_WEIGHTS,
+};
+
+/**
+ * The weights a lane splits by on a platform, or undefined for a lane that keeps `--shard`.
+ *
+ * @example
+ * laneWeights('root', 'win32')?.['scripts/tests/check-cache.unit.test.ts']; // => 195
+ * laneWeights('api-unit', 'linux'); // => undefined
+ */
+export function laneWeights(
+  laneId: TestLaneId,
+  platform: NodeJS.Platform
+): FileWeights | undefined {
+  return (platform === 'win32' ? WINDOWS_LANE_WEIGHTS[laneId] : undefined) ?? LANE_WEIGHTS[laneId];
+}

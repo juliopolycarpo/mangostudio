@@ -29,7 +29,7 @@ import { Glob } from 'bun';
 
 import { ROOT_DIR } from './config';
 import { endOfOpenTag, type JunitCounts, parseJunitXml, readAttributes } from './junit-report';
-import { type FileWeights, LANE_WEIGHTS } from './test-lane-weights';
+import { type FileWeights, laneWeights } from './test-lane-weights';
 import type { TestLane } from './test-lanes';
 import { type Leftover, WORKER_TOKEN_ENV } from './test-worker-settle';
 
@@ -146,9 +146,11 @@ export function laneSpec(
     command,
     testDir: lane.workers.testDir,
     alsoRuns: lane.workers.alsoRuns,
-    // Windows keeps `--shard`: explicit file arguments have not been tried
-    // there, and the lane runs one worker, with the serial command, by default.
-    weights: platform === 'win32' ? undefined : LANE_WEIGHTS[lane.id],
+    // Windows splits by weight too, with its own table where timings differ. By
+    // `--shard` the root lane's two workers took 660 s and 371 s of 366 files.
+    // One worker still runs the serial command: `planWorkers` uses weights only
+    // when it plans more than one.
+    weights: laneWeights(lane.id, platform),
     launcher: launcher ?? [process.execPath, join(ROOT_DIR, 'scripts', 'with-test-home.ts')],
     // Windows keeps the serial default and Bun's orphan cleanup. It has no
     // POSIX process group for the replacement settlement guard to inspect.

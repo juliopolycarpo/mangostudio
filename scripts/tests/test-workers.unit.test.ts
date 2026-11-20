@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { parseJunitXml } from '../lib/junit-report';
-import { LANE_WEIGHTS } from '../lib/test-lane-weights';
+import { LANE_WEIGHTS, WINDOWS_LANE_WEIGHTS } from '../lib/test-lane-weights';
 import { laneById } from '../lib/test-lanes';
 import { WORKER_TOKEN_ENV } from '../lib/test-worker-settle';
 import {
@@ -409,14 +409,48 @@ describe('planWorkers with weights', () => {
   });
 
   it.each(['root', 'api-integration'] as const)(
-    'carries the tracked weights of %s into its spec, except on Windows',
+    'carries the tracked weights of %s into its spec',
     (id) => {
       const command = ['bun', 'test', laneById(id).workers?.testDir ?? ''];
 
       expect(laneSpec(laneById(id), command, undefined, 'linux').weights).toBe(LANE_WEIGHTS[id]);
-      expect(laneSpec(laneById(id), command, undefined, 'win32').weights).toBeUndefined();
     }
   );
+
+  it('gives the root lane its own table on Windows and api-integration the shared one', () => {
+    const rootCommand = ['bun', 'test', 'scripts'];
+    const integrationCommand = ['bun', 'test', 'tests/integration'];
+
+    expect(laneSpec(laneById('root'), rootCommand, undefined, 'win32').weights).toBe(
+      WINDOWS_LANE_WEIGHTS.root
+    );
+    expect(
+      laneSpec(laneById('api-integration'), integrationCommand, undefined, 'win32').weights
+    ).toBe(LANE_WEIGHTS['api-integration']);
+  });
+
+  it('splits the root lane by weight at two workers on Windows and runs one worker serially', () => {
+    const command = ['bun', 'test', 'scripts'];
+    const spec = laneSpec(laneById('root'), command, undefined, 'win32');
+    const files = [
+      'scripts/tests/check-cache.unit.test.ts',
+      'scripts/tests/a.unit.test.ts',
+      'scripts/tests/b.unit.test.ts',
+    ];
+
+    const two = planWorkers(spec, 2, '/reports/run-1', files);
+    const one = planWorkers(spec, 1, '/reports/run-1', files);
+
+    expect(
+      two.map((plan) => plan.files),
+      '(root on win32): expected the heavy file alone on worker 1 | received a --shard split'
+    ).toEqual([
+      ['scripts/tests/check-cache.unit.test.ts'],
+      ['scripts/tests/a.unit.test.ts', 'scripts/tests/b.unit.test.ts'],
+    ]);
+    expect(one[0]?.files, '(root on win32): expected the serial command at one worker').toBeNull();
+    expect(one[0]?.argv).toEqual(expect.not.arrayContaining(['--shard=1/1']));
+  });
 
   it('leaves the api unit lane on --shard', () => {
     const command = ['bun', 'test', 'tests/unit'];
