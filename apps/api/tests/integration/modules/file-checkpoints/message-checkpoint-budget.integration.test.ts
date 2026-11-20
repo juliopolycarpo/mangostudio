@@ -26,12 +26,14 @@ import { getDb } from '../../../../src/db/database';
 import { getConfig } from '../../../../src/lib/config';
 import { messageStagedUsage } from '../../../../src/modules/file-checkpoints/application/staged-capture-limit';
 import { insertCheckpointRow } from '../../../../src/modules/file-checkpoints/infrastructure/checkpoint-repository';
+import { getRuntimeConnectionManager } from '../../../../src/services/runtime-client/runtime-connection-manager';
 import { executeMoveFile } from '../../../../src/services/tools/builtin/move-file';
 import { snapshotCaptureParams } from '../../../../src/services/tools/file-mutation-snapshot';
 import type { ToolContext } from '../../../../src/services/tools/types';
 import { type ChatFixture, insertTestChat, type UserFixture } from '../../../support/factories';
 import { insertUserWithLocalRuntime } from '../../../support/fixtures/local-runtime-user';
 import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
+import { explainStagedSnapshotSupport } from '../../../support/staged-snapshot-probe';
 
 const MIB = 1024 * 1024;
 
@@ -87,6 +89,11 @@ function turnContext(): ToolContext {
   };
 }
 
+/** Why the Local runtime does or does not stage snapshots, for an assertion message. */
+function stagingExplanation(): Promise<string> {
+  return explainStagedSnapshotSupport(getRuntimeConnectionManager(), chat.userId, 'local');
+}
+
 /** Records an edit whose before-content is a `size`-byte blob, without writing its bytes. */
 async function recordSparseCheckpoint(size: number): Promise<void> {
   const blobKey = createHash('sha256').update(randomUUID()).digest('hex');
@@ -111,7 +118,7 @@ async function recordSparseCheckpoint(size: number): Promise<void> {
 
 describe('snapshotCaptureParams against a message budget', () => {
   it('sends the configured limit for a message with no large checkpoints', async () => {
-    expect(await snapshotCaptureParams(turnContext())).toEqual({
+    expect(await snapshotCaptureParams(turnContext()), await stagingExplanation()).toEqual({
       captureSnapshot: true,
       snapshotMaxBytes: getConfig().checkpoints.maxFileBytes,
     });
@@ -121,7 +128,7 @@ describe('snapshotCaptureParams against a message budget', () => {
     const left = 40 * MIB;
     await recordSparseCheckpoint(SNAPSHOT_MESSAGE_STAGED_MAX_BYTES - left);
 
-    expect(await snapshotCaptureParams(turnContext())).toEqual({
+    expect(await snapshotCaptureParams(turnContext()), await stagingExplanation()).toEqual({
       captureSnapshot: true,
       snapshotMaxBytes: left,
     });
@@ -130,7 +137,7 @@ describe('snapshotCaptureParams against a message budget', () => {
   it('limits a message that holds the whole byte budget to inline-size files', async () => {
     await recordSparseCheckpoint(SNAPSHOT_MESSAGE_STAGED_MAX_BYTES);
 
-    expect(await snapshotCaptureParams(turnContext())).toEqual({
+    expect(await snapshotCaptureParams(turnContext()), await stagingExplanation()).toEqual({
       captureSnapshot: true,
       snapshotMaxBytes: SNAPSHOT_INLINE_MAX_BYTES,
     });
@@ -145,7 +152,7 @@ describe('snapshotCaptureParams against a message budget', () => {
       blobs: SNAPSHOT_MESSAGE_STAGED_MAX_BLOBS,
       bytes: SNAPSHOT_MESSAGE_STAGED_MAX_BLOBS * 2 * MIB,
     });
-    expect(await snapshotCaptureParams(turnContext())).toEqual({
+    expect(await snapshotCaptureParams(turnContext()), await stagingExplanation()).toEqual({
       captureSnapshot: true,
       snapshotMaxBytes: SNAPSHOT_INLINE_MAX_BYTES,
     });
@@ -157,7 +164,7 @@ describe('snapshotCaptureParams against a message budget', () => {
     }
 
     expect(await messageStagedUsage(getDb(), chat.id, messageId)).toEqual({ blobs: 0, bytes: 0 });
-    expect(await snapshotCaptureParams(turnContext())).toEqual({
+    expect(await snapshotCaptureParams(turnContext()), await stagingExplanation()).toEqual({
       captureSnapshot: true,
       snapshotMaxBytes: getConfig().checkpoints.maxFileBytes,
     });
@@ -187,8 +194,9 @@ describe('a large file once the message budget is spent', () => {
       (reason: unknown) => reason
     );
 
-    expect(error).toBeInstanceOf(RemoteError);
-    expect((error as RemoteError).details).toMatchObject({
+    const explanation = `received: ${String(error)} | ${await stagingExplanation()}`;
+    expect(error, explanation).toBeInstanceOf(RemoteError);
+    expect((error as RemoteError).details, explanation).toMatchObject({
       kind: 'snapshot_too_large',
       sizeBytes: size,
       limitBytes: SNAPSHOT_INLINE_MAX_BYTES,
