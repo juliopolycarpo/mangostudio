@@ -10,6 +10,8 @@ import {
 } from '@/lib/shiki';
 import { createCheckedRenderers } from '@/lib/shiki-checked-render';
 
+import { pinTokenizerClockPerTest } from '../../support/harness/pinned-tokenizer-clock';
+
 /**
  * A source over the budget must never reach the grammar: the tokenizer is quadratic in one
  * unbroken word and cannot be interrupted, so what matters is that it is not called.
@@ -19,6 +21,8 @@ const SCALING_BOUND_MS = 250;
 /** The largest word that fits a quadratic grammar's budget; see `code-highlight-limits`. */
 const LARGEST_FITTING_WORD = 547;
 const THEME = 'one-dark-pro';
+
+pinTokenizerClockPerTest();
 
 let highlighter: Awaited<ReturnType<typeof initHighlighter>>;
 let restore: (() => void) | undefined;

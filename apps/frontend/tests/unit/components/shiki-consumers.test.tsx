@@ -5,9 +5,12 @@ import type { GitDiffResponse } from '@mangostudio/shared/git';
 import { CODE_THEMES, initHighlighter, preloadCodeLanguages } from '@/lib/shiki';
 
 import { stubClipboard } from '../../support/harness/clipboard';
+import { pinTokenizerClockPerTest } from '../../support/harness/pinned-tokenizer-clock';
 import { fireEvent, flushAsyncRender, render, screen, waitFor } from '../../support/harness/render';
 
 const git = { diff: undefined as GitDiffResponse | undefined };
+
+pinTokenizerClockPerTest();
 
 function useFakeGitDiff() {
   return { data: git.diff, isLoading: false, error: null };

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
+import { pinTokenizerClockPerTest } from '../../support/harness/pinned-tokenizer-clock';
 import {
   FirstPassStopsTokenizerClock,
   frozenTokenizerClock,
@@ -19,6 +20,8 @@ import {
  * check`. Bun does honour a cache-busting query (`@/lib/shiki?fresh=1` really
  * is a second instance) but it hides the module from knip the same way.
  */
+pinTokenizerClockPerTest();
+
 function loadShiki(): Promise<typeof import('@/lib/shiki')> {
   return import('@/lib/shiki');
 }

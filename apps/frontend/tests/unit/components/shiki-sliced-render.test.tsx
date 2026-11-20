@@ -16,12 +16,12 @@ import {
 import { createCheckedRenderers } from '@/lib/shiki-checked-render';
 
 import { stubClipboard } from '../../support/harness/clipboard';
+import { pinTokenizerClockPerTest } from '../../support/harness/pinned-tokenizer-clock';
 import { flushAsyncRender, render, waitFor } from '../../support/harness/render';
 import { FakeIdleScheduler } from '../../support/mocks/fake-idle-scheduler';
 import { SteppingClock } from '../../support/mocks/fake-stepping-clock';
 import {
   frozenTokenizerClock,
-  SlowedTokenizerClock,
   withTokenizerClock,
   withTokenizerClockAsync,
 } from '../../support/mocks/fake-tokenizer-clock';
@@ -32,6 +32,8 @@ const THEME = 'one-dark-pro';
 /** Lines tokenized between two clock reads: the unit a time budget is spent in. */
 const BATCH_LINES = 16;
 const CLOCK_STEP_MS = 10;
+/** Tokenizer clock advance per read that stands for a slow machine; a line needs hundreds to pass 500 ms. */
+const SLOW_MACHINE_READ_MS = 1;
 /** At 10 ms per clock read the first draw spends its budget after ceil(budget / 10) batches. */
 const FIRST_DRAW_LINES = BATCH_LINES * Math.ceil(HIGHLIGHT_FIRST_SLICE_MS / CLOCK_STEP_MS);
 
@@ -49,6 +51,9 @@ beforeAll(async () => {
     highlighter.codeToHtml(typescriptSource('warm', 1), { lang: 'typescript', theme: THEME });
   });
 });
+
+// None of these tests is about real time; the slow-machine one scripts its own clock.
+pinTokenizerClockPerTest();
 
 afterEach(() => {
   setTimeStopClock(null);
@@ -190,8 +195,11 @@ describe('a large code block drawn in slices', () => {
     useTenMillisecondClock();
     const source = typescriptSource('slowRunner', 20);
 
+    // The slowness is scripted, not measured: every read of the tokenizer clock is 1 ms later, which
+    // is a warm match on a machine about 20 times slower than a fast one. A line stays far under the
+    // 500 ms limit, whatever speed the runner really has.
     const { container } = await withTokenizerClockAsync(
-      new SlowedTokenizerClock(20).now,
+      new SteppingClock(SLOW_MACHINE_READ_MS).now,
       async () => {
         const rendered = render(<MarkdownContentRenderer content={fence(source)} />);
         await settleFirstDraw();

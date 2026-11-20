@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 
+import { pinTokenizerClockPerTest } from '../../support/harness/pinned-tokenizer-clock';
 import { render, waitFor } from '../../support/harness/render';
 
 // A named fake in place of the Shiki chunk: it colours any fenced block and counts how often
@@ -22,6 +23,8 @@ void mock.module('@/lib/shiki', () => ({
 const { MarkdownContentRenderer } = await import('../../../src/components/MarkdownContentRenderer');
 
 /** The renderer's own output for `content`, from a fresh mount: what today's whole-message render gives. */
+pinTokenizerClockPerTest();
+
 function fromScratchHtml(content: string): string {
   const { container, unmount } = render(<MarkdownContentRenderer content={content} />);
   const html = container.querySelector('.markdown-content')?.innerHTML ?? '';
