@@ -24,6 +24,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
+use crate::commands::toolchain;
+
 use super::detection::agent_cli_definitions::{
     AGENT_CLI_DEFINITIONS, AgentAuthDefinition, AgentCliDefinition, AgentTargetId,
     ExternalAgentCliDefinition,
@@ -336,7 +338,7 @@ async fn handle_probe_runtimes(
             .as_ref()
             .and_then(|map| map.get(&definition.id))
             .cloned();
-        let status = analyze_runtime_scan(
+        let mut status = analyze_runtime_scan(
             definition,
             &RuntimeScanResult {
                 installations,
@@ -349,6 +351,23 @@ async fn handle_probe_runtimes(
                 consumer_requirements,
             },
         );
+        // The same resolution a spawned process's PATH is built from, so the
+        // status says which installation `auto` runs instead of leaving the
+        // client to guess from the inherited PATH.
+        if matches!(definition.id, RuntimeId::Node | RuntimeId::Bun) {
+            let path_env = Arc::clone(&path_env);
+            let id = definition.id;
+            let installations = status.installations.clone();
+            status.auto_selection = mangostudio_runtime_core::blocking::run_blocking(move || {
+                toolchain::auto_selection(
+                    &path_env,
+                    id,
+                    &installations,
+                    &toolchain::NativeToolchainFs,
+                )
+            })
+            .await;
+        }
         statuses.push(status);
     }
 
@@ -818,6 +837,7 @@ async fn describe_self_agent(
             health,
             installations: vec![installation.clone()],
             effective: Some(installation),
+            auto_selection: None,
             findings,
             installable: false,
             probed_at_ms: now_ms(),
@@ -1188,6 +1208,7 @@ mod tests {
             id: RuntimeId::Cursor,
             health: RuntimeHealth::Ok,
             effective: installations.iter().find(|entry| entry.effective).cloned(),
+            auto_selection: None,
             installations,
             findings: Vec::new(),
             installable: false,

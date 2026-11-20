@@ -6406,6 +6406,38 @@
                     }
                   }
                 },
+                "autoSelection": {
+                  "type": "object",
+                  "required": [
+                    "reason"
+                  ],
+                  "properties": {
+                    "reason": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "manager-default"
+                        },
+                        {
+                          "type": "string",
+                          "const": "well-known-directory"
+                        },
+                        {
+                          "type": "string",
+                          "const": "inherited-path"
+                        }
+                      ]
+                    },
+                    "dir": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "installationPath": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
                 "findings": {
                   "type": "array",
                   "items": {
@@ -7223,6 +7255,38 @@
                           "const": "mise"
                         }
                       ]
+                    }
+                  }
+                },
+                "autoSelection": {
+                  "type": "object",
+                  "required": [
+                    "reason"
+                  ],
+                  "properties": {
+                    "reason": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "manager-default"
+                        },
+                        {
+                          "type": "string",
+                          "const": "well-known-directory"
+                        },
+                        {
+                          "type": "string",
+                          "const": "inherited-path"
+                        }
+                      ]
+                    },
+                    "dir": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "installationPath": {
+                      "type": "string",
+                      "minLength": 1
                     }
                   }
                 },

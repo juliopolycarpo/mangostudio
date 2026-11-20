@@ -59,6 +59,12 @@ knows. On Windows that includes `%ProgramFiles%\nodejs`, because the Node MSI ed
 a runtime whose manifest does not advertise `features.toolchain`; such a peer keeps its own
 `PATH` exactly as before.
 
+The Node and Bun runtime statuses carry that answer as `autoSelection`: `reason`
+(`manager-default`, `well-known-directory` or `inherited-path`), the prepended `dir`, and the
+`installationPath` of the probed installation it lands on. It comes from the same resolution
+that builds a spawn's `PATH`, so the card's "Processes run …" line names the installation
+processes get rather than the one the inherited `PATH` happens to put first.
+
 ## What the scanner knows
 
 Each installation carries a `pathSource`: `nvm`, `fnm` and `volta` come from the

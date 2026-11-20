@@ -15,6 +15,7 @@ use crate::probing::detection::{
     nvm::is_safe_nvm_alias,
     path_env::{PathEnv, dirname_path, join_path},
     runtime_definitions::well_known_node_directories,
+    types::{RuntimeAutoReason, RuntimeAutoSelection, RuntimeId, RuntimeInstallation},
     version_manager_support::normalized_managed_path,
 };
 
@@ -115,6 +116,60 @@ impl read_cache::Reader for NativeDirectoryReader {
 struct Resolved {
     dir: String,
     manager: Option<(&'static str, String)>,
+    /// Why `auto` chose this directory; `None` for an explicit pin.
+    reason: Option<RuntimeAutoReason>,
+}
+
+/// What `auto` resolves to for `runtime` on `host`, using the same
+/// resolution [`build`] applies when it spawns a process, so the status a
+/// user reads cannot diverge from the PATH a process gets.
+///
+/// `None` for a runtime with no toolchain selection, or when `auto` prepends
+/// nothing and no probed installation is on the inherited `PATH`.
+///
+/// # Example
+///
+/// ```
+/// use mangostudio_runtime_cold::commands::toolchain::{auto_selection, NativeToolchainFs};
+/// use mangostudio_runtime_cold::probing::detection::path_env::PathEnv;
+/// use mangostudio_runtime_cold::probing::detection::types::RuntimeId;
+/// assert!(auto_selection(&PathEnv::default(), RuntimeId::Git, &[], &NativeToolchainFs).is_none());
+/// ```
+pub fn auto_selection(
+    host: &PathEnv,
+    runtime: RuntimeId,
+    installations: &[RuntimeInstallation],
+    fs: &dyn ToolchainFs,
+) -> Option<RuntimeAutoSelection> {
+    let name = match runtime {
+        RuntimeId::Node => "node",
+        RuntimeId::Bun => "bun",
+        _ => return None,
+    };
+    let Some(resolved) = resolve(host, name, "auto", fs) else {
+        let effective = installations.iter().find(|entry| entry.effective)?;
+        return Some(RuntimeAutoSelection {
+            reason: RuntimeAutoReason::InheritedPath,
+            dir: None,
+            installation_path: Some(effective.path.clone()),
+        });
+    };
+    let wanted = normalized_managed_path(&resolved.dir, &host.platform);
+    // The alias path (`raw_path`) and its realpath can sit in different
+    // directories (fnm's `aliases/default` points into `installation`), so
+    // either one names the installation.
+    let in_dir = |path: &str| {
+        normalized_managed_path(&dirname_path(&host.platform, path), &host.platform) == wanted
+    };
+    let installation_path = installations
+        .iter()
+        .find(|entry| in_dir(&entry.raw_path) || in_dir(&entry.path))
+        .map(|entry| entry.path.clone());
+    Some(RuntimeAutoSelection {
+        reason: resolved.reason?,
+        dir: Some(resolved.dir),
+        installation_path,
+    })
 }
 
 /// Prepends the selected Node and Bun directories to an environment snapshot.
@@ -188,6 +243,7 @@ fn resolve(host: &PathEnv, runtime: &str, choice: &str, fs: &dyn ToolchainFs) ->
         return Some(Resolved {
             dir: dirname_path(&host.platform, choice),
             manager: None,
+            reason: None,
         });
     }
     if runtime == "node" {
@@ -229,6 +285,7 @@ fn managed(
             .non_blank_var(key)
             .is_none()
             .then(|| (key, root.into())),
+        reason: Some(RuntimeAutoReason::ManagerDefault),
     })
 }
 
@@ -269,10 +326,11 @@ fn auto_node(host: &PathEnv, fs: &dyn ToolchainFs) -> Option<Resolved> {
     {
         return None;
     }
-    candidates
-        .into_iter()
-        .next()
-        .map(|dir| Resolved { dir, manager: None })
+    candidates.into_iter().next().map(|dir| Resolved {
+        dir,
+        manager: None,
+        reason: Some(RuntimeAutoReason::WellKnownDirectory),
+    })
 }
 
 fn auto_nvm(host: &PathEnv, fs: &dyn ToolchainFs) -> Option<Resolved> {
@@ -564,6 +622,89 @@ mod tests {
             env["PATH"], "/base",
             "expected the inherited PATH unchanged | received {:?}",
             env["PATH"]
+        );
+    }
+
+    fn probed(path: &str, effective: bool) -> RuntimeInstallation {
+        RuntimeInstallation {
+            path: path.into(),
+            raw_path: path.into(),
+            version: Some("22.1.0".into()),
+            origin: crate::probing::detection::types::RuntimeOrigin::Path,
+            path_index: Some(0),
+            effective,
+            alias_of: None,
+            managed_by: None,
+            path_source: None,
+        }
+    }
+
+    #[test]
+    fn auto_selection_names_the_nvm_default_that_a_spawn_would_put_first() {
+        let mut fs = FakeFs::default();
+        fs.files
+            .insert("/home/test/.nvm/alias/default".into(), "v22.1.0".into());
+        let nvm_node = "/home/test/.nvm/versions/node/v22.1.0/bin/node";
+        fs.files.insert(nvm_node.into(), String::new());
+        // The inherited PATH names a different Node first; `auto` must not report it.
+        let installations = [probed("/usr/bin/node", true), probed(nvm_node, false)];
+
+        let selection =
+            auto_selection(&host("linux"), RuntimeId::Node, &installations, &fs).unwrap();
+
+        assert_eq!(
+            selection,
+            RuntimeAutoSelection {
+                reason: RuntimeAutoReason::ManagerDefault,
+                dir: Some("/home/test/.nvm/versions/node/v22.1.0/bin".into()),
+                installation_path: Some(nvm_node.into()),
+            },
+            "expected auto to pick the nvm default over the inherited /usr/bin/node"
+        );
+    }
+
+    #[test]
+    fn auto_selection_falls_back_to_the_inherited_effective_installation() {
+        let fs = FakeFs::default();
+        let installations = [probed("/usr/bin/node", true)];
+
+        assert_eq!(
+            auto_selection(&host("linux"), RuntimeId::Node, &installations, &fs),
+            Some(RuntimeAutoSelection {
+                reason: RuntimeAutoReason::InheritedPath,
+                dir: None,
+                installation_path: Some("/usr/bin/node".into()),
+            })
+        );
+        assert_eq!(
+            auto_selection(&host("linux"), RuntimeId::Node, &[], &fs),
+            None
+        );
+    }
+
+    #[test]
+    fn auto_selection_reports_a_well_known_directory_off_path() {
+        let mut fs = FakeFs::default();
+        fs.files.insert("/usr/local/bin/node".into(), String::new());
+        let installations = [probed("/usr/local/bin/node", false)];
+
+        let selection =
+            auto_selection(&host("darwin"), RuntimeId::Node, &installations, &fs).unwrap();
+
+        assert_eq!(selection.reason, RuntimeAutoReason::WellKnownDirectory);
+        assert_eq!(
+            selection.installation_path.as_deref(),
+            Some("/usr/local/bin/node")
+        );
+    }
+
+    #[test]
+    fn auto_selection_only_answers_for_node_and_bun() {
+        let fs = FakeFs::default();
+        let installations = [probed("/usr/bin/git", true)];
+        assert_eq!(
+            auto_selection(&host("linux"), RuntimeId::Git, &installations, &fs),
+            None
         );
     }
 

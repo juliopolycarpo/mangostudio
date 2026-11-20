@@ -284,6 +284,9 @@ pub fn analyze_runtime_scan(
         health: health_for(scan.installations.len(), scan.failures.len(), &findings),
         installations: scan.installations.clone(),
         effective: effective.cloned(),
+        // Filled in by the probing method, which owns the host snapshot
+        // and filesystem the resolution needs.
+        auto_selection: None,
         findings,
         installable: options.installable,
         probed_at_ms: options.probed_at_ms,

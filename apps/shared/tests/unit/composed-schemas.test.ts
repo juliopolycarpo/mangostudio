@@ -280,6 +280,7 @@ const CASES: CompositeCase<object>[] = [
       'health',
       'installations',
       'effective',
+      'autoSelection',
       'findings',
       'installable',
       'probedAtMs',

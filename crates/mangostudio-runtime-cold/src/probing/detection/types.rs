@@ -482,6 +482,35 @@ pub struct RuntimeFinding {
     pub severity: Option<RuntimeFindingSeverity>,
 }
 
+/// Why `auto` lands on the installation it does when a process is spawned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RuntimeAutoReason {
+    /// The nvm or fnm default alias, or Bun's own install directory, is put
+    /// in front of `PATH`.
+    ManagerDefault,
+    /// A well-known install directory that is not on `PATH` is put in front
+    /// of it.
+    WellKnownDirectory,
+    /// Nothing is prepended: the first match on the inherited `PATH` runs.
+    InheritedPath,
+}
+
+/// What `auto` resolves to for one runtime on this machine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeAutoSelection {
+    /// Why this directory, or `PATH` itself, wins.
+    pub reason: RuntimeAutoReason,
+    /// The directory put in front of `PATH`; absent for `inherited-path`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dir: Option<String>,
+    /// The `path` of the probed installation the process runs, when one
+    /// matches.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installation_path: Option<String>,
+}
+
 /// The published status of one runtime, as
 /// [`crate::probing::detection::duplicate_analysis::analyze_runtime_scan`]
 /// builds it.
@@ -497,6 +526,9 @@ pub struct RuntimeStatus {
     /// The installation a plain shell lookup would run, when one exists.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effective: Option<RuntimeInstallation>,
+    /// Node and Bun only: what the `auto` toolchain choice resolves to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_selection: Option<RuntimeAutoSelection>,
     /// Facts worth surfacing about this runtime.
     pub findings: Vec<RuntimeFinding>,
     /// Whether MangoStudio can offer an install recipe for this runtime.
