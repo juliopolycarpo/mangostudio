@@ -73,6 +73,12 @@ export interface TestLane {
     /** The lane's own default width, when it is not the runner's (six). */
     readonly defaultWidth?: number;
     /**
+     * The lane's default width on Windows, where the runner's is one (serial).
+     * Only a lane whose files start no loopback server may name one: the serial
+     * pin exists for `ECONNRESET` under concurrent workers.
+     */
+    readonly windowsWidth?: number;
+    /**
      * Test files outside `testDir` that the lane's command also runs, as the
      * `file` attribute of their JUnit cases spells them. For a lane whose last
      * argument is a path *filter* and not a directory, which `bun test`
@@ -145,8 +151,14 @@ export const TEST_LANES: readonly TestLane[] = [
     // No `defaultWidth`: with the weighted split six workers beat four (median
     // wall 76.5 s against 104.9 s), so the lane takes the runner's default of
     // six. docs/reference/testing.md has the measurements.
+    //
+    // `windowsWidth`: the Windows runner is serial by default and this lane then took 560 to
+    // 660 s of the native qualification's 900 s `bun run test` deadline (the 907 s worst of
+    // 115 passing runs). Two workers halve the critical path; the loopback `ECONNRESET` that
+    // keeps the other lanes serial was measured in the api-unit lane only.
     workers: {
       testDir: 'scripts',
+      windowsWidth: 2,
       alsoRuns: [
         'apps/api/tests/integration/modules/environments/wsl-runtime-scripts.integration.test.ts',
         'apps/api/tests/unit/modules/environments/runtime-slot-scripts.test.ts',

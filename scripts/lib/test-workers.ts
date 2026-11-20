@@ -29,7 +29,7 @@ import { Glob } from 'bun';
 
 import { ROOT_DIR } from './config';
 import { endOfOpenTag, type JunitCounts, parseJunitXml, readAttributes } from './junit-report';
-import { type FileWeights, LANE_WEIGHTS } from './test-lane-weights';
+import { type FileWeights, laneWeights } from './test-lane-weights';
 import type { TestLane } from './test-lanes';
 import { type Leftover, WORKER_TOKEN_ENV } from './test-worker-settle';
 
@@ -62,9 +62,12 @@ const DEFAULT_WORKERS = 6;
  * explicit `MANGO_TEST_WORKERS` still wins, with the same validation.
  *
  * A lane may name a default of its own (`laneDefault`); six is the api-unit and
- * root lanes', four the api-integration lane's.
+ * root lanes', four the api-integration lane's. It may also name its own Windows
+ * default (`windowsDefault`, still capped at half the cores), for a lane that
+ * starts no loopback server; the root lane takes two.
  *
  * @example
+ * resolveWorkerCount({}, 4, 'win32', 6, 2); // => 2
  * resolveWorkerCount({}, 34, 'linux'); // => 6
  * resolveWorkerCount({}, 34, 'linux', 4); // => 4
  * resolveWorkerCount({}, 34, 'win32'); // => 1
@@ -74,12 +77,13 @@ export function resolveWorkerCount(
   env: Readonly<Record<string, string | undefined>>,
   cpus: number,
   platform: NodeJS.Platform = process.platform,
-  laneDefault: number = DEFAULT_WORKERS
+  laneDefault: number = DEFAULT_WORKERS,
+  windowsDefault = 1
 ): number {
   const raw = env[WORKERS_ENV]?.trim();
   if (!raw) {
-    if (platform === 'win32') return 1;
-    return Math.max(1, Math.min(laneDefault, Math.floor(cpus / 2)));
+    const width = platform === 'win32' ? windowsDefault : laneDefault;
+    return Math.max(1, Math.min(width, Math.floor(cpus / 2)));
   }
 
   const count = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
@@ -142,9 +146,11 @@ export function laneSpec(
     command,
     testDir: lane.workers.testDir,
     alsoRuns: lane.workers.alsoRuns,
-    // Windows keeps `--shard`: explicit file arguments have not been tried
-    // there, and the lane runs one worker, with the serial command, by default.
-    weights: platform === 'win32' ? undefined : LANE_WEIGHTS[lane.id],
+    // Windows splits by weight too, with its own table where timings differ. By
+    // `--shard` the root lane's two workers took 660 s and 371 s of 366 files.
+    // One worker still runs the serial command: `planWorkers` uses weights only
+    // when it plans more than one.
+    weights: laneWeights(lane.id, platform),
     launcher: launcher ?? [process.execPath, join(ROOT_DIR, 'scripts', 'with-test-home.ts')],
     // Windows keeps the serial default and Bun's orphan cleanup. It has no
     // POSIX process group for the replacement settlement guard to inspect.

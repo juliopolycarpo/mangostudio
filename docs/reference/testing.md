@@ -696,7 +696,13 @@ and a bare Bun server that sends `Connection: close`, or stops while it answers,
 in about 40% of requests under six processes there (3 of 100 in one process), with no
 MangoStudio code involved. That is a connection-teardown problem to understand before
 Windows goes wide. `resolveWorkerCount` carries the `win32` branch to lift, and
-`MANGO_TEST_WORKERS=6` overrides it meanwhile.
+`MANGO_TEST_WORKERS=6` overrides it meanwhile. The root scripts lane is the one exception:
+its `workers.windowsWidth` is two, because served serially it took 560 to 660 s of the
+native qualification's 900 s `bun run test` deadline (115 passing Windows runs between
+2026-11-06 and 2026-11-19: median 774 s, 90th percentile 842 s, worst 907 s). Windows runs
+it with the tracked weights, from the Windows table (`WINDOWS_LANE_WEIGHTS`): by `--shard`
+its two workers took 660 s and 371 s of 366 files, because the files that are slow there
+(`check-cache`, the install layout tests, the watchdog tests) are not the ones that are slow on Linux.
 
 The lane fails, naming `api-unit worker i/N`, when a worker:
 
@@ -988,8 +994,10 @@ integration lanes now balance by weights that are source:
   and the list lacks is run by no worker, and `root-lane-workers.unit.test.ts`
   fails on it before the lane does.
 - These keep their commands: one worker (the serial command), a selected run
-  (`--changed` or a name filter, one process), Windows (the serial command by
-  default, `--shard` when a width is set) and the API unit lane (`--shard`). CI's
+  (`--changed` or a name filter, one process), Windows at one worker (the serial
+  command, the default except for the root lane) and the API unit lane (`--shard`).
+  Windows at two or more workers splits by `WINDOWS_LANE_WEIGHTS`, and a lane without
+  an entry there uses its `LANE_WEIGHTS` table. CI's
   shards and both coverage scripts also stay on `--shard`, with Bun's timings.
 - No test asserts a timing. `test-lane-weights.unit.test.ts` checks that every
   listed path is a file the lane owns, each weight is an integer above 1, the keys

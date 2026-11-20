@@ -262,7 +262,8 @@ describe('the runner over the root tree', () => {
     { label: 'six on a large POSIX host', cpus: 34, platform: 'linux' as const, count: 6 },
     { label: 'half the cores on a smaller host', cpus: 6, platform: 'linux' as const, count: 3 },
     { label: 'one on a single-core host', cpus: 1, platform: 'linux' as const, count: 1 },
-    { label: 'one on Windows', cpus: 34, platform: 'win32' as const, count: 1 },
+    { label: 'two on Windows', cpus: 34, platform: 'win32' as const, count: 2 },
+    { label: 'one on a two-core Windows host', cpus: 2, platform: 'win32' as const, count: 1 },
   ])('defaults to $label when the worker override is absent', async ({ cpus, platform, count }) => {
     const run = harness(diskWorker(REAL_FILES));
 
@@ -346,11 +347,11 @@ describe('the runner over the root tree', () => {
     expect(run.lines.join('\n')).toContain(`no worker reported ${REAL_FILES[0]?.path}`);
   });
 
-  it('runs one worker, unsharded, on Windows unless the width is set', async () => {
+  it('runs two workers on Windows unless the width is set', async () => {
     const run = harness(diskWorker(REAL_FILES));
 
     expect(await main(laneArgv(), { ...run.deps, platform: 'win32' })).toBe(0);
-    expect(run.started).toEqual([1]);
+    expect(run.started.sort()).toEqual([1, 2]);
   });
 });
 
