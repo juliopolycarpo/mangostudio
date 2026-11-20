@@ -7,8 +7,12 @@ import {
   preloadCodeLanguages,
 } from '@/lib/shiki';
 
+import { pinTokenizerClockPerTest } from '../../support/harness/pinned-tokenizer-clock';
+
 type Highlighter = Awaited<ReturnType<typeof initHighlighter>>;
 type Grammar = ReturnType<Highlighter['getLanguage']>;
+
+pinTokenizerClockPerTest();
 
 let highlighter: Highlighter;
 let restoreTokenizer: (() => void) | undefined;

@@ -21,6 +21,7 @@ import {
 } from '@/lib/shiki';
 import { createCheckedRenderers } from '@/lib/shiki-checked-render';
 
+import { pinTokenizerClockPerTest } from '../../support/harness/pinned-tokenizer-clock';
 import { SteppingClock } from '../../support/mocks/fake-stepping-clock';
 import {
   EveryLineStopsTokenizerClock,
@@ -34,6 +35,8 @@ const BUDGET_MS = 25;
 const BATCH_LINES = 16;
 /** A budgeted call colours this many lines, or fewer, in one go: a short block is never sliced. */
 const UNSLICED_LINES = 64;
+
+pinTokenizerClockPerTest();
 
 let highlighter: Awaited<ReturnType<typeof initHighlighter>>;
 
