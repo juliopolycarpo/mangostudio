@@ -3,6 +3,9 @@ import { beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import { CODE_THEMES, initHighlighter, preloadCodeLanguages } from '@/lib/shiki';
 import { createCheckedRenderers } from '@/lib/shiki-checked-render';
 
+import { pinTokenizerClockPerTest } from '../../support/harness/pinned-tokenizer-clock';
+import { frozenTokenizerClock, withTokenizerClock } from '../../support/mocks/fake-tokenizer-clock';
+
 const SAMPLES = {
   bash: 'echo "$PATH"',
   c: 'int main(void) { return 0; }',
@@ -28,6 +31,8 @@ const SAMPLES = {
   xml: '<root name="Hello" />',
   yaml: 'value: 42',
 } as const;
+
+pinTokenizerClockPerTest();
 
 let highlighter: Awaited<ReturnType<typeof initHighlighter>>;
 
@@ -93,11 +98,16 @@ describe('checked Shiki renderer', () => {
     ].join('\n');
     const options = { lang: 'typescript', theme: 'one-dark-pro' };
     const checked = createCheckedRenderers(highlighter);
-    const ours = checked.htmlFromLines(
-      checked.tokenLinesToHtml(checked.codeToTokensBase(source, options), options),
-      options
-    );
-    const shiki = highlighter.codeToHtml(source, options);
+    // Equality with Shiki is the claim, so time must not matter: on a slow runner a cold regex
+    // compile passes the real 500 ms limit and the checked renderer throws
+    // IncompleteTokenizationError instead of returning coarser tokens.
+    const { ours, shiki } = withTokenizerClock(frozenTokenizerClock, () => ({
+      ours: checked.htmlFromLines(
+        checked.tokenLinesToHtml(checked.codeToTokensBase(source, options), options),
+        options
+      ),
+      shiki: highlighter.codeToHtml(source, options),
+    }));
 
     // The DOM parser decodes entities and drops tags; stripping tags with a regex would not be a
     // faithful reading of what the browser shows.
