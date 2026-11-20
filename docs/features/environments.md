@@ -65,6 +65,30 @@ The Node and Bun runtime statuses carry that answer as `autoSelection`: `reason`
 that builds a spawn's `PATH`, so the card's "Processes run …" line names the installation
 processes get rather than the one the inherited `PATH` happens to put first.
 
+A terminal shell runs the user's startup files after that environment is in place, and an `nvm
+use`, `fnm env` or `volta` line in them rewrites `PATH`. When a selection resolves to directories,
+`terminal.open` therefore launches the shell through a shim (`terminal/shell_init.rs`) that runs
+the usual startup first and puts the pinned directories back in front:
+
+- **bash (Linux):** `--rcfile` on a shim that sources `~/.bashrc`, then prepends. A macOS bash
+  stays a plain `-l` login shell with no shim: `--rcfile` is ignored by a login shell, and
+  replacing `-l` would lose `login_shell`, the `-bash` `$0`, `logout` and `.bash_logout`. macOS
+  bash therefore does not get the re-pin (macOS's default shell is zsh).
+- **zsh:** `ZDOTDIR` points at a shim directory holding only `.zshenv`. It restores the user's
+  original `ZDOTDIR` (or unsets it) at once, sources the user's `.zshenv`, and registers a
+  one-shot `precmd` hook that prepends before the first prompt. `/etc/zshrc`, `.zprofile`,
+  `.zshrc` and `.zlogin` are read by zsh itself from the real `ZDOTDIR`, so `HISTFILE`,
+  `.zcompdump`, oh-my-zsh and p10k never see the shim, and the pin lands after profile `PATH`
+  rewrites. If `/etc/zshenv` or `/etc/zsh/zshenv` mentions `ZDOTDIR`, the shim could be
+  bypassed, so that host keeps the plain launch.
+- **PowerShell:** `-NoExit -Command` prepends after PowerShell has loaded `$PROFILE`.
+
+Shims live in a private directory under the OS temp directory and are removed when the session
+ends; nothing is written to the user's home. Bash and zsh on a Windows host keep the plain launch.
+The pin is applied once (zsh: at the first prompt, so a command run before it sees the
+profile's `PATH`): a hook that re-runs per directory (`fnm env --use-on-cd`)
+can still move the selection when the user `cd`s.
+
 ## What the scanner knows
 
 Each installation carries a `pathSource`: `nvm`, `fnm` and `volta` come from the

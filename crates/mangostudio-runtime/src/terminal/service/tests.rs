@@ -287,6 +287,7 @@ fn fake_entry(id: &str, handle: Arc<dyn PtyHandle>) -> Arc<Entry> {
         close_scheduled: std::sync::atomic::AtomicBool::new(false),
         close_result: tokio::sync::Mutex::new(None),
         consent_revoked: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        _shell_init: None,
     })
 }
 
@@ -1817,4 +1818,103 @@ async fn closing_cursor_login_waits_for_version_probe_child_to_settle() {
         .expect_err("cancelled probe cannot open a PTY");
     assert_eq!(refused.code, codes::CANCELLED);
     assert!(state.lock().unwrap().launches.is_empty());
+}
+
+/// Runs the shell `prepare` chose, the way a terminal does (interactive, its own arguments and
+/// environment), without a PTY, and returns what `command` printed.
+#[cfg(unix)]
+fn run_prepared_shell(prepared: &super::Prepared, home: &std::path::Path, command: &str) -> String {
+    let mut process = std::process::Command::new(&prepared.request.program);
+    process
+        .args(&prepared.request.args)
+        .args(["-i", "-c", command])
+        .env_clear()
+        .envs(
+            prepared
+                .request
+                .env
+                .clone()
+                .expect("a terminal replaces the environment"),
+        )
+        .env("HOME", home);
+    let output = process
+        .output()
+        .expect("expected the prepared shell to start");
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+#[cfg(unix)]
+fn rewriting_profile_host(label: &str, platform: &str) -> (ScratchDir, PathEnv) {
+    let scratch = ScratchDir::created(label);
+    let home = scratch.join("home");
+    std::fs::create_dir(&home).unwrap();
+    // What an nvm/fnm/volta init does: put its own directory first.
+    for profile in [".bashrc", ".bash_profile"] {
+        std::fs::write(
+            home.join(profile),
+            "export PATH=/profile/rewrite/bin:$PATH\n",
+        )
+        .unwrap();
+    }
+    let host = PathEnv {
+        platform: platform.into(),
+        home_dir: home.to_string_lossy().into_owned(),
+        env: HashMap::from([("PATH".into(), "/usr/bin:/bin".into())]),
+    };
+    (scratch, host)
+}
+
+#[cfg(unix)]
+fn pinned_node_selection() -> crate::commands::toolchain::Selection {
+    crate::commands::toolchain::Selection {
+        node: "/pinned/node/bin/node".into(),
+        bun: "/pinned/bun/bin/bun".into(),
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_profile_that_rewrites_path_cannot_displace_the_pinned_toolchain_in_linux_bash() {
+    let (_scratch, host) = rewriting_profile_host("terminal-pin-profile", "linux");
+    let mut params = open_params();
+    params.toolchain = Some(pinned_node_selection());
+    let prepared = prepare(params, host.clone()).unwrap();
+    let home = std::path::PathBuf::from(&host.home_dir);
+    let path = run_prepared_shell(&prepared, &home, "printf '%s' \"$PATH\"");
+    assert!(
+        path.starts_with("/pinned/node/bin:/pinned/bun/bin:/profile/rewrite/bin:"),
+        "interactive bash on linux: expected the pinned toolchain in front of the profile's \
+         PATH change | received {path:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn macos_bash_keeps_its_login_launch_without_a_shim() {
+    let (_scratch, host) = rewriting_profile_host("terminal-pin-macos-bash", "darwin");
+    let mut params = open_params();
+    params.toolchain = Some(pinned_node_selection());
+    let prepared = prepare(params, host).unwrap();
+    assert!(
+        prepared.shell_init.is_none(),
+        "expected no shim for macOS bash, which keeps login semantics"
+    );
+    assert_eq!(
+        prepared.request.args,
+        [std::ffi::OsString::from("-l")],
+        "expected macOS bash to launch with exactly [\"-l\"] | received {:?}",
+        prepared.request.args
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn without_a_toolchain_selection_the_shell_launch_is_unchanged() {
+    let (_scratch, host) = rewriting_profile_host("terminal-pin-none", "linux");
+    let prepared = prepare(open_params(), host).unwrap();
+    assert!(
+        prepared.request.args.is_empty() && prepared.shell_init.is_none(),
+        "expected plain bash args and no shim without a toolchain | received {:?}",
+        prepared.request.args
+    );
 }
