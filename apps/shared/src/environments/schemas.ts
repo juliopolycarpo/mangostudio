@@ -734,11 +734,46 @@ export const RuntimeFindingSchema = Type.Object({
   severity: Type.Optional(RuntimeFindingSeveritySchema),
 });
 
+/**
+ * Why `auto` lands on the installation it does when a process is spawned.
+ *
+ * - `manager-default`: the nvm or fnm default alias, or Bun's own install
+ *   directory, is put in front of `PATH`.
+ * - `well-known-directory`: a well-known install directory that is not on
+ *   `PATH` is put in front of it.
+ * - `inherited-path`: nothing is prepended, so the first match on the
+ *   inherited `PATH` runs, which is the status's `effective` installation.
+ */
+export const RuntimeAutoReasonSchema = Type.Union([
+  Type.Literal('manager-default'),
+  Type.Literal('well-known-directory'),
+  Type.Literal('inherited-path'),
+]);
+
+/**
+ * What `auto` resolves to for one runtime on this machine, computed by the
+ * same code that builds a spawned process's environment so the two cannot
+ * diverge. Absent for runtimes with no toolchain selection and when there is
+ * no installation to pick.
+ */
+export const RuntimeAutoSelectionSchema = Type.Object({
+  reason: RuntimeAutoReasonSchema,
+  /** The directory put in front of `PATH`; absent for `inherited-path`. */
+  dir: Type.Optional(Type.String({ minLength: 1 })),
+  /**
+   * The `path` of the entry in `installations` the process runs, when one
+   * matches. Absent when the chosen directory holds no probed installation.
+   */
+  installationPath: Type.Optional(Type.String({ minLength: 1 })),
+});
+
 export const RuntimeStatusSchema = Type.Object({
   id: RuntimeIdSchema,
   health: RuntimeHealthSchema,
   installations: Type.Array(RuntimeInstallationSchema),
   effective: Type.Optional(RuntimeInstallationSchema),
+  /** Node and Bun only: what the `auto` toolchain choice resolves to. */
+  autoSelection: Type.Optional(RuntimeAutoSelectionSchema),
   findings: Type.Array(RuntimeFindingSchema),
   installable: Type.Boolean(),
   probedAtMs: Type.Number({ minimum: 0 }),
@@ -1039,6 +1074,8 @@ export type RuntimeFindingCode = Static<typeof RuntimeFindingCodeSchema>;
 export type RuntimeFindingSeverity = Static<typeof RuntimeFindingSeveritySchema>;
 export type RuntimeInstallation = Static<typeof RuntimeInstallationSchema>;
 export type RuntimeFinding = Static<typeof RuntimeFindingSchema>;
+export type RuntimeAutoReason = Static<typeof RuntimeAutoReasonSchema>;
+export type RuntimeAutoSelection = Static<typeof RuntimeAutoSelectionSchema>;
 export type RuntimeStatus = Static<typeof RuntimeStatusSchema>;
 export type RuntimeStatusList = Static<typeof RuntimeStatusListSchema>;
 export type AgentAuthSignal = Static<typeof AgentAuthSignalSchema>;
