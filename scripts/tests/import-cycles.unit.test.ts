@@ -337,17 +337,13 @@ function expectCaseReported(
   }
 }
 
-/**
- * Register one describe whose hook scans all cases once. A test per case checks
- * its own slice of that scan and `assertWhole` checks what only the whole scan
- * can say (exit code, cycle count). The scan is read-only after the hook, so the
- * tests are order-insensitive.
- * @example
- * defineBatch('apps/api rejects', cases, () => scanWorkspaceCases('apps/api', cases), assertFails);
- */
 /** Scans registered by `defineBatch`, started together by the file-level hook. */
 const batchScans: Array<() => Promise<unknown>> = [];
 const SCAN_CONCURRENCY = 4;
+// The file-level hook waits for all ten scans. One scan took up to 5.5 s on a
+// loaded Windows runner, and the default 15 s hook timeout dropped the file's
+// 84 cases there.
+const BATCH_SCAN_TIMEOUT_MS = 120_000;
 
 /**
  * Run every registered batch scan, a few at a time. The scans are separate
@@ -365,6 +361,14 @@ async function startBatchScans(): Promise<void> {
   await Promise.all(Array.from({ length: SCAN_CONCURRENCY }, worker));
 }
 
+/**
+ * Register one describe whose hook waits for its scan of all cases. A test per
+ * case checks its own slice of that scan and `assertWhole` checks what only the
+ * whole scan can say (exit code, cycle count). The scan is read-only after the
+ * hook, so the tests are order-insensitive.
+ * @example
+ * defineBatch('apps/api rejects', cases, () => scanWorkspaceCases('apps/api', cases), assertFails);
+ */
 function defineBatch<Scan extends { readonly output: string; readonly required?: CheckRun }>(
   title: string,
   cases: readonly CycleCase[],
@@ -831,8 +835,10 @@ describe('checked cycle evidence', () => {
 
 beforeAll(async () => {
   baseFixture = buildBaseFixture();
+  // Awaited: some cases here change PATH, and a scan spawned beside them
+  // cannot find bun.
   await startBatchScans();
-});
+}, BATCH_SCAN_TIMEOUT_MS);
 
 afterEach(removeFixtures);
 
