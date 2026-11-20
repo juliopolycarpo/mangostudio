@@ -195,6 +195,11 @@ export class FakeSmokeHub {
       groupAlive: () => this.groupStillAlive,
       spawn: this.spawn,
       snapshot: this.snapshot,
+      // Stands in for the /proc group scan: whoever is in the group at hub exit, minus reuse.
+      groupMembers: async (pgid: number) =>
+        (await this.snapshot()).filter(
+          (row) => row.group === pgid && row.pid !== pgid && row.identity !== '900001:999'
+        ),
       signalGroup: this.signalGroup,
       signalProcess: this.signalProcess,
       budgetMs: 20,
