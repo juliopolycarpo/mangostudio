@@ -4,6 +4,12 @@ import type { GitScope } from '@mangostudio/shared/realtime';
 
 import { createGitInvalidationCoalescer } from '@/features/workspace/hooks/git-invalidation-coalescer';
 
+import {
+  advanceTimersByTimeAsync,
+  restoreRealTimers,
+  useFakeTimers,
+} from '../../support/harness/timers';
+
 interface Applied {
   readonly chatId: string;
   readonly scopes: readonly GitScope[];
@@ -55,16 +61,26 @@ describe('createGitInvalidationCoalescer', () => {
 
   it('does not extend the window while frames keep arriving', async () => {
     const { applied, apply } = recordingApply();
-    const coalescer = createGitInvalidationCoalescer(apply, 20);
+    // The window is driven by hand: a real 12 ms sleep ran past the 20 ms
+    // window on a loaded runner, so the second frame opened a window of its own.
+    useFakeTimers();
+    try {
+      const coalescer = createGitInvalidationCoalescer(apply, 20);
 
-    const first = coalescer.schedule('chat-a', ['state']);
-    await Bun.sleep(12);
-    coalescer.schedule('chat-a', ['branches']).catch(() => undefined);
-    await first;
+      const first = coalescer.schedule('chat-a', ['state']);
+      await advanceTimersByTimeAsync(12);
+      coalescer.schedule('chat-a', ['branches']).catch(() => undefined);
+      // 20 ms after the first frame: a window the second one had pushed out
+      // would still be open here.
+      await advanceTimersByTimeAsync(8);
+      await first;
 
-    // The window was fixed by the first frame, so the later one merged into it
-    // rather than pushing the refresh out.
-    expect(applied).toEqual([{ chatId: 'chat-a', scopes: ['branches', 'state'] }]);
+      // The window was fixed by the first frame, so the later one merged into it
+      // rather than pushing the refresh out.
+      expect(applied).toEqual([{ chatId: 'chat-a', scopes: ['branches', 'state'] }]);
+    } finally {
+      await restoreRealTimers();
+    }
   });
 
   it('applies the window-wide work once, with the scopes of every chat in the window', async () => {
