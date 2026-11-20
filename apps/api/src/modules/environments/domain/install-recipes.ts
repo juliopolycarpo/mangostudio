@@ -386,6 +386,54 @@ function nvmScriptCopyCommand(input: RecipeInput, _platform: InstallPlatform): s
   return `curl -fsSL ${NVM_INSTALL_SCRIPT_URL} | PROFILE=/dev/null bash`;
 }
 
+const FNM_RELEASE_TAG = 'v1.39.0';
+// fnm's installer lives in the repo at `.ci/install.sh`; fnm.vercel.app serves
+// a moving copy, so the tagged raw URL is what makes the digest pinnable.
+const FNM_INSTALL_SCRIPT_URL = `https://raw.githubusercontent.com/Schniz/fnm/${FNM_RELEASE_TAG}/.ci/install.sh`;
+const FNM_INSTALL_SCRIPT_SHA256 =
+  'a732195fcf0e69199a21043b9e987a0240d4b12488850c6b13abf2b3b517b522';
+const FNM_DOWNLOADS = vendorDownloads({
+  posix: FNM_INSTALL_SCRIPT_URL,
+  interpreter: 'bash',
+  sha256: FNM_INSTALL_SCRIPT_SHA256,
+});
+
+/**
+ * Runs the verified installer with an explicit install dir, picked with the
+ * same ladder the detector reads (`fnm_root_candidates`): a non-blank
+ * `FNM_DIR`, an existing legacy `~/.fnm`, then the platform default. The
+ * script's own default also honours `XDG_DATA_HOME`, which the detector never
+ * reads, so leaving the choice to the script could install an fnm that the
+ * next probe cannot find. `--force-install` stops the script from delegating
+ * to Homebrew on macOS (it would land in a brew prefix, not in fnm's root);
+ * it is a no-op on Linux. `--skip-shell` keeps the user's shell rc untouched,
+ * and `--release` pins the binary to the same tag as the script.
+ *
+ * Constant script text: the installer path is the only value, passed as `$1`.
+ */
+const FNM_INSTALL_SHELL = [
+  // eslint-disable-next-line no-template-curly-in-string -- bash `${var// /}` expansion for the target shell, not a JS placeholder
+  'if [ -n "${FNM_DIR// /}" ]; then dir="$FNM_DIR"',
+  'elif [ -d "$HOME/.fnm" ]; then dir="$HOME/.fnm"',
+  'elif [ "$(uname -s)" = Darwin ]; then dir="$HOME/Library/Application Support/fnm"',
+  'else dir="$HOME/.local/share/fnm"',
+  'fi',
+  `exec bash "$1" --skip-shell --force-install --release ${FNM_RELEASE_TAG} --install-dir "$dir"`,
+].join('\n');
+
+function fnmInstallScriptArgv(input: RecipeInput, context: InstallRecipeBuildContext) {
+  assertRecipeInput(input, 'none');
+  if (!context.installerPath) {
+    throw new Error('Downloaded installer path is required.');
+  }
+  return ['bash', '-c', FNM_INSTALL_SHELL, 'mangostudio-install', context.installerPath];
+}
+
+function fnmScriptCopyCommand(input: RecipeInput, _platform: InstallPlatform): string {
+  assertRecipeInput(input, 'none');
+  return `curl -fsSL ${FNM_INSTALL_SCRIPT_URL} | bash -s -- --skip-shell --release ${FNM_RELEASE_TAG}`;
+}
+
 const CLAUDE_DOWNLOADS = vendorDownloads({
   posix: 'https://claude.ai/install.sh',
   interpreter: 'bash',
@@ -629,6 +677,26 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
   // winget's fnm manifest ships zip+portable: without Developer Mode there
   // is no stable symlink for it, which is why the node recipes below call
   // fnm by the absolute path the probe resolved rather than by name.
+  {
+    // The POSIX counterpart of the winget `fnm.install` below: the two never
+    // share a platform, so a runtime still has one unattended install each.
+    id: 'fnm.install.official',
+    runtimeId: 'fnm',
+    action: 'install',
+    inputKind: 'none',
+    platforms: POSIX_PLATFORMS,
+    requires: [],
+    writes: ['$FNM_DIR', '$HOME/.local/share/fnm', '$HOME/Library/Application Support/fnm'],
+    networkAccess: true,
+    timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
+    probe: [
+      { kind: 'runtime', runtimeId: 'fnm' },
+      { kind: 'version-manager', versionManagerId: 'fnm' },
+    ],
+    download: FNM_DOWNLOADS,
+    argv: fnmInstallScriptArgv,
+    copyCommand: fnmScriptCopyCommand,
+  },
   wingetRecipe({
     id: 'fnm.install',
     runtimeId: 'fnm',

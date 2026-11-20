@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
+import { getInstallRecipe } from '../../../../src/modules/environments/domain/install-recipes';
 import {
   createInstallerDownloader,
   InstallerDownloadError,
@@ -263,6 +264,17 @@ describe('installer download', () => {
       })
     ).rejects.toThrow(
       `installer digest mismatch: expected ${wrongDigest} | received ${sha256Hex(SCRIPT)}`
+    );
+    expect(fixture.getWritten()).toBeNull();
+  });
+
+  it("refuses a body that differs from fnm.install.official's pinned digest, before writing it", async () => {
+    const download = getInstallRecipe('fnm.install.official').download?.linux;
+    if (!download) throw new Error('fnm.install.official declares no linux download');
+    const fixture = createDownloader(new Response(SCRIPT, { status: 200 }));
+
+    await expect(fixture.downloader.download(download)).rejects.toThrow(
+      `installer digest mismatch: expected ${download.sha256} | received ${sha256Hex(SCRIPT)}`
     );
     expect(fixture.getWritten()).toBeNull();
   });

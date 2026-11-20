@@ -671,6 +671,38 @@ describe('install service', () => {
     expect(preview?.download?.sha256).toBeUndefined();
   });
 
+  it.each([
+    ['linux', true],
+    ['darwin', true],
+    ['win32', false],
+  ] as const)(
+    'lists fnm.install.official on %s with supported: %s',
+    async (platform, expectedSupported) => {
+      const detection = createDetectionServices();
+      const memory = createMemoryRepository();
+      const service = createInstallService({
+        recipes: [getInstallRecipe('fnm.install.official')],
+        ...detection,
+        repository: memory.repository,
+        resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
+        platform,
+      });
+
+      const [preview] = await service.listRecipes(REQUEST_CONTEXT);
+
+      expect(preview?.supported, `fnm.install.official supported on ${platform}`).toBe(
+        expectedSupported
+      );
+      expect(preview?.missingRequirements).toEqual([]);
+      // No script is declared for win32, so there is nothing to pin there.
+      expect(preview?.download?.pinnedSha256).toBe(
+        expectedSupported
+          ? 'a732195fcf0e69199a21043b9e987a0240d4b12488850c6b13abf2b3b517b522'
+          : undefined
+      );
+    }
+  );
+
   it('offers a copy-only recipe with an empty argv and runnable: false', async () => {
     const detection = createDetectionServices();
     const memory = createMemoryRepository();
