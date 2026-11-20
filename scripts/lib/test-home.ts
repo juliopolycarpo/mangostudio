@@ -93,9 +93,9 @@ export function testHomeEnv(
     // signing stands down for a harness that discards the user configuration
     // this way, which is what a CI runner looks like to it.
     GIT_CONFIG_GLOBAL: join(root, '.gitconfig'),
-    // The system config of a CI image (Git for Windows ships one) can set what the global file
-    // turns off, such as `core.fsmonitor`. Skip it, as the global one is skipped for the developer's.
-    GIT_CONFIG_NOSYSTEM: '1',
+    // Not `GIT_CONFIG_NOSYSTEM`: the runtime's Git does not receive it, so the system config
+    // (Git for Windows' `core.autocrlf=true`) would apply to the runtime's Git only, and the
+    // parity tests that diff test-spawned Git against runtime-spawned Git would disagree.
     [REAL_HOME_ENV]: host.realHome,
     ...toolchainEnv(ambient, host),
     BUN_INSTALL: bunInstall,

@@ -146,10 +146,10 @@ describe('testHomeEnv', () => {
     expect(testHomeEnv(root, {}, host).GIT_CONFIG_GLOBAL).toBe(join(root, '.gitconfig'));
   });
 
-  test('skips the system git config so an image cannot turn the global settings back on', () => {
+  test('leaves the system git config on, so test and runtime git read the same one', () => {
     const received = testHomeEnv(root, {}, host).GIT_CONFIG_NOSYSTEM;
 
-    expect(received, `expected GIT_CONFIG_NOSYSTEM: 1 | received: ${received}`).toBe('1');
+    expect(received, `expected GIT_CONFIG_NOSYSTEM unset | received: ${received}`).toBeUndefined();
   });
 
   test('pins the toolchain homes to the real ones', () => {

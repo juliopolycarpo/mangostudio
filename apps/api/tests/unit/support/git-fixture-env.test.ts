@@ -20,18 +20,6 @@ describe('gitFixtureEnv', () => {
     ).toBe('/tmp/mangostudio-test-home-abc/.gitconfig');
   });
 
-  test('forwards GIT_CONFIG_NOSYSTEM so the system config stays out of fixture git', () => {
-    const previous = process.env.GIT_CONFIG_NOSYSTEM;
-    process.env.GIT_CONFIG_NOSYSTEM = '1';
-    try {
-      const received = gitFixtureEnv().GIT_CONFIG_NOSYSTEM;
-      expect(received, `expected GIT_CONFIG_NOSYSTEM: 1 | received: ${received}`).toBe('1');
-    } finally {
-      if (previous === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
-      else process.env.GIT_CONFIG_NOSYSTEM = previous;
-    }
-  });
-
   test('leaves the variable unset when the lane did not set it', () => {
     delete process.env[KEY];
 

@@ -1496,9 +1496,9 @@ What the launcher sets, besides the home:
   only `gc.auto=0`, `maintenance.auto=false` and `core.fsmonitor=false`, so Git never leaves a
   detached process holding a fixture repository after a request, and the developer's
   signing policy, identity and `core.hooksPath` never reach the fixture repositories the tests
-  build. `GIT_CONFIG_NOSYSTEM=1` keeps a CI image's system config from undoing them; the
-  fixtures' own Git honours it (runtime-spawned Git does once its environment allowlist
-  forwards the variable). A fixture that builds its own `env` for `git` must forward it
+  build. The launcher leaves the system config on (no `GIT_CONFIG_NOSYSTEM`): the runtime's Git
+  does not receive that variable, and the parity tests need test-spawned and runtime-spawned Git
+  to read the same configuration. A fixture that builds its own `env` for `git` must forward it
   (`tests/support/git-fixture-env.ts`), or Git falls back to the real `~/.gitconfig`.
 - API tests remove recursive temp directories with `removeFixtureDir` / `removeFixtureDirSync`
   (`tests/support/remove-fixture-dir.ts`), which retry Windows `EBUSY`/`EPERM`/`ENOTEMPTY` with a
