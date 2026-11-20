@@ -45,7 +45,7 @@
 //
 // Usage: bun ./scripts/ci/run-tests-watchdog.ts --label=3 -- bun run test --coverage --shard=3/3
 
-import { spawn } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createWriteStream } from 'node:fs';
 import { appendFile, cp, mkdtemp, rename, rm, stat } from 'node:fs/promises';
@@ -69,6 +69,14 @@ export interface WatchdogOptions {
   readonly command: readonly string[];
   /** Wall-clock bound per attempt; an attempt still running after it is hung. */
   readonly timeoutSeconds: number;
+  /**
+   * Holds the timeout back until this resolves, per attempt. Production leaves
+   * it unset, so the clock starts at spawn. A test that needs a hung child to
+   * finish its setup before the kill passes a readiness signal here and a
+   * short `timeoutSeconds`, instead of a bound sized for a loaded CI runner
+   * that every such case then waits out in full.
+   */
+  readonly timeoutStartsWhen?: (child: ChildProcess) => Promise<void>;
   /** How long SIGTERM gets before the group is SIGKILLed. */
   readonly killGraceSeconds?: number;
   /**
@@ -441,8 +449,15 @@ const runAttempt = async (options: WatchdogOptions): Promise<AttemptResult> => {
   );
 
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let attemptSettled = false;
   const timedOut = new Promise<'timeout'>((resolve) => {
-    timer = setTimeout(() => resolve('timeout'), options.timeoutSeconds * 1000);
+    const arm = (): void => {
+      // A gate that resolves after the attempt ended must not leave a live timer behind.
+      if (attemptSettled) return;
+      timer = setTimeout(() => resolve('timeout'), options.timeoutSeconds * 1000);
+    };
+    if (options.timeoutStartsWhen) void options.timeoutStartsWhen(child).then(arm, arm);
+    else arm();
   });
 
   try {
@@ -467,6 +482,7 @@ const runAttempt = async (options: WatchdogOptions): Promise<AttemptResult> => {
     }
     return { exitCode: HUNG_EXIT_CODE, hung: true };
   } finally {
+    attemptSettled = true;
     clearTimeout(timer);
     // `end()` only queues the flush, and the CLI below finishes with
     // `process.exit()`, which does not drain a pending stream. The log feeds

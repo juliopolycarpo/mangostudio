@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { type ChildProcess } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -97,6 +98,26 @@ afterEach(() => {
   else process.env.GITHUB_OUTPUT = originalGithubOutput;
 });
 
+// A fixture that must hang prints this once its setup is done. The watchdog
+// clock starts on seeing it, so a short bound is safe on a slow runner: the
+// child is never killed mid-setup, and no case waits out a CI-sized timeout.
+const HANG_READY_LINE = 'watchdog-fixture-ready';
+const HANG_UNTIL_KILLED = `console.log(${JSON.stringify(HANG_READY_LINE)}); setInterval(() => {}, 1000);`;
+
+const waitForHangReadyLine = (child: ChildProcess): Promise<void> =>
+  new Promise((resolve) => {
+    let seen = '';
+    child.stdout?.on('data', (chunk: Buffer) => {
+      seen += chunk.toString();
+      if (seen.includes(HANG_READY_LINE)) resolve();
+    });
+  });
+
+const HUNG_ATTEMPT_TIMING = {
+  timeoutSeconds: 0.2,
+  timeoutStartsWhen: waitForHangReadyLine,
+} satisfies Partial<WatchdogOptions>;
+
 const optionsIn = (dir: string, overrides: Partial<WatchdogOptions>): WatchdogOptions => ({
   label: '3',
   command: ['bun', '-e', 'console.log("ok")'],
@@ -166,8 +187,8 @@ describe('runTestsWithWatchdog', () => {
     const dir = await makeTemp();
     const result = await runTestsWithWatchdog(
       optionsIn(dir, {
-        command: ['bun', '-e', 'console.log("spinning"); setInterval(() => {}, 1000)'],
-        timeoutSeconds: 1,
+        command: ['bun', '-e', HANG_UNTIL_KILLED],
+        ...HUNG_ATTEMPT_TIMING,
       })
     );
 
@@ -177,6 +198,35 @@ describe('runTestsWithWatchdog', () => {
       shard: 3,
       exitCode: 124,
     });
+  });
+
+  // The gate is what lets hung fixtures use a sub-second bound: the clock must
+  // not start before the child says it is ready, or a slow start is killed mid-setup.
+  it('starts the timeout clock only after timeoutStartsWhen resolves', async () => {
+    const dir = await makeTemp();
+    const gateOpened = Promise.withResolvers<void>();
+    const startedAt = Date.now();
+    let openedAt = 0;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: ['bun', '-e', HANG_UNTIL_KILLED],
+        timeoutSeconds: 0.2,
+        timeoutStartsWhen: async () => {
+          await Bun.sleep(600);
+          openedAt = Date.now();
+          gateOpened.resolve();
+        },
+      })
+    );
+    await gateOpened.promise;
+
+    expect(result.exitCode, '(hung exit code): expected 124 after both attempts hang').toBe(124);
+    // Two attempts each wait 600 ms for the gate and 200 ms for the clock; an
+    // ungated clock would kill both at 200 ms and finish well under 1 s.
+    expect(
+      Date.now() - startedAt,
+      `(elapsed ms, gate opened at ${openedAt - startedAt}): expected >= 1600`
+    ).toBeGreaterThanOrEqual(1600);
   });
 
   // Both sinks refuse chunks once their buffers fill, and a forwarder that
@@ -191,7 +241,7 @@ describe('runTestsWithWatchdog', () => {
     const result = await runTestsWithWatchdog(
       optionsIn(dir, {
         command: ['bun', '-e', 'for (let i = 0; i < 200; i++) console.log("line-" + i);'],
-        timeoutSeconds: 30,
+        ...HUNG_ATTEMPT_TIMING,
         stdout: sink,
       })
     );
@@ -213,7 +263,7 @@ describe('runTestsWithWatchdog', () => {
     const result = await runTestsWithWatchdog(
       optionsIn(dir, {
         command: ['bun', '-e', 'for (let i = 0; i < 300; i++) console.log("line-" + i);'],
-        timeoutSeconds: 30,
+        ...HUNG_ATTEMPT_TIMING,
         stdout: sink,
       })
     );
@@ -239,7 +289,7 @@ describe('runTestsWithWatchdog', () => {
     const result = await runTestsWithWatchdog(
       optionsIn(dir, {
         command: [join(dir, 'no-such-executable'), 'arg'],
-        timeoutSeconds: 30,
+        ...HUNG_ATTEMPT_TIMING,
       })
     );
 
@@ -247,9 +297,7 @@ describe('runTestsWithWatchdog', () => {
     expect(await Bun.file(join(dir, 'shard-meta.json')).json()).toMatchObject({ exitCode: 1 });
   });
 
-  // `timeoutSeconds` is generous here on purpose: the first attempt has to
-  // reach its `writeFileSync` before the watchdog kills it, and a loaded CI
-  // runner can spend most of a second just starting `bun`.
+  // The hung fixtures print HANG_READY_LINE after their setup; the timeout clock starts then.
   it('retries a hung first attempt and keeps a green retry green despite mirrored failures', async () => {
     const dir = await makeTemp();
     // First run leaves a marker and hangs; the second sees the marker and exits 0.
@@ -264,10 +312,10 @@ describe('runTestsWithWatchdog', () => {
         process.exit(0);
       }
       fs.writeFileSync(${JSON.stringify(marker)}, "");
-      setInterval(() => {}, 1000);
+      ${HANG_UNTIL_KILLED}
     `;
     const result = await runTestsWithWatchdog(
-      optionsIn(dir, { command: ['bun', '-e', script], timeoutSeconds: 3 })
+      optionsIn(dir, { command: ['bun', '-e', script], ...HUNG_ATTEMPT_TIMING })
     );
 
     expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
@@ -295,10 +343,10 @@ describe('runTestsWithWatchdog', () => {
       }
       fs.writeFileSync(${JSON.stringify(marker)}, "");
       console.log(${JSON.stringify(line)});
-      setInterval(() => {}, 1000);
+      ${HANG_UNTIL_KILLED}
     `;
     const result = await runTestsWithWatchdog(
-      optionsIn(dir, { command: ['bun', '-e', script], timeoutSeconds: 3, stdout: sink })
+      optionsIn(dir, { command: ['bun', '-e', script], ...HUNG_ATTEMPT_TIMING, stdout: sink })
     );
 
     expect(result).toMatchObject({ exitCode: 1, attempts: 2 });
@@ -330,10 +378,10 @@ describe('runTestsWithWatchdog', () => {
       fs.writeFileSync(${JSON.stringify(marker)}, "");
       fs.mkdirSync(${JSON.stringify(join(dir, 'timings'))}, { recursive: true });
       fs.writeFileSync(${JSON.stringify(timingsFile)}, "written-by-attempt-1");
-      setInterval(() => {}, 1000);
+      ${HANG_UNTIL_KILLED}
     `;
     const result = await runTestsWithWatchdog(
-      optionsIn(dir, { command: ['bun', '-e', script], timeoutSeconds: 3 })
+      optionsIn(dir, { command: ['bun', '-e', script], ...HUNG_ATTEMPT_TIMING })
     );
 
     expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
@@ -362,10 +410,10 @@ describe('runTestsWithWatchdog', () => {
       }
       fs.writeFileSync(${JSON.stringify(marker)}, "");
       fs.writeFileSync(${JSON.stringify(timingsFile)}, "clobbered");
-      setInterval(() => {}, 1000);
+      ${HANG_UNTIL_KILLED}
     `;
     const result = await runTestsWithWatchdog(
-      optionsIn(dir, { command: ['bun', '-e', script], timeoutSeconds: 3 })
+      optionsIn(dir, { command: ['bun', '-e', script], ...HUNG_ATTEMPT_TIMING })
     );
 
     expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
@@ -388,12 +436,12 @@ describe('runTestsWithWatchdog', () => {
       if (fs.existsSync(${JSON.stringify(marker)})) process.exit(0);
       fs.writeFileSync(${JSON.stringify(marker)}, "");
       fs.unlinkSync(${JSON.stringify(logFile)});
-      setInterval(() => {}, 1000);
+      ${HANG_UNTIL_KILLED}
     `;
     const result = await runTestsWithWatchdog(
       optionsIn(dir, {
         command: ['bun', '-e', script],
-        timeoutSeconds: 3,
+        ...HUNG_ATTEMPT_TIMING,
         logFile,
         stdout: sink,
       })
@@ -805,13 +853,13 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
       const fs = require("node:fs");
       if (fs.existsSync(${JSON.stringify(marker)})) process.exit(0);
       fs.writeFileSync(${JSON.stringify(marker)}, "");
-      setInterval(() => {}, 1000);
+      ${HANG_UNTIL_KILLED}
     `;
 
     const result = await runTestsWithWatchdog(
       optionsIn(dir, {
         command: ['bun', '-e', script],
-        timeoutSeconds: 3,
+        ...HUNG_ATTEMPT_TIMING,
         retryOnCrash: true,
       })
     );
@@ -1008,7 +1056,7 @@ describe('attempt log preservation without retryOnCrash', () => {
     }
     fs.writeFileSync(${JSON.stringify(marker)}, "");
     console.log(${JSON.stringify(logLine)});
-    setInterval(() => {}, 1000);
+    ${HANG_UNTIL_KILLED}
   `;
 
   it('keeps the hung first attempt at <logFile>.attempt-1 and the retry at <logFile>', async () => {
@@ -1024,7 +1072,7 @@ describe('attempt log preservation without retryOnCrash', () => {
           '-e',
           hangOnceThenScript(join(dir, 'first-attempt-ran'), '(fail) a > b [0.37ms]'),
         ],
-        timeoutSeconds: 3,
+        ...HUNG_ATTEMPT_TIMING,
       })
     );
 
