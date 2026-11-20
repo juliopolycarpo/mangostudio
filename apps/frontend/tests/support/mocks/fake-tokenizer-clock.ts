@@ -30,6 +30,18 @@ export class EveryLineStopsTokenizerClock {
 }
 
 /**
+ * Passes the limit during the first of the two passes `includeExplanation` makes over a line
+ * (`tokenizeLine`, which stops early and returns coarse tokens) and then stands still, so the
+ * second pass (`tokenizeLine2`) finishes with finer ones. The shiki zip of the two then runs out
+ * of explanation tokens: `undefined is not an object (evaluating 'tokenWithScopes.startIndex')`.
+ * A slow CI machine under coverage produces the same split by chance.
+ */
+export class FirstPassStopsTokenizerClock {
+  private reads = 0;
+  now = (): number => (this.reads++ < 2 ? this.reads * 1_000 : 2_001);
+}
+
+/**
  * The real clock running `factor` times faster, so a machine `factor` times slower than this one:
  * a grammar's cold regex compile (100-270 ms on a fast machine) passes the tokenizer's 500 ms
  * limit while a warm call of a few milliseconds stays far under it.

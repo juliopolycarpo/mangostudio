@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 
+import {
+  FirstPassStopsTokenizerClock,
+  frozenTokenizerClock,
+  withTokenizerClock,
+} from '../../support/mocks/fake-tokenizer-clock';
+
 /**
  * Vitest called `vi.resetModules()` between cases so each one got an
  * uninitialized highlighter. `bun test` has no equivalent, and one module
@@ -148,11 +154,16 @@ describe('shiki highlighter', () => {
     code: string,
     lang: 'vue' | 'svelte'
   ): { content: string; scopes: string[] }[] {
-    const tokens = highlighter.codeToTokensBase(code, {
-      lang,
-      theme: 'one-dark-pro',
-      includeExplanation: 'scopeName',
-    });
+    // `includeExplanation` tokenizes every line twice, each pass with its own `tokenizeTimeLimit`
+    // check, and zips the results. A pass that stops early on a slow machine leaves the zip short
+    // and shiki throws, so the clock is pinned for the whole call (the flake in #2646).
+    const tokens = withTokenizerClock(frozenTokenizerClock, () =>
+      highlighter.codeToTokensBase(code, {
+        lang,
+        theme: 'one-dark-pro',
+        includeExplanation: 'scopeName',
+      })
+    );
     return tokens.flatMap((line) =>
       line.map((token) => ({
         content: token.content,
@@ -214,6 +225,42 @@ describe('shiki highlighter', () => {
       expect(html, `${lang} fence html`).toContain('<span style=');
     });
   }
+
+  it('explains scopes even when the clock passes the limit during only the first pass', async () => {
+    const shiki = await loadShiki();
+    const { lang, code } = embeddedFences[0];
+
+    await shiki.preloadCodeLanguages([lang], 'one-dark-pro');
+    const highlighter = await shiki.initHighlighter();
+    const tokens = withTokenizerClock(new FirstPassStopsTokenizerClock().now, () =>
+      scopedTokens(highlighter, code, lang)
+    );
+
+    expect(
+      tokens.length,
+      `${lang} tokens | expected: a non-empty explained token list`
+    ).toBeGreaterThan(0);
+  });
+
+  it('documents that shiki itself throws when only the first explanation pass stops', async () => {
+    const shiki = await loadShiki();
+    const { lang, code } = embeddedFences[0];
+
+    await shiki.preloadCodeLanguages([lang], 'one-dark-pro');
+    const highlighter = await shiki.initHighlighter();
+
+    // Upstream hazard the helper above guards against; if shiki fixes the zip this test fails and
+    // the guard can go.
+    expect(() =>
+      withTokenizerClock(new FirstPassStopsTokenizerClock().now, () =>
+        highlighter.codeToTokensBase(code, {
+          lang,
+          theme: 'one-dark-pro',
+          includeExplanation: 'scopeName',
+        })
+      )
+    ).toThrow(TypeError);
+  });
 
   it('ignores unsupported languages without initializing the highlighter', async () => {
     const shiki = await loadShiki();
