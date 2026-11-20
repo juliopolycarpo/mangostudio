@@ -155,6 +155,64 @@ describe('install recipes', () => {
     );
   });
 
+  it("pins fnm.install.official's script to a release tag and a SHA-256 digest", () => {
+    const recipe = getInstallRecipe('fnm.install.official');
+    for (const platform of ['darwin', 'linux'] as const) {
+      const download = recipe.download?.[platform];
+      expect(download?.url, `${platform} download url`).toBe(
+        'https://raw.githubusercontent.com/Schniz/fnm/v1.39.0/.ci/install.sh'
+      );
+      expect(download?.sha256, `${platform} pinned digest`).toMatch(/^[0-9a-f]{64}$/);
+      expect(download?.interpreter).toBe('bash');
+    }
+    expect(recipe.download?.linux?.sha256).toBe(
+      'a732195fcf0e69199a21043b9e987a0240d4b12488850c6b13abf2b3b517b522'
+    );
+    expect(recipe.download?.win32).toBeUndefined();
+  });
+
+  it('is POSIX-only, so winget keeps the one unattended fnm install on win32', () => {
+    expect(getInstallRecipe('fnm.install.official').platforms).toEqual(['darwin', 'linux']);
+    expect(getInstallRecipe('fnm.install').platforms).toEqual(['win32']);
+  });
+
+  it('runs the fnm installer from the prepared file with --skip-shell and an explicit dir', () => {
+    const recipe = getInstallRecipe('fnm.install.official');
+    const context = { platform: 'linux' as const, binaryPaths: {}, installerPath: '/tmp/i.sh' };
+
+    const argv = recipe.argv?.({ kind: 'none' }, context) ?? [];
+
+    expect(argv.slice(0, 2)).toEqual(['bash', '-c']);
+    // The installer path is a positional parameter, never spliced into the script text.
+    expect(argv.slice(3)).toEqual(['mangostudio-install', '/tmp/i.sh']);
+    const script = argv[2] ?? '';
+    expect(script).not.toContain('/tmp/i.sh');
+    expect(script).toContain('--skip-shell');
+    expect(script).toContain('--install-dir "$dir"');
+    expect(script).toContain('--release v1.39.0');
+    // Without it the script hands macOS to Homebrew and fnm lands outside its root.
+    expect(script).toContain('--force-install');
+    // The dirs are the detector's candidate ladder, not XDG_DATA_HOME.
+    expect(script).toContain('"$HOME/.local/share/fnm"');
+    expect(script).toContain('"$HOME/Library/Application Support/fnm"');
+    expect(script).not.toContain('XDG_DATA_HOME');
+  });
+
+  it('refuses to build the fnm installer argv without a prepared installer path', () => {
+    expect(() =>
+      getInstallRecipe('fnm.install.official').argv?.(
+        { kind: 'none' },
+        { platform: 'linux', binaryPaths: {} }
+      )
+    ).toThrow('Downloaded installer path is required.');
+  });
+
+  it('copies the fnm install as a tagged, shell-untouching command', () => {
+    expect(getInstallRecipe('fnm.install.official').copyCommand({ kind: 'none' }, 'linux')).toBe(
+      'curl -fsSL https://raw.githubusercontent.com/Schniz/fnm/v1.39.0/.ci/install.sh | bash -s -- --skip-shell --release v1.39.0'
+    );
+  });
+
   it('calls fnm by its resolved absolute path, never `fnm use`', () => {
     const install = getInstallRecipe('fnm.node.install');
     const setDefault = getInstallRecipe('fnm.node.set-default');

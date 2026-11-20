@@ -824,6 +824,7 @@ export const InstallRecipeIdSchema = Type.Union([
   Type.Literal('nvm.node.install'),
   Type.Literal('nvm.node.set-default'),
   Type.Literal('fnm.install'),
+  Type.Literal('fnm.install.official'),
   Type.Literal('fnm.node.install'),
   Type.Literal('fnm.node.set-default'),
   Type.Literal('winget.node.install'),

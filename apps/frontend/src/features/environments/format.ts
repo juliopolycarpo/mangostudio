@@ -526,9 +526,9 @@ function nodeRecipeInput(recipe: InstallRecipePreview): RecipeInput {
  * The probe answers for every manager this release detects, on every platform.
  * Rendering all of them puts a "{manager} is not installed" block — and an
  * affordance that resolves to "nothing here installs {manager}" — inside the
- * Node card for a manager this machine has no path to: fnm on POSIX, whose
- * only install recipe is winget's. A manager with nothing installed and no way
- * to get there is not a row a reader can act on.
+ * Node card for a manager this machine has no path to: fnm on Windows without
+ * winget, whose only install recipe needs it. A manager with nothing installed
+ * and no way to get there is not a row a reader can act on.
  *
  * An empty catalog is "unknown", not "unreachable": the page passes
  * `recipes.data ?? []` while the catalog loads, and narrowing on that would

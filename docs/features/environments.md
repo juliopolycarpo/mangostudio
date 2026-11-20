@@ -140,7 +140,8 @@ What matters for this page:
   `nvm.node.install`; with nvm present it runs only the Node step. First install has no
   `set-default` follow-up. On Windows the winget default is one step; the fnm alternative
   is two when fnm is absent (`fnm.install`, then `fnm.node.install`), or only the Node step
-  when fnm is already installed. One confirmation lists the chain, with one console per step.
+  when fnm is already installed. On POSIX, fnm is installed by `fnm.install.official` and shows
+  up in the Node card as an installable manager, but nvm stays the default for a first install. One confirmation lists the chain, with one console per step.
 - **Node update**: an outdated effective nvm/fnm Node runs that manager's `node.install`
   followed by `node.set-default`, so the new LTS becomes effective. Winget uses only
   `winget.node.update`; installations managed elsewhere keep their own update instructions.
@@ -155,6 +156,5 @@ the same selection as the picker, for people on SSH. See [`cli.md`](../reference
 
 ## Deferred
 
-Node managers beyond winget LTS and fnm (nvm-windows v2 once it has a winget id, a POSIX
-`fnm.install`) are tracked in
+Node managers beyond winget LTS and fnm (nvm-windows v2 once it has a winget id) are tracked in
 [#1011](https://github.com/juliopolycarpo/mangostudio/issues/1011).

@@ -102,7 +102,7 @@ export function RuntimesPage() {
               >
                 {/* Every version manager gets its own table here, not only nvm —
                     but only the ones this machine can actually act on, so an
-                    absent manager with no install path here (fnm on POSIX)
+                    absent manager with no install path here (fnm without winget)
                     does not add a dead row inside the Node card. */}
                 {runtime.id === 'node' &&
                   managerTables.map((manager) => (

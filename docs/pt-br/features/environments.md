@@ -105,7 +105,9 @@ A tabela de receitas está descrita em
   `nvm.node.install`; com nvm presente, executa apenas o passo de Node. A primeira instalação
   não acrescenta `set-default`. No Windows o padrão winget tem um passo; a alternativa fnm
   tem dois se fnm estiver ausente (`fnm.install`, depois `fnm.node.install`), ou apenas o passo
-  de Node se fnm já estiver instalado. Uma confirmação lista a cadeia, com um console por passo.
+  de Node se fnm já estiver instalado. No POSIX, o fnm é instalado por `fnm.install.official` e
+  aparece no cartão do Node como gerenciador instalável, mas o nvm continua sendo o padrão da
+  primeira instalação. Uma confirmação lista a cadeia, com um console por passo.
 - **Atualização de Node**: um Node efetivo desatualizado gerenciado por nvm/fnm executa
   `node.install` do gerenciador seguido por `node.set-default`, tornando o novo LTS efetivo.
   Winget usa apenas `winget.node.update`; instalações gerenciadas por outras ferramentas
@@ -121,6 +123,5 @@ a mesma seleção que o seletor, para quem está via SSH. Veja [`cli.md`](../ref
 
 ## Adiado
 
-Gerenciadores de Node além do winget LTS e do fnm (nvm-windows v2 quando tiver id no winget, um
-`fnm.install` POSIX) estão registrados em
+Gerenciadores de Node além do winget LTS e do fnm (nvm-windows v2 quando tiver id no winget) estão registrados em
 [#1011](https://github.com/juliopolycarpo/mangostudio/issues/1011).

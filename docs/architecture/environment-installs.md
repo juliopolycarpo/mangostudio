@@ -89,6 +89,30 @@ the tool. Recipes may declare `acceptedExitCodes` for exits that mean success: w
 already-current package with `-1978335189` (`0x8A15002B`, "no applicable upgrade"), which is not
 a failure MangoStudio should report as one.
 
+### fnm on POSIX
+
+`fnm.install.official` (Linux and macOS) fetches fnm's own `.ci/install.sh` at a release tag
+(`v1.39.0`) and pins its SHA-256 digest, the same way `nvm.install` does. The id differs from the
+winget `fnm.install` because `requires` is per recipe: the winget one needs winget, this one needs
+nothing, and the two never share a platform. It runs the verified file as
+`bash -c <constant script> mangostudio-install <file>` so that the script can pick the install
+directory and the file path stays a positional argument:
+
+- `--skip-shell`: the script never appends to `.bashrc`, `.zshrc` or fish's `conf.d`.
+- `--install-dir`: a non-blank `FNM_DIR`, else an existing `~/.fnm`, else the platform default
+  (`~/Library/Application Support/fnm` on macOS, `~/.local/share/fnm` elsewhere). This is the same
+  ladder as `fnm_root_candidates` in the runtime's detector, so the next probe finds the binary
+  and its Node versions with no shell restart. The script's own default would also honour
+  `XDG_DATA_HOME`, which detection never reads.
+- `--force-install`: on macOS the script otherwise runs `brew install fnm`, and the binary lands in
+  a Homebrew prefix. It is a no-op on Linux. The script prints a reminder about it; that is expected.
+- `--release v1.39.0`: the script otherwise downloads the latest fnm binary, so the binary is pinned
+  to the same tag as the script. The binary zip is not digest-checked, only the script.
+
+The script needs `curl` and `unzip`; it prints which one is missing and exits 1. As with nvm there
+is no uninstall recipe, and fnm has no update recipe yet. Bumping the pin means changing the tag
+and digest together: fetch the script at the new tag and run `sha256sum` on it.
+
 ### Copy-only recipes
 
 A recipe MangoStudio runs must have a vendor-documented shape; the audit row is the promise. A
@@ -127,7 +151,7 @@ Official script installers have a prepare step before execution:
    provider base URLs, so a hijacked installer host cannot redirect the server onto a loopback,
    private, unique-local, or link-local endpoint.
 2. Stream the response through a size bound before allocating the complete body.
-3. When the recipe pins a digest (an immutable URL such as a tagged nvm release), refuse a body
+3. When the recipe pins a digest (an immutable URL such as a tagged nvm or fnm release), refuse a body
    whose SHA-256 differs, naming both digests.
 4. Reject empty or implausibly small responses, oversized responses, HTML, and content without a
    shell shebang — or, for a PowerShell installer, without any PowerShell token.
@@ -188,7 +212,7 @@ under the runtime's own home elsewhere.
 
 MangoStudio does not directly edit `.bashrc`, `.zshrc`, or another shell startup file. An official
 third-party installer may do so as part of its documented behavior. The automatic nvm recipe
-sets `PROFILE=/dev/null` to suppress that mutation. Bun and nvm recipe previews instead return
+sets `PROFILE=/dev/null` to suppress that mutation, and the fnm recipe passes `--skip-shell`. Bun and nvm recipe previews instead return
 their canonical profile lines, whether the complete block is already present, and the profile
 paths where it was detected. This lets the UI offer an inspectable copy action without returning
 unrelated profile contents or modifying a file.
