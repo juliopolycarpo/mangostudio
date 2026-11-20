@@ -16,6 +16,7 @@ import {
   FAKE_GH_SCENARIO_FILE,
   fakeGhReply,
 } from '../../support/fake-gh/program';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 /** The real hard link, with every request it was asked for. */
 class RecordingLink implements FakeGhInstallDependencies {
@@ -101,7 +102,8 @@ describe('compiled fake gh', () => {
   }, 60_000);
 
   afterAll(async () => {
-    await rm(work, { recursive: true, force: true });
+    // Every `run` awaited its child's exit, so nothing owned is still running here.
+    await removeFixtureDir({ role: 'fake-gh-build', path: work });
   });
 
   async function run(directory: string, args: readonly string[]) {

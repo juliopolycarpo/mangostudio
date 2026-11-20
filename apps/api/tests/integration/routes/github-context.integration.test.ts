@@ -20,12 +20,12 @@ import { DEFAULT_PR_OUTPUT, type FakeGhScenario } from '../../support/fake-gh/pr
 import {
   cleanupGithubFixtureDirectories,
   type GithubFixtureDirectory,
-  removeDirectoryWithRetry,
 } from '../../support/github-fixture-cleanup';
 import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
 } from '../../support/harness/create-api-test-app';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 let tempDirs: GithubFixtureDirectory[] = [];
 const buildDirs: GithubFixtureDirectory[] = [];
@@ -99,7 +99,7 @@ async function closeFixtureRuntime(): Promise<void> {
 const cleanupDependencies = {
   closeRuntime: closeFixtureRuntime,
   // The runtime is closed first, so the retry only waits out what Windows still holds after exit.
-  removeDirectory: (path: string) => removeDirectoryWithRetry(path),
+  removeDirectory: (path: string) => removeFixtureDir({ role: 'github-fixture', path }),
 };
 
 afterAll(async () => {
