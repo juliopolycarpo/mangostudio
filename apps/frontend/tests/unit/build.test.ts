@@ -462,11 +462,35 @@ describe('removeTempPaths', () => {
   });
 });
 
+/**
+ * What the build child needs before it reaches the stylesheet step: its entrypoint, helpers, config
+ * and an empty route directory. The 790-odd files under `src/` and `public/` are never read when
+ * the entry stylesheet fails to compile, and copying them is the bulk of fixture setup on Windows.
+ */
+const STYLESHEET_FAILURE_FRONTEND_FILES = [
+  'build.ts',
+  'package.json',
+  'tsconfig.json',
+  'tsr.config.json',
+  'tailwind-inputs.json',
+  'index.html',
+  'scripts',
+  'src/routeTree.gen.ts',
+] as const;
+
 describe('compiler failure publication', () => {
+  /**
+   * `full` copies the whole frontend so the child can run a real compile. `stylesheet-entry` copies
+   * only what the child touches before the entry stylesheet fails, and links the stylesheet
+   * packages instead of copying them (they are only resolved after that point).
+   */
+  type FixtureScope = 'full' | 'stylesheet-entry';
+
   async function isolatedBuildFixture(
     diagnostics: BuildFixtureDiagnostics,
     owner: BuildFixtureOwner,
-    afterAllocation: (path: string) => void = () => {}
+    afterAllocation: (path: string) => void = () => {},
+    scope: FixtureScope = 'full'
   ): Promise<{ isolated: string; frontend: string; routeTreeStamp: number }> {
     diagnostics.record('fixture:prepare-started');
     const repository = join(import.meta.dir, '../../../..');
@@ -478,13 +502,21 @@ describe('compiler failure publication', () => {
     const frontend = join(isolated, 'apps/frontend');
     diagnostics.record('fixture:directory-ready');
     diagnostics.record('fixture:frontend-copy-started');
-    cpSync(join(repository, 'apps/frontend'), frontend, {
-      recursive: true,
-      filter: (path) =>
-        !['node_modules', 'dist', 'dist-metafile.json', '.turbo', '.tanstack', 'tests'].includes(
-          basename(path)
-        ),
-    });
+    if (scope === 'full') {
+      cpSync(join(repository, 'apps/frontend'), frontend, {
+        recursive: true,
+        filter: (path) =>
+          !['node_modules', 'dist', 'dist-metafile.json', '.turbo', '.tanstack', 'tests'].includes(
+            basename(path)
+          ),
+      });
+    } else {
+      await mkdir(join(frontend, 'src/routes'), { recursive: true });
+      for (const entry of STYLESHEET_FAILURE_FRONTEND_FILES)
+        cpSync(join(repository, 'apps/frontend', entry), join(frontend, entry), {
+          recursive: true,
+        });
+    }
     diagnostics.record('fixture:frontend-copied');
     // These cases are about the stylesheet and source guards, not the route tree. `build.ts --dev`
     // regenerates the tree whenever `routeTreeIsCurrent` reads it as older than `src/routes`, and the
@@ -509,14 +541,15 @@ describe('compiler failure publication', () => {
       if (entry.startsWith('.')) continue;
       if (!entry.startsWith('@')) {
         const source = realpathSync(join(installed, entry));
-        if (entry === 'tailwindcss') cpSync(source, join(modules, entry), { recursive: true });
+        if (entry === 'tailwindcss' && scope === 'full')
+          cpSync(source, join(modules, entry), { recursive: true });
         else symlinkSync(source, join(modules, entry), 'junction');
         continue;
       }
       await mkdir(join(modules, entry));
       for (const child of await readdir(join(installed, entry))) {
         const source = realpathSync(join(installed, entry, child));
-        if (entry === '@xterm' && child === 'xterm')
+        if (entry === '@xterm' && child === 'xterm' && scope === 'full')
           cpSync(source, join(modules, entry, child), { recursive: true });
         else symlinkSync(source, join(modules, entry, child), 'junction');
       }
@@ -583,7 +616,7 @@ describe('compiler failure publication', () => {
     const owner = new BuildFixtureOwner(diagnostics);
     await owner.run(async () => {
       const { frontend, routeTreeStamp } = await owner.prepare(() =>
-        isolatedBuildFixture(diagnostics, owner)
+        isolatedBuildFixture(diagnostics, owner, undefined, 'stylesheet-entry')
       );
       diagnostics.record('fixture:invalid-stylesheet-started');
       await owner.prepare(() =>
