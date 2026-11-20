@@ -28,17 +28,24 @@ import { parseBackupArgs } from '../../../src/cli/commands/backup';
 import { createBunSqliteDialect } from '../../../src/db/bun-sqlite-dialect';
 import { allMigrations } from '../../../src/db/migrations';
 import { getConfig, getConfigEnvFilePath } from '../../../src/lib/config';
+import { type FixtureDirectory, removeTrackedFixtureDirs } from '../../support/remove-fixture-dir';
 
 const cleanups: (() => Promise<void>)[] = [];
+const captureRoots: FixtureDirectory[] = [];
 afterEach(async () => {
-  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  try {
+    for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  } finally {
+    // Handles (the databases) close first; a root that refuses removal stays tracked.
+    await removeTrackedFixtureDirs(captureRoots);
+  }
 });
 
 async function capturePaths() {
   // Capture resolves paths before I/O. Keep race fixture paths identical
   // even when the system temporary directory has an alias.
   const root = await mkdtemp(join(await fs.realpath(tmpdir()), 'mango-capture-test-'));
-  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  captureRoots.push({ role: 'capture-root', path: root });
   const config = {
     ...getConfig(),
     database: { path: join(root, 'configured.sqlite') },
