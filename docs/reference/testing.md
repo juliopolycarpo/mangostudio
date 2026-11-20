@@ -696,7 +696,11 @@ and a bare Bun server that sends `Connection: close`, or stops while it answers,
 in about 40% of requests under six processes there (3 of 100 in one process), with no
 MangoStudio code involved. That is a connection-teardown problem to understand before
 Windows goes wide. `resolveWorkerCount` carries the `win32` branch to lift, and
-`MANGO_TEST_WORKERS=6` overrides it meanwhile.
+`MANGO_TEST_WORKERS=6` overrides it meanwhile. The root scripts lane is the one exception:
+its `workers.windowsWidth` is two, because served serially it took 560 to 660 s of the
+native qualification's 900 s `bun run test` deadline (115 passing Windows runs between
+2026-11-06 and 2026-11-19: median 774 s, 90th percentile 842 s, worst 907 s). Windows runs
+it with `--shard` splits, not the tracked weights.
 
 The lane fails, naming `api-unit worker i/N`, when a worker:
 

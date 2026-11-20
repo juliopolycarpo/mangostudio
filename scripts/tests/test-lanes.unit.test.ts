@@ -223,6 +223,15 @@ describe('api lanes', () => {
     }
   );
 
+  // The serial Windows pin exists for loopback `ECONNRESET` under concurrent workers, seen
+  // in api-unit. Only the root lane is lifted, to two, to fit the native 900 s deadline.
+  it('lifts the Windows serial default for the root lane only', () => {
+    const widths = TEST_LANES.filter((lane) => lane.workers?.windowsWidth !== undefined).map(
+      (lane) => `${lane.id}=${lane.workers?.windowsWidth}`
+    );
+    expect(widths, 'expected lanes with a windowsWidth: root=2').toEqual(['root=2']);
+  });
+
   // The integration lane's plain script takes the same runner, with the same
   // agreement between table and script, and keeps the flags that keep it out of
   // Bun's isolate machinery (the runner adds `--shard`, never `--isolate`).

@@ -115,6 +115,17 @@ describe('resolveWorkerCount', () => {
     expect(resolveWorkerCount({ [WORKERS_ENV]: '8' }, 34, 'linux', 4)).toBe(8);
   });
 
+  it('takes a lane’s Windows width, capped at half the cores and never below one', () => {
+    expect(resolveWorkerCount({}, 4, 'win32', 6, 2)).toBe(2);
+    expect(resolveWorkerCount({}, 36, 'win32', 6, 2)).toBe(2);
+    expect(resolveWorkerCount({}, 2, 'win32', 6, 2)).toBe(1);
+    expect(resolveWorkerCount({}, 1, 'win32', 6, 2)).toBe(1);
+    // The Windows width is not a width elsewhere.
+    expect(resolveWorkerCount({}, 36, 'linux', 6, 2)).toBe(6);
+    // An explicit width still wins over it.
+    expect(resolveWorkerCount({ [WORKERS_ENV]: '3' }, 4, 'win32', 6, 2)).toBe(3);
+  });
+
   it('lets an explicit width win on Windows, and validates it as anywhere', () => {
     expect(resolveWorkerCount({ [WORKERS_ENV]: '6' }, 36, 'win32')).toBe(6);
     expect(resolveWorkerCount({ [WORKERS_ENV]: String(MAX_WORKERS) }, 4, 'win32')).toBe(

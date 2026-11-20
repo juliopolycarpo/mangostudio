@@ -62,9 +62,12 @@ const DEFAULT_WORKERS = 6;
  * explicit `MANGO_TEST_WORKERS` still wins, with the same validation.
  *
  * A lane may name a default of its own (`laneDefault`); six is the api-unit and
- * root lanes', four the api-integration lane's.
+ * root lanes', four the api-integration lane's. It may also name its own Windows
+ * default (`windowsDefault`, still capped at half the cores), for a lane that
+ * starts no loopback server; the root lane takes two.
  *
  * @example
+ * resolveWorkerCount({}, 4, 'win32', 6, 2); // => 2
  * resolveWorkerCount({}, 34, 'linux'); // => 6
  * resolveWorkerCount({}, 34, 'linux', 4); // => 4
  * resolveWorkerCount({}, 34, 'win32'); // => 1
@@ -74,12 +77,13 @@ export function resolveWorkerCount(
   env: Readonly<Record<string, string | undefined>>,
   cpus: number,
   platform: NodeJS.Platform = process.platform,
-  laneDefault: number = DEFAULT_WORKERS
+  laneDefault: number = DEFAULT_WORKERS,
+  windowsDefault = 1
 ): number {
   const raw = env[WORKERS_ENV]?.trim();
   if (!raw) {
-    if (platform === 'win32') return 1;
-    return Math.max(1, Math.min(laneDefault, Math.floor(cpus / 2)));
+    const width = platform === 'win32' ? windowsDefault : laneDefault;
+    return Math.max(1, Math.min(width, Math.floor(cpus / 2)));
   }
 
   const count = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;

@@ -148,7 +148,13 @@ export async function main(
     return deps.runSerial(command);
   }
 
-  const count = resolveWorkerCount(deps.env, deps.cpus, deps.platform, lane.workers?.defaultWidth);
+  const count = resolveWorkerCount(
+    deps.env,
+    deps.cpus,
+    deps.platform,
+    lane.workers?.defaultWidth,
+    lane.workers?.windowsWidth
+  );
   const cancellation = new AbortController();
   const interrupt: { by: Interrupt | null } = { by: null };
   deps.onInterrupt((signal) => {
