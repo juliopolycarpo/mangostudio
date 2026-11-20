@@ -15,10 +15,12 @@
 
 import { expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 
 import { createInstallRunner } from '../../src/modules/environments/infrastructure/install-runner';
 import type { RuntimeClient } from '../../src/services/runtime-client/runtime-client';
 import type { FakeInstaller } from './controlled-installer';
+import { explainStalledWait } from './install-stall-probe';
 import { waitUntil } from './wait-until';
 
 export type { FakeInstaller } from './controlled-installer';
@@ -32,7 +34,10 @@ export interface RelayedInstall {
   /** Everything relayed so far plus the run's status and exit code, for failure messages. */
   describe(): string;
   readonly result: ReturnType<ReturnType<typeof createInstallRunner>['run']>;
-  /** Resolves once a relayed line on `stream` contains `text`. */
+  /**
+   * Resolves once a relayed line on `stream` contains `text`. On timeout it appends the run's
+   * `diagnose` text, releases the installer so cleanup is quick, and rethrows.
+   */
   waitForLine(stream: string, text: string, timeoutMs?: number): Promise<void>;
 }
 
@@ -47,7 +52,13 @@ export interface RelayedInstall {
 export function startRelayedInstall(
   client: RuntimeClient,
   installer: FakeInstaller,
-  options: { readonly runId: string; readonly signal?: AbortSignal; readonly timeoutMs?: number }
+  options: {
+    readonly runId: string;
+    readonly signal?: AbortSignal;
+    readonly timeoutMs?: number;
+    /** Explains a `waitForLine` timeout; see `describeInstallStall`. */
+    readonly diagnose?: () => Promise<string>;
+  }
 ): RelayedInstall {
   const lines: Array<{ stream: string; line: string }> = [];
   const runner = createInstallRunner({
@@ -81,13 +92,22 @@ export function startRelayedInstall(
     lines,
     result,
     describe,
-    waitForLine: (stream, text, timeoutMs = 20_000) =>
-      waitUntil(
-        () => lines.some((entry) => entry.stream === stream && entry.line.includes(text)),
-        `a relayed ${stream} line containing "${text}"`,
-        timeoutMs,
-        describe
-      ),
+    waitForLine: async (stream, text, timeoutMs = 20_000) => {
+      try {
+        await waitUntil(
+          () => lines.some((entry) => entry.stream === stream && entry.line.includes(text)),
+          `a relayed ${stream} line containing "${text}"`,
+          timeoutMs,
+          describe
+        );
+      } catch (error) {
+        await explainStalledWait(error, {
+          diagnose: options.diagnose,
+          release: () => writeFile(installer.release, 'finish'),
+        });
+        throw error;
+      }
+    },
   };
 }
 
