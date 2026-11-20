@@ -84,9 +84,12 @@ test('removes the private launcher directory when compiler spawning throws', () 
 import { expect, spyOn, test } from 'bun:test';
 import { readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { installCompiledFakeCli } from ${FAKE_CLI};
+import { disposeCompiledFakeCli, installCompiledFakeCli } from ${FAKE_CLI};
 
 test('compiler startup error leaves no directory', () => {
+  // On Windows the preload has already compiled the launcher; drop it so
+  // this install compiles, and meets the failure below.
+  disposeCompiledFakeCli();
   function rejectCompilerStart(command) {
     expect(command).toContain('--compile');
     throw new Error('fixture compiler startup failed');

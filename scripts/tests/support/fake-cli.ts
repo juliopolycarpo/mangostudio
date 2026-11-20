@@ -24,7 +24,7 @@ export function installFakeCli(directory: string, name: string, source: string):
  */
 export function installCompiledFakeCli(directory: string, name: string, source: string): void {
   const executable = join(directory, `${name}${executableSuffix}`);
-  const launcher = (compiledLauncher ??= compileLauncher());
+  const launcher = compiledLauncherPath();
   writeFileSync(`${executable}.ts`, source);
   try {
     linkSync(launcher, executable);
@@ -82,6 +82,23 @@ export function removeFakeCliDirectory(
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, retryDelayMs);
     }
   }
+}
+
+/**
+ * Compile the Windows launcher now rather than inside the first test that
+ * installs a fake CLI. `bun build --compile` took most of a 15 s test timeout on
+ * a loaded Windows runner (issue #2661), so the preload pays it in a hook with
+ * its own bound. Elsewhere a fake CLI is a plain script and there is nothing to
+ * prepare. Returns the launcher path, or undefined off Windows.
+ * @example beforeAll(() => { prepareFakeCli(); }, 120_000);
+ */
+export function prepareFakeCli(platform: NodeJS.Platform = process.platform): string | undefined {
+  return platform === 'win32' ? compiledLauncherPath() : undefined;
+}
+
+/** The worker's launcher, compiled on first use. */
+function compiledLauncherPath(): string {
+  return (compiledLauncher ??= compileLauncher());
 }
 
 /**
