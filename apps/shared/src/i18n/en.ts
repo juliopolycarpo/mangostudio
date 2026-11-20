@@ -1329,6 +1329,10 @@ export const messages: CoreMessages = {
       confirmUninstallDescription:
         'This removes {paths} from this machine. Review it before continuing.',
       runUninstall: 'Remove',
+      // Shown in place of the removal description when the detected tool lives
+      // outside a directory MangoStudio may delete (a package-manager Bun).
+      uninstallRefused:
+        'MangoStudio will not remove {path}: it is not inside a .bun directory, so its folder may hold other tools. Remove it with the package manager that installed it.',
       // Shown instead of a run button when a recipe has no vendor-documented
       // unattended shape — the copyable command is the whole offer.
       unrunnable: {

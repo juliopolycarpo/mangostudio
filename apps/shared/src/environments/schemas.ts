@@ -933,6 +933,18 @@ export const InstallProfileSetupSchema = Type.Object({
   detectedIn: Type.Array(Type.String({ minLength: 1 })),
 });
 
+/**
+ * What an uninstall will delete on the target machine, resolved from the
+ * detected installation rather than assumed. `root` is the directory the
+ * recipe removes (null when it refuses), `detectedPath` the binary it was
+ * derived from, and `removable` whether the recipe will run at all.
+ */
+export const InstallUninstallTargetSchema = Type.Object({
+  detectedPath: Type.String(),
+  root: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
+  removable: Type.Boolean(),
+});
+
 export const InstallRecipePreviewSchema = Type.Object({
   id: InstallRecipeIdSchema,
   runtimeId: RuntimeIdSchema,
@@ -957,6 +969,8 @@ export const InstallRecipePreviewSchema = Type.Object({
   unrunnableReason: Type.Optional(InstallUnrunnableReasonSchema),
   download: Type.Optional(InstallRecipeDownloadSchema),
   profileSetup: Type.Optional(InstallProfileSetupSchema),
+  /** Present only for an uninstall whose target depends on the detected installation. */
+  uninstallTarget: Type.Optional(InstallUninstallTargetSchema),
 });
 
 export const InstallPrepareBodySchema = Type.Object(
@@ -1093,6 +1107,7 @@ export type InstallGuardReason = Static<typeof InstallGuardReasonSchema>;
 export type InstallGuard = Static<typeof InstallGuardSchema>;
 export type InstallRecipeDownload = Static<typeof InstallRecipeDownloadSchema>;
 export type InstallProfileSetup = Static<typeof InstallProfileSetupSchema>;
+export type InstallUninstallTarget = Static<typeof InstallUninstallTargetSchema>;
 export type InstallRecipePreview = Static<typeof InstallRecipePreviewSchema>;
 export type InstallPrepareBody = Static<typeof InstallPrepareBodySchema>;
 export type InstallPreparation = Static<typeof InstallPreparationSchema>;

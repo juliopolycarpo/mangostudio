@@ -3904,6 +3904,10 @@ export const messages = {
       confirmUninstallTitle: 'Remover {target}?',
       confirmUninstallDescription: 'Isto remove {paths} desta máquina. Confira antes de continuar.',
       runUninstall: 'Remover',
+      // Mostrado no lugar da descrição de remoção quando a ferramenta detectada
+      // fica fora de um diretório que o MangoStudio pode apagar (Bun de gerenciador de pacotes).
+      uninstallRefused:
+        'O MangoStudio não vai remover {path}: ele não está dentro de um diretório .bun, então a pasta pode conter outras ferramentas. Remova com o gerenciador de pacotes que o instalou.',
       // Mostrado no lugar do botão de executar quando a receita não tem uma
       // forma documentada pelo fabricante para rodar sem interação — o comando
       // copiável é a única oferta.
