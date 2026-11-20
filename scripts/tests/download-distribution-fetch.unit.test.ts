@@ -47,8 +47,11 @@ const DIRECT_DOWNLOAD_EXCEPTIONS = ['.github/workflows/distribution-build.yml'];
 
 // A literal distribution or hub-inputs name, or an expression that resolves to
 // one of the content-addressed artifact names the build workflow publishes.
-const DISTRIBUTION_ARTIFACT_NAME =
-  /^(hub-inputs|distribution)-|artifact_name|target_artifacts|(linux|windows|assets|npm|checksums)_artifact/;
+const LITERAL_ARTIFACT_NAME = /^(?:hub-inputs|distribution)-/;
+const EXPRESSION_ARTIFACT_NAME =
+  /artifact_name|target_artifacts|(?:linux|windows|assets|npm|checksums)_artifact/;
+const isDistributionArtifactName = (name: string): boolean =>
+  LITERAL_ARTIFACT_NAME.test(name) || EXPRESSION_ARTIFACT_NAME.test(name);
 
 describe('same-run distribution fetch', () => {
   test('the composite fetches through the bounded script, not the Node action', () => {
@@ -78,7 +81,7 @@ describe('same-run distribution fetch', () => {
       ];
       for (const step of steps.filter(isDirectDownloadArtifact)) {
         const name = step.with?.name ?? '';
-        if (DISTRIBUTION_ARTIFACT_NAME.test(name)) {
+        if (isDistributionArtifactName(name)) {
           offenders.push(`${file} step "${step.name ?? name}" downloads ${name}`);
         }
       }
