@@ -20,6 +20,7 @@ import { writeFile } from 'node:fs/promises';
 import { createInstallRunner } from '../../src/modules/environments/infrastructure/install-runner';
 import type { RuntimeClient } from '../../src/services/runtime-client/runtime-client';
 import type { FakeInstaller } from './controlled-installer';
+import { explainStalledWait } from './install-stall-probe';
 import { waitUntil } from './wait-until';
 
 export type { FakeInstaller } from './controlled-installer';
@@ -100,14 +101,10 @@ export function startRelayedInstall(
           describe
         );
       } catch (error) {
-        // Diagnose while the run is still stuck, then let the installer finish: left waiting, it holds
-        // the runtime open until its own timeout and the test's cleanup outlives the test timeout,
-        // which replaces this message with a bare "timed out".
-        const stall = await options
-          .diagnose?.()
-          .catch((cause: unknown) => `probe failed: ${String(cause)}`);
-        await writeFile(installer.release, 'finish').catch(() => undefined);
-        if (stall && error instanceof Error) error.message += `; stall probe: ${stall}`;
+        await explainStalledWait(error, {
+          diagnose: options.diagnose,
+          release: () => writeFile(installer.release, 'finish'),
+        });
         throw error;
       }
     },

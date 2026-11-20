@@ -1,16 +1,14 @@
 import { describe, expect, it } from 'bun:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
-import type { FakeInstaller } from '../../support/controlled-installer';
 import {
   describeInstallStall,
+  explainStalledWait,
   type InstallStallProbeOptions,
   stallProbeLogPath,
 } from '../../support/install-stall-probe';
-import { startRelayedInstall } from '../../support/rust-runtime-install-fixture';
 
 type RunBehaviour = 'already-active' | 'accepts' | 'silent';
 
@@ -122,38 +120,48 @@ describe('describeInstallStall', () => {
   });
 });
 
-describe('startRelayedInstall waitForLine timeout', () => {
+describe('explainStalledWait', () => {
   it('appends the diagnosis, releases the installer, and keeps the original message', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'fix-stall-probe-'));
-    try {
-      const installer: FakeInstaller = {
-        argv: ['never-started'],
-        marker: join(dir, 'm'),
-        release: join(dir, 'release'),
-        logPath: join(dir, 'log'),
-        pidFile: join(dir, 'pid'),
-      };
-      const silentClient = {
-        manifest: { features: {} },
-        effectiveMinor: 99,
-        onEvent: () => () => undefined,
-        install: { run: () => new Promise(() => undefined), cancel: () => Promise.resolve() },
-      } as unknown as RuntimeClient;
-      const run = startRelayedInstall(silentClient, installer, {
-        runId: 'quiet',
-        diagnose: () => Promise.resolve('fake diagnosis text'),
-      });
+    const order: string[] = [];
+    const error = new Error('expected a relayed stdout line containing "waiting"');
+    await explainStalledWait(error, {
+      diagnose: () => {
+        order.push('diagnose');
+        return Promise.resolve('fake diagnosis text');
+      },
+      release: () => {
+        order.push('release');
+        return Promise.resolve();
+      },
+    });
 
-      let message = '';
-      await run.waitForLine('stdout', 'waiting', 50).catch((error: Error) => {
-        message = error.message;
-      });
+    expect(error.message).toBe(
+      'expected a relayed stdout line containing "waiting"; stall probe: fake diagnosis text'
+    );
+    expect(order).toEqual(['diagnose', 'release']);
+  });
 
-      expect(message).toContain('expected a relayed stdout line containing "waiting"');
-      expect(message).toContain('; stall probe: fake diagnosis text');
-      expect(await readFile(installer.release, 'utf8')).toBe('finish');
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+  it('reports a failing diagnosis and still releases when release rejects', async () => {
+    const error = new Error('base');
+    await explainStalledWait(error, {
+      diagnose: () => Promise.reject(new Error('probe exploded')),
+      release: () => Promise.reject(new Error('EBUSY')),
+    });
+
+    expect(error.message).toBe('base; stall probe: probe failed: Error: probe exploded');
+  });
+
+  it('leaves the message alone without a diagnosis but still releases', async () => {
+    const error = new Error('base');
+    let released = false;
+    await explainStalledWait(error, {
+      release: () => {
+        released = true;
+        return Promise.resolve();
+      },
+    });
+
+    expect(error.message).toBe('base');
+    expect(released).toBe(true);
   });
 });

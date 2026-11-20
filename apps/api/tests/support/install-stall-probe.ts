@@ -121,6 +121,30 @@ async function listHostProcesses(runtimePid: number | undefined): Promise<string
 }
 
 /**
+ * What a timed-out install wait does before it rethrows: diagnose while the run is still stuck, then
+ * release the installer, then append the diagnosis to `error`'s message (the original text is kept).
+ * Left waiting, the installer holds the runtime open until its own timeout and the test's cleanup
+ * outlives the test timeout, which replaces the message with a bare "timed out". Neither step can throw.
+ *
+ * @example
+ * await explainStalledWait(error, { diagnose, release: () => writeFile(installer.release, 'finish') });
+ * throw error;
+ */
+export async function explainStalledWait(
+  error: unknown,
+  steps: {
+    readonly diagnose?: () => Promise<string>;
+    readonly release: () => Promise<unknown>;
+  }
+): Promise<void> {
+  const stall = await steps
+    .diagnose?.()
+    .catch((cause: unknown) => `probe failed: ${String(cause)}`);
+  await steps.release().catch(() => undefined);
+  if (stall && error instanceof Error) error.message += `; stall probe: ${stall}`;
+}
+
+/**
  * Builds the text a timed-out install wait appends to its message.
  *
  * @example
