@@ -446,56 +446,63 @@ test.each([
   'missing-count',
   'incomplete-pages',
   'empty-pages',
-])('qualification CLI: %s', (scenario) => {
-  const directory = mkdtempSync(join(tmpdir(), 'canary-qualification-cli-'));
-  try {
-    const api = new FakeQualificationApi();
-    const apiValues = join(directory, 'api.json');
-    writeFileSync(apiValues, JSON.stringify(Object.fromEntries(api.values)));
-    installFakeCli(directory, 'gh', fakeQualificationGitHubCli);
-    const output = join(directory, 'output');
-    const receiptPath = join(directory, 'receipt.json');
-    const result = Bun.spawnSync(['bun', './scripts/ci/qualify-canary-source.ts'], {
-      env: {
-        ...fakeCliEnvironment(directory),
-        REPO: source.repository,
-        SOURCE_RUN_ID: String(source.runId),
-        SOURCE_RUN_ATTEMPT: String(source.runAttempt),
-        SOURCE_SHA: source.sourceSha,
-        VERIFIED_PUSH_BEFORE_SHA: source.pushBeforeSha,
-        QUALIFICATION_RECEIPT: receiptPath,
-        GITHUB_OUTPUT: output,
-        FAKE_API_VALUES: apiValues,
-        FAKE_API_FAILURE: String(scenario === 'api-failure'),
-        FAKE_MALFORMED_PAGE: String(scenario === 'malformed-page'),
-        FAKE_MISSING_COUNT: String(scenario === 'missing-count'),
-        FAKE_INCOMPLETE_PAGES: String(scenario === 'incomplete-pages'),
-        FAKE_EMPTY_PAGES: String(scenario === 'empty-pages'),
-      },
-    });
-    expect(result.exitCode).toBe(scenario === 'success' ? 0 : 1);
-    if (scenario === 'success') {
-      expect(readFileSync(output, 'utf8')).toBe('builder_attempt=1\nqualified=true\n');
-      expect(JSON.parse(readFileSync(receiptPath, 'utf8')).source).toEqual(source);
-    } else {
-      expect(existsSync(receiptPath)).toBe(false);
-      expect(existsSync(output)).toBe(false);
-      expect(result.stderr.toString()).toContain(
-        scenario === 'api-failure'
-          ? 'fixture denied API read'
-          : scenario === 'malformed-page'
-            ? 'expected page.jobs array'
-            : scenario === 'missing-count'
-              ? 'expected page.total_count nonnegative safe integer'
-              : scenario === 'incomplete-pages'
-                ? 'expected complete jobs collection'
-                : 'expected nonempty paginated array'
-      );
+])(
+  'qualification CLI: %s',
+  (scenario) => {
+    const directory = mkdtempSync(join(tmpdir(), 'canary-qualification-cli-'));
+    try {
+      const api = new FakeQualificationApi();
+      const apiValues = join(directory, 'api.json');
+      writeFileSync(apiValues, JSON.stringify(Object.fromEntries(api.values)));
+      installFakeCli(directory, 'gh', fakeQualificationGitHubCli);
+      const output = join(directory, 'output');
+      const receiptPath = join(directory, 'receipt.json');
+      const result = Bun.spawnSync(['bun', './scripts/ci/qualify-canary-source.ts'], {
+        env: {
+          ...fakeCliEnvironment(directory),
+          REPO: source.repository,
+          SOURCE_RUN_ID: String(source.runId),
+          SOURCE_RUN_ATTEMPT: String(source.runAttempt),
+          SOURCE_SHA: source.sourceSha,
+          VERIFIED_PUSH_BEFORE_SHA: source.pushBeforeSha,
+          QUALIFICATION_RECEIPT: receiptPath,
+          GITHUB_OUTPUT: output,
+          FAKE_API_VALUES: apiValues,
+          FAKE_API_FAILURE: String(scenario === 'api-failure'),
+          FAKE_MALFORMED_PAGE: String(scenario === 'malformed-page'),
+          FAKE_MISSING_COUNT: String(scenario === 'missing-count'),
+          FAKE_INCOMPLETE_PAGES: String(scenario === 'incomplete-pages'),
+          FAKE_EMPTY_PAGES: String(scenario === 'empty-pages'),
+        },
+      });
+      expect(result.exitCode).toBe(scenario === 'success' ? 0 : 1);
+      if (scenario === 'success') {
+        expect(readFileSync(output, 'utf8')).toBe('builder_attempt=1\nqualified=true\n');
+        expect(JSON.parse(readFileSync(receiptPath, 'utf8')).source).toEqual(source);
+      } else {
+        expect(existsSync(receiptPath)).toBe(false);
+        expect(existsSync(output)).toBe(false);
+        expect(result.stderr.toString()).toContain(
+          scenario === 'api-failure'
+            ? 'fixture denied API read'
+            : scenario === 'malformed-page'
+              ? 'expected page.jobs array'
+              : scenario === 'missing-count'
+                ? 'expected page.total_count nonnegative safe integer'
+                : scenario === 'incomplete-pages'
+                  ? 'expected complete jobs collection'
+                  : 'expected nonempty paginated array'
+        );
+      }
+    } finally {
+      removeFakeCliDirectory(directory);
     }
-  } finally {
-    removeFakeCliDirectory(directory);
-  }
-});
+    // The success scenario reads every fixture value: about 13 fake gh calls,
+    // each a launcher and a Bun start on Windows. That took 0.5 to 1.7 s on an
+    // idle runner and past 15 s beside two root workers and api-unit (#2661).
+  },
+  60_000
+);
 
 test.each([true, null, 'false', 0])(
   'refuses explicitly truncated or malformed comparison marker %j',
