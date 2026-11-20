@@ -33,6 +33,7 @@ on:
 
 permissions:
   contents: read
+  actions: read # list and download this run's artifacts with gh
 
 concurrency:
   group: release-dry-run-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
@@ -174,7 +175,7 @@ jobs:
 
       - name: Download prepared packaging inputs
         if: inputs.reuse_distribution
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        uses: ./.github/actions/download-run-artifact # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           name: hub-inputs-${{ inputs.source_sha }}
           path: .
@@ -403,7 +404,7 @@ jobs:
 
       - name: Download prepared packaging inputs
         if: inputs.reuse_distribution
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        uses: ./.github/actions/download-run-artifact # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           name: hub-inputs-${{ inputs.source_sha }}
           path: .
