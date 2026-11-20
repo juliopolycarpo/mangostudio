@@ -73,6 +73,16 @@ describe.skipIf(!binary.available)('Rust command parity', () => {
     rust = runtime.client;
   }, 30_000);
 
+  // The first gh start on a fresh Windows runner took 2.9 to 20.4 s on every VM
+  // measured (issue #2661), then under 1 s for every later start. Pay that once
+  // here, outside the cases that time gh, under its own bound.
+  beforeAll(async () => {
+    if (!Bun.which('gh')) return;
+    const warmup = Bun.spawn(['gh', '--version'], { stdout: 'ignore', stderr: 'ignore' });
+    const exitCode = await warmup.exited;
+    expect(exitCode, `(gh warm-up): expected gh --version exit 0 | received: ${exitCode}`).toBe(0);
+  }, 45_000);
+
   afterAll(async () => {
     await runtime?.close();
     if (previousHome === undefined) delete process.env.MANGO_HOME;
