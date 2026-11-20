@@ -51,16 +51,72 @@ function collectFiles(path: string, root: string, files: Set<string>): void {
   }
 }
 
-function configFor(file: string, cache: Map<string, ts.CompilerOptions>): ts.CompilerOptions {
-  const config = ts.findConfigFile(dirname(file), ts.sys.fileExists);
-  if (!config)
-    return {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      allowJs: true,
-    };
-  const cached = cache.get(config);
-  if (cached) return cached;
+/** Compiler options for one tsconfig and the resolution cache shared by its files. */
+interface ResolutionContext {
+  readonly options: ts.CompilerOptions;
+  readonly cache: ts.ModuleResolutionCache;
+}
+
+/**
+ * Per-scan memo of everything the resolver would otherwise look up again for
+ * each file and import: the tsconfig governing a directory, the parsed options
+ * of each tsconfig with its module resolution cache, and canonical paths.
+ * One scan of the repository resolves ~4,000 files, most in a handful of
+ * directories and through the same few hundred specifiers.
+ */
+class ResolutionMemo {
+  readonly #configByDirectory = new Map<string, string | undefined>();
+  readonly #contextByConfig = new Map<string, ResolutionContext>();
+  readonly #canonicalByPath = new Map<string, string>();
+  #fallback: ResolutionContext | undefined;
+
+  contextFor(file: string): ResolutionContext {
+    const directory = dirname(file);
+    let config = this.#configByDirectory.get(directory);
+    if (config === undefined && !this.#configByDirectory.has(directory)) {
+      config = ts.findConfigFile(directory, ts.sys.fileExists);
+      this.#configByDirectory.set(directory, config);
+    }
+    if (!config) return (this.#fallback ??= withCache(FALLBACK_OPTIONS));
+    let context = this.#contextByConfig.get(config);
+    if (!context) {
+      context = withCache(readCompilerOptions(config));
+      this.#contextByConfig.set(config, context);
+    }
+    return context;
+  }
+
+  canonical(path: string): string {
+    let actual = this.#canonicalByPath.get(path);
+    if (actual === undefined) {
+      actual = canonical(path);
+      this.#canonicalByPath.set(path, actual);
+    }
+    return actual;
+  }
+}
+
+const FALLBACK_OPTIONS: ts.CompilerOptions = {
+  module: ts.ModuleKind.ESNext,
+  moduleResolution: ts.ModuleResolutionKind.Bundler,
+  allowJs: true,
+};
+
+function withCache(options: ts.CompilerOptions): ResolutionContext {
+  const getCanonicalFileName = ts.sys.useCaseSensitiveFileNames
+    ? (name: string) => name
+    : (name: string) => name.toLowerCase();
+  return {
+    options,
+    cache: ts.createModuleResolutionCache(
+      ts.sys.getCurrentDirectory(),
+      getCanonicalFileName,
+      options
+    ),
+  };
+}
+
+function readCompilerOptions(config: string): ts.CompilerOptions {
   const result = ts.readConfigFile(config, ts.sys.readFile);
   if (result.error)
     throw new Error(
@@ -79,9 +135,7 @@ function configFor(file: string, cache: Map<string, ts.CompilerOptions>): ts.Com
       `Cannot resolve imports using ${config}: ${errors.map((error) => ts.flattenDiagnosticMessageText(error.messageText, '\n')).join('\n')}`
     );
   }
-  const options = { ...parsed.options, allowJs: true };
-  cache.set(config, options);
-  return options;
+  return { ...parsed.options, allowJs: true };
 }
 
 function isLocal(path: string, root: string): boolean {
@@ -201,16 +255,16 @@ function readBoundedSource(path: string, root: string): string {
 
 function graphFor(files: Set<string>, root: string): Map<string, Edge[]> {
   const graph = new Map<string, Edge[]>();
-  const configs = new Map<string, ts.CompilerOptions>();
+  const memo = new ResolutionMemo();
   for (const file of files) {
     const source = readBoundedSource(file, root);
-    const options = configFor(file, configs);
+    const { options, cache } = memo.contextFor(file);
     const targets = new Map<string, Edge>();
     for (const entry of importsFrom(file, source)) {
-      const resolved = ts.resolveModuleName(entry.text, file, options, ts.sys).resolvedModule
+      const resolved = ts.resolveModuleName(entry.text, file, options, ts.sys, cache).resolvedModule
         ?.resolvedFileName;
       if (!resolved || !SOURCE.test(resolved)) continue;
-      const target = canonical(resolved);
+      const target = memo.canonical(resolved);
       if (!isLocal(target, root)) continue;
       if (!targets.has(target)) {
         const before = source.slice(0, entry.position);
