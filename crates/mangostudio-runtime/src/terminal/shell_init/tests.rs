@@ -4,7 +4,9 @@ use std::process::Command;
 
 use mangostudio_runtime_contract::manifest::RuntimeShellKind;
 
-use super::{Launch, ShellInit, plan, posix_quote, powershell_pin_script};
+#[cfg(unix)]
+use super::posix_quote;
+use super::{Launch, ShellInit, plan, powershell_pin_script};
 use crate::test_support::ScratchDir;
 
 const PINNED: &str = "/pinned/node/bin";

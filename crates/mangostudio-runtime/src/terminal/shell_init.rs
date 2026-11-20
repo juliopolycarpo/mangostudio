@@ -152,12 +152,16 @@ fn create_private_dir(parent: &Path) -> std::io::Result<PathBuf> {
         getrandom::fill(&mut random).map_err(|error| std::io::Error::other(error.to_string()))?;
         let name: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
         let candidate = parent.join(format!("{SHIM_DIR_PREFIX}{name}"));
-        let mut builder = std::fs::DirBuilder::new();
+        // Only Unix has a creation mode to set; `mut` would be unused (a clippy error) elsewhere.
         #[cfg(unix)]
-        {
+        let builder = {
             use std::os::unix::fs::DirBuilderExt as _;
+            let mut builder = std::fs::DirBuilder::new();
             builder.mode(0o700);
-        }
+            builder
+        };
+        #[cfg(not(unix))]
+        let builder = std::fs::DirBuilder::new();
         match builder.create(&candidate) {
             Ok(()) => return Ok(candidate),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
