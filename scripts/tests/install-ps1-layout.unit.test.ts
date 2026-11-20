@@ -81,15 +81,27 @@ beforeAll(() => {
   if (!POWERSHELL) return;
   if (IS_WINDOWS) {
     windowsTempMount = tmpdir();
-    return;
+  } else {
+    // A path under %TEMP% is one the Windows-side PowerShell can address
+    // directly as C:\...; a \\wsl.localhost\... UNC path (what wslpath -w
+    // would produce for a repo path) breaks junction creation and .cmd
+    // execution, so every fixture lives here instead.
+    const temp = sh([POWERSHELL, '-NoProfile', '-Command', '$env:TEMP']);
+    windowsTempMount = toLinuxPath(temp.stdout.replace(/\r/g, '').trim());
   }
-  // A path under %TEMP% is one the Windows-side PowerShell can address
-  // directly as C:\...; a \\wsl.localhost\... UNC path (what wslpath -w
-  // would produce for a repo path) breaks junction creation and .cmd
-  // execution, so every fixture lives here instead.
-  const temp = sh([POWERSHELL, '-NoProfile', '-Command', '$env:TEMP']);
-  windowsTempMount = toLinuxPath(temp.stdout.replace(/\r/g, '').trim());
-});
+  // The first run of the script on a fresh Windows runner took 15.3 s, the
+  // second 3.8 s and later ones ~0.6 s (issue #2661), so the first case timed
+  // out. Pay that start here under the hook's own bound. -Prune touches
+  // neither the user PATH nor anything outside the fixture.
+  const warmup = layout();
+  craftInstalledState(warmup, '0.1.0');
+  const result = run(warmup.scriptPath, ['-Prune'], warmup.env);
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { force: true, recursive: true });
+  expect(
+    result.exitCode,
+    `(install.ps1 warm-up): expected -Prune exit 0 | received: ${JSON.stringify(result)}`
+  ).toBe(0);
+}, 60_000);
 
 // Fresh installs, -Use, and -Rollback all call Add-UserPath, which writes
 // the fixture's bin dir into the real HKCU\Environment\Path — a machine-wide
