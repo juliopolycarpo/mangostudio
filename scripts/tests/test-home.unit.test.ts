@@ -1,11 +1,12 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 
 import { assertTemporaryHome, type TemporaryHomeHost } from '../lib/temp-home';
 import {
   describeTempLeak,
+  isForeignTempEntry,
   KEEP_BUILD_VERSION_FLAG,
   launcherHost,
   listTempLeftovers,
@@ -608,6 +609,45 @@ describe('the test temp directory', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  describe('PowerShell policy-probe files', () => {
+    const probeNames = [
+      '__PSScriptPolicyTest_a1b2c3d4.e5f.ps1',
+      '__PSScriptPolicyTest_a1b2c3d4.e5f.psm1',
+      '__psscriptpolicytest_A1B2C3D4.E5F.PS1',
+    ];
+
+    test('are ignored on Windows, case-insensitively', () => {
+      const root = mkdtempSync(join(tmpdir(), 'with-test-home-probe-'));
+      try {
+        for (const name of probeNames) writeFileSync(join(root, name), '');
+        expect(listTempLeftovers(root, 'win32')).toEqual([]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    test('never hide another leftover, including near-miss names', () => {
+      const lookalikes = [
+        'leaked-ccc333',
+        '__PSScriptPolicyTest_.ps1',
+        '__PSScriptPolicyTest_a1b2.ps1.txt',
+        'x__PSScriptPolicyTest_a1b2.c3d.ps1',
+        '__PSScriptPolicyTest_a1b2.c3d.ps2',
+      ];
+      const root = mkdtempSync(join(tmpdir(), 'with-test-home-probe-'));
+      try {
+        for (const name of [...probeNames, ...lookalikes]) writeFileSync(join(root, name), '');
+        expect(listTempLeftovers(root, 'win32')).toEqual([...lookalikes].sort());
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    test('still count as leaks off Windows', () => {
+      expect(isForeignTempEntry(probeNames[0] ?? '', 'linux')).toBe(false);
+    });
   });
 
   test('testTempEnv sets every variable a process reads for its temp directory', () => {

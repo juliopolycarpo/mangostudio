@@ -191,8 +191,29 @@ export function testTempEnv(root: string): Record<string, string> {
  * @example
  * listTempLeftovers('/tmp/mangostudio-test-tmp-a1b2c3'); // => ['skills-doctor-x1y2z3']
  */
-export function listTempLeftovers(root: string): string[] {
-  return readdirSync(root).sort();
+export function listTempLeftovers(
+  root: string,
+  platform: NodeJS.Platform = process.platform
+): string[] {
+  return readdirSync(root)
+    .filter((name) => !isForeignTempEntry(name, platform))
+    .sort();
+}
+
+/**
+ * Temp entries that tools outside this repository create, so no test of ours
+ * leaked them. Keep each pattern exact: the guard must keep failing on everything else.
+ *
+ * Windows PowerShell probes its execution policy by writing
+ * `__PSScriptPolicyTest_<id>.<id>.ps1` (and `.psm1`) into `%TEMP%`, and
+ * sometimes fails to delete them. The launcher points `TEMP` at the run's
+ * directory, so a test that spawns `powershell` leaves them there.
+ */
+const POWERSHELL_POLICY_PROBE = /^__PSScriptPolicyTest_[0-9a-z]+\.[0-9a-z]+\.psm?1$/i;
+
+/** Whether `name` is a foreign tool's temp entry on `platform`. Only Windows PowerShell writes the probe. */
+export function isForeignTempEntry(name: string, platform: NodeJS.Platform): boolean {
+  return platform === 'win32' && POWERSHELL_POLICY_PROBE.test(name);
 }
 
 /**
