@@ -235,6 +235,30 @@ function healthProbe(
 }
 
 describe('RuntimeConnectionManager', () => {
+  // #2662: the connector runs after awaits, so only a request made when the
+  // manager is asked still names who asked.
+  it('hands the connector a request whose frames name the code that called getClient', async () => {
+    let requestedBy: Error | undefined;
+    const connector: RuntimeEnvironmentConnector = (_definition, _onUnavailable, context) => {
+      requestedBy = context.requestedBy;
+      return Promise.resolve(fakeConnection(() => undefined));
+    };
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: { stdio: connector },
+    });
+    async function callerOfGetClient(): Promise<void> {
+      await manager.getClient('user-1', 'devbox');
+    }
+    await callerOfGetClient();
+    const frames = requestedBy ? connectCallerFrames(requestedBy) : [];
+    expect(
+      frames.some((frame) => frame.includes('callerOfGetClient')),
+      `expected a frame naming callerOfGetClient | received: ${JSON.stringify(frames)}`
+    ).toBe(true);
+    await manager.closeAll();
+  });
+
   it('deduplicates lazy connects and preserves the manifest after disconnect', async () => {
     let finishConnect: ((connection: ManagedRuntimeConnection) => void) | undefined;
     let connectCalls = 0;
@@ -1982,6 +2006,40 @@ describe('RuntimeConnectionManager', () => {
   function outlastChainDeadline(): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, 30));
   }
+
+  // #2662: through the manager, the connector's own stack stops at
+  // `#openConnection`, so it logs the frames of the manager's request instead.
+  it('logs the frames of the request the manager made, when it passes one', async () => {
+    const opens = scriptedLocalOpen();
+    const connector = createLocalRuntimeConnector({ open: opens.open });
+    const watch = new LocalRuntimeLossWatch();
+    watch.start();
+    try {
+      const first = connector(localDefinition('user-1'), () => undefined, connectContext());
+      (await opens.waitForCall(0)).succeed();
+      await first;
+
+      const requestedBy = new Error('runtime connect requested');
+      requestedBy.stack = [
+        'Error: runtime connect requested',
+        '    at leakedBackgroundConnect (earlier-file.test.ts:42:7)',
+      ].join('\n');
+      const second = connector(localDefinition('user-2'), () => undefined, {
+        ...connectContext(),
+        requestedBy,
+      });
+      (await opens.waitForCall(1)).succeed();
+      const secondConnection = await second;
+
+      const explanation = watch.explain();
+      expect(explanation, explanation).toContain(
+        '"arrivingCallerFrames":["at leakedBackgroundConnect (earlier-file.test.ts:42:7)"]'
+      );
+      await secondConnection.close();
+    } finally {
+      watch.stop();
+    }
+  });
 
   it('keeps the frames of a connect request without its message line, at most twelve', () => {
     const request = new Error('Local connect requested');

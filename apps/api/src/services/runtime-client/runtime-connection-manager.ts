@@ -143,6 +143,11 @@ export type RuntimeConnectPhase = 'pulling' | 'offline-cache' | 'handshaking';
 export interface RuntimeConnectContext {
   readonly report: (phase: RuntimeConnectPhase) => void;
   readonly signal: AbortSignal;
+  /**
+   * Made where the manager was asked to connect, before any await, so its
+   * stack still names the caller. Only read for diagnostics.
+   */
+  readonly requestedBy?: Error;
 }
 
 export type RuntimeEnvironmentConnector = (
@@ -689,6 +694,8 @@ export class RuntimeConnectionManager {
     const current = this.#entries.get(key);
     if (current?.connection) return current.connection.client;
     if (current?.connecting) return await current.connecting;
+    // Still synchronous with the caller here; the chain below loses it.
+    const requestedBy = new Error('runtime connect requested');
 
     const entry = current ?? {
       userId,
@@ -746,6 +753,7 @@ export class RuntimeConnectionManager {
               this.#reportPhase(entry, userId, revision, phase);
             },
             signal: abort.signal,
+            requestedBy,
           }
         );
       });
@@ -1898,8 +1906,9 @@ export function createLocalRuntimeConnector(
   };
 
   return (definition, onUnavailable, context) => {
-    // Captured before the serial chain, whose frames would hide the caller.
-    const request = new Error('Local connect requested');
+    // The manager's request names the code that asked for it; a direct call
+    // still has its caller here, before the serial chain hides it.
+    const request = context.requestedBy ?? new Error('Local connect requested');
     const attempt = connectSerial.then(async () => {
       if (definition.id !== LOCAL_ENVIRONMENT_ID) {
         throw unavailable('Single-user-host attestation is reserved for the Local environment.');
