@@ -3,7 +3,6 @@ import {
   mkdirSync,
   mkdtempSync,
   realpathSync,
-  rmSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -21,6 +20,7 @@ import {
   RuntimeBinaryNotFoundError,
   workspaceCargoTargetDir,
 } from '../../../src/lib/runtime-paths';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const originalExecPath = process.execPath;
 const originalCwd = process.cwd();
@@ -48,7 +48,7 @@ describe('runtime paths', () => {
     process.chdir(originalCwd);
     setExecPath(originalExecPath);
     resetConfig();
-    rmSync(tempDir, { force: true, recursive: true });
+    removeFixtureDirSync({ role: 'runtime-paths', path: tempDir });
   });
 
   it('uses the Bun runtime cwd during development', () => {

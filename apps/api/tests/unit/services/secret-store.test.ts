@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -9,6 +9,7 @@ import {
   type SecretDescriptor,
   SecretStorageUnavailableError,
 } from '../../../src/services/secret-store/store';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 type SecretRecord = SecretDescriptor & { value?: string };
 
@@ -262,7 +263,7 @@ describe('createBunSecretStore', () => {
       expect(await store.getSecret({ service: 'svc', name: 'api-key' })).toBeNull();
     } finally {
       loadConfigForTest({ secretStore: { unsafeFileFallbackDir: '' } });
-      rmSync(fallbackDir, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'secret-store', path: fallbackDir });
     }
   });
 
@@ -295,7 +296,7 @@ describe('createBunSecretStore', () => {
       expect(nativeCalls).toBe(0);
     } finally {
       loadConfigForTest({ secretStore: { unsafeFileFallbackDir: '' } });
-      rmSync(fallbackDir, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'secret-store', path: fallbackDir });
     }
   });
 });

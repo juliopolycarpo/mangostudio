@@ -6,7 +6,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 
@@ -23,6 +23,7 @@ import Value from 'typebox/value';
 import { getDb } from '../../../../src/db/database';
 import { discoverLibraryResources } from '../../../../src/modules/library/application/library-discovery';
 import { LibraryCache } from '../../../../src/modules/library/infrastructure/library-cache';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const LINUX_ENV: PathEnv = { platform: 'linux', homeDir: '/home/ada', env: {} };
 
@@ -96,7 +97,7 @@ describe('scope-aware cache keys', () => {
   });
 
   afterAll(() => {
-    rmSync(root, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'scope-seam', path: root });
   });
 
   function scan(cache: LibraryCache, pathEnv: PathEnv, rootDir: string, now: number) {

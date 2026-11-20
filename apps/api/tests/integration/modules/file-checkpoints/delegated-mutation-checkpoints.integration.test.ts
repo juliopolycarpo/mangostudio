@@ -20,7 +20,7 @@
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -52,6 +52,7 @@ import {
   type UserFixture,
 } from '../../../support/factories';
 import { insertUserWithLocalRuntime } from '../../../support/fixtures/local-runtime-user';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const hasBash = isShellAvailable('bash');
 const MODEL_ID = 'delegated-checkpoints-model';
@@ -195,7 +196,7 @@ beforeEach(async () => {
 afterEach(() => {
   if (previousProvider) registerProvider(previousProvider);
   previousProvider = null;
-  rmSync(tempDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'delegated-mutation-checkpoints', path: tempDir });
 });
 
 async function delegate(call: ScriptedCall, subagentToolNames: string[]) {

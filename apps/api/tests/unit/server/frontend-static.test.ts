@@ -33,6 +33,7 @@ import {
 } from '../../../src/server/embedded-frontend';
 import { clearFrontendFallback, frontendNotFound } from '../../../src/server/frontend-fallback';
 import { registerFrontend } from '../../../src/server/frontend-static';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const INDEX_HTML = '<html><body>embedded index</body></html>';
 const ASSET_JS = 'console.log("embedded")';
@@ -78,9 +79,9 @@ beforeEach(() => {
 afterEach(() => {
   resetEmbeddedFrontend();
   clearFrontendFallback();
-  rmSync(assetDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'frontend-static', path: assetDir });
   while (temporaryDirs.length > 0) {
-    rmSync(temporaryDirs.pop() as string, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'frontend-static', path: temporaryDirs.pop() as string });
   }
 });
 
@@ -235,7 +236,7 @@ describe('registerFrontend with embedded assets', () => {
       const get = buildApp(staleDir);
       expect(await (await get('/')).text()).toBe(INDEX_HTML);
     } finally {
-      rmSync(staleDir, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'frontend-static', path: staleDir });
     }
   });
 });
@@ -863,7 +864,7 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
       // because the `..` is not visible until then.
       const outside = join(server.frontendDir, '..', 'escaped-secret.txt');
       writeFileSync(outside, 'secret');
-      // `rmSync(..., { recursive: true, force: true })` in afterEach removes a
+      // `removeFixtureDirSync({ role: 'frontend-static', path: ... })` in afterEach removes a
       // plain file just as happily as a directory.
       temporaryDirs.push(outside);
 
@@ -1027,7 +1028,7 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
       expect(await previous.text()).toBe(INDEX_HTML);
       expect(previousEtag).not.toBe('');
 
-      rmSync(current, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'frontend-static', path: current });
       symlinkSync(releaseB, current, 'junction');
       const asset = await server.get('/assets/index-ReleaseB.js');
       const assetBody = await asset.text();

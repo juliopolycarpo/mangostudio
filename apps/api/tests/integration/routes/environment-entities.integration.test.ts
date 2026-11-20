@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
+import { copyFile, mkdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -65,6 +65,7 @@ import { insertTestUser } from '../../support/factories';
 import { connectFakeRuntime, type FakeRuntimeConnection } from '../../support/fake-runtime-host';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import { InMemorySecretStore } from '../../support/mocks/mock-secret-store';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 import {
   FakeRuntimeDefinition,
   fixedConsent,
@@ -105,7 +106,11 @@ afterEach(async () => {
   await getDb().deleteFrom('environments').where('userId', '=', TEST_USER.id).execute();
   await getDb().deleteFrom('user').where('id', '=', TEST_USER.id).execute();
   setRealtimeBusForTests(undefined);
-  await Promise.all(tempHomes.splice(0).map((home) => rm(home, { recursive: true, force: true })));
+  await Promise.all(
+    tempHomes
+      .splice(0)
+      .map((home) => removeFixtureDir({ role: 'environment-entities', path: home }))
+  );
 });
 
 function createTestApp(

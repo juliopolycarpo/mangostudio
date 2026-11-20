@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join, normalize } from 'node:path';
 
@@ -12,6 +12,7 @@ import {
   connectSshRuntime,
   sshLaunch,
 } from '../../../../src/services/runtime-client/connect-ssh-runtime';
+import { removeFixtureDir } from '../../../support/remove-fixture-dir';
 
 /** A named, already-exited SSH launcher with no process or resolver behind it. */
 class FailedSshLauncher {
@@ -158,7 +159,7 @@ describe('connectSshRuntime', () => {
         details: { closeCode: CLOSE_CODES.RELEASED, sshFailureReason: 'unreachable' },
       });
     } finally {
-      await rm(directory, { force: true, recursive: true });
+      await removeFixtureDir({ role: 'connect-ssh-runtime', path: directory });
     }
   }, 30_000);
 
@@ -217,7 +218,7 @@ describe('connectSshRuntime', () => {
         details: { closeCode: CLOSE_CODES.RELEASED, sshFailureReason: 'unreachable' },
       });
     } finally {
-      await rm(directory, { force: true, recursive: true });
+      await removeFixtureDir({ role: 'connect-ssh-runtime', path: directory });
     }
   }, 30_000);
   it('refuses to spawn ssh once the connect has been cancelled', async () => {

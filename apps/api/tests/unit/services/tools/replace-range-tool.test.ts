@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,6 +18,7 @@ import {
 } from '../../../../src/services/tools/builtin/replace-range';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 let tempDir: string;
 
@@ -29,7 +30,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tempDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'replace-range-tool', path: tempDir });
 });
 
 function makeContext(parameters: Record<string, unknown> = {}): ToolContext {

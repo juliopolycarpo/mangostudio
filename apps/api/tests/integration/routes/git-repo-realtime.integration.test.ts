@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -26,6 +26,7 @@ import {
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import { gitFixtureEnv } from '../../support/git-fixture-env';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 const hasGit = Bun.which('git') !== null;
 const tempDirs: string[] = [];
@@ -124,7 +125,9 @@ afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
   setRealtimeBusForTests(undefined);
-  await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    tempDirs.splice(0).map((path) => removeFixtureDir({ role: 'git-repo-realtime', path: path }))
+  );
 });
 
 /** One owner with chats in several checkouts of one repository, plus an unrelated repository. */

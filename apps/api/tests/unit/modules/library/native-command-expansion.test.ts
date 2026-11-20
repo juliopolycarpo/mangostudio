@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -10,6 +10,7 @@ import {
   expandNativeSlashCommand,
   MAX_COMMAND_FILE_BYTES,
 } from '../../../../src/modules/library/application/native-command-expansion';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 let configHome: string;
 let commandsDir: string;
@@ -34,7 +35,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(configHome, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'native-command-expansion', path: configHome });
   resetLibraryDiscoveryCache();
 });
 

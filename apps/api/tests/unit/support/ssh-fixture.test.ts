@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 import {
   buildKnownHostsLine,
   buildSshdConfig,
@@ -31,7 +32,9 @@ async function scratchDirectory(): Promise<string> {
 }
 
 afterEach(async () => {
-  await Promise.all(scratch.splice(0).map((d) => rm(d, { force: true, recursive: true })));
+  await Promise.all(
+    scratch.splice(0).map((d) => removeFixtureDir({ role: 'ssh-fixture', path: d }))
+  );
 });
 
 describe('buildSshdConfig', () => {

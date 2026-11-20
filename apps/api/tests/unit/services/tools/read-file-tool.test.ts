@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -23,6 +23,7 @@ import {
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 import {
   skipWithoutRustBinary,
   targetHomeRuntime,
@@ -44,7 +45,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tempDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'read-file-tool', path: tempDir });
 });
 
 function makeContext(parameters: Record<string, unknown> = {}): ToolContext {
@@ -159,7 +160,7 @@ describe('executeReadFile', () => {
         message: expect.stringContaining('outside the chat working directory'),
       });
     } finally {
-      rmSync(outsideDir, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'read-file-tool', path: outsideDir });
     }
   });
 

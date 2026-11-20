@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -12,6 +12,7 @@ import {
   persistSecret,
   removeSecret,
 } from '../../../src/modules/connectors/infrastructure/secret-persistence';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const CONNECTOR_ENV_VAR = 'GEMINI_API_KEY_DEFAULT';
 const SECRET_VALUE = 'sk-regression-test-key';
@@ -28,7 +29,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(TMP_DIR, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'secret-persistence', path: TMP_DIR });
   if (envVarSnapshot === undefined) {
     delete process.env[CONNECTOR_ENV_VAR];
   } else {

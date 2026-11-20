@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -8,11 +8,13 @@ import {
   resolveUploadedFile,
   UPLOADED_FILE_CACHE_CONTROL,
 } from '../../../src/routes/uploaded-files';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const temporaryDirs: string[] = [];
 
 afterEach(() => {
-  for (const dir of temporaryDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const dir of temporaryDirs.splice(0))
+    removeFixtureDirSync({ role: 'uploaded-files', path: dir });
 });
 
 /** A fresh directory under the OS temp root, removed after the test. */

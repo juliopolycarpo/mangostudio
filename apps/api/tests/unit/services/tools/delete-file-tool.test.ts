@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -19,6 +19,7 @@ import {
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 import { EMPTY_STRING_ARGUMENTS, useToolRegistry } from './support/tool-registry-harness';
 
 let tempDir: string;
@@ -30,7 +31,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tempDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'delete-file-tool', path: tempDir });
 });
 
 function makeContext(parameters: Record<string, unknown> = {}): ToolContext {
@@ -220,7 +221,7 @@ describe('executeDeleteFile', () => {
       ).rejects.toThrow('outside the chat working directory');
       expect(await Bun.file(outsidePath).text()).toBe('keep me');
     } finally {
-      rmSync(outsideDir, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'delete-file-tool', path: outsideDir });
     }
   });
 });

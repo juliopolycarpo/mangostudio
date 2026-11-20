@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -16,6 +16,7 @@ import { executeReadFile } from '../../../../src/services/tools/builtin/read-fil
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 import { EMPTY_STRING_ARGUMENTS, useToolRegistry } from './support/tool-registry-harness';
 
 let tempDir: string;
@@ -27,7 +28,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tempDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'move-file-tool', path: tempDir });
 });
 
 function makeContext(parameters: Record<string, unknown> = {}): ToolContext {
@@ -181,7 +182,7 @@ describe('executeMoveFile', () => {
       expect(await Bun.file(from).text()).toBe('keep me');
       expect(existsSync(to)).toBe(false);
     } finally {
-      rmSync(outsideDir, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'move-file-tool', path: outsideDir });
     }
   });
 
@@ -223,7 +224,7 @@ describe('executeMoveFile', () => {
       expect(await Bun.file(from).text()).toBe('keep me');
       expect(existsSync(to)).toBe(false);
     } finally {
-      rmSync(outsideDir, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'move-file-tool', path: outsideDir });
     }
   });
 

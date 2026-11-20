@@ -12,7 +12,7 @@
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -32,6 +32,7 @@ import { registerTools } from '../../../../src/services/tools/register-tools';
 import { type ChatFixture, insertTestChat, type UserFixture } from '../../../support/factories';
 import { insertUserWithLocalRuntime } from '../../../support/fixtures/local-runtime-user';
 import { gitFixtureEnv } from '../../../support/git-fixture-env';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const hasBash = isShellAvailable('bash');
 const hasGit = Bun.which('git') !== null;
@@ -57,7 +58,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'shell-retry-checkpoints', path: workdir });
 });
 
 function git(...args: string[]): void {

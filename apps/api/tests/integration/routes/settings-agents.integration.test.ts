@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,6 +18,7 @@ import { loadConfigForTest } from '../../../src/lib/config';
 import { settingsRoutes } from '../../../src/routes/settings';
 import { makeTestIdentity, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const TEST_AUTH_SECRET = 'test-secret-at-least-32-characters-long';
 
@@ -60,7 +61,7 @@ beforeEach(() => {
 afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
-  rmSync(agentsDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'settings-agents', path: agentsDir });
 });
 
 describe('settings agents routes', () => {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -17,6 +17,7 @@ import {
   SKILL_TOOL_NAME,
   skillKey,
 } from '../../../../src/modules/skills/domain/skill';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const USER_ID = 'user-skills-prompt-test';
 
@@ -99,7 +100,7 @@ describe('appendSkillsPromptSection', () => {
   let skillsDir: string | undefined;
 
   afterEach(() => {
-    if (skillsDir) rmSync(skillsDir, { recursive: true, force: true });
+    if (skillsDir) removeFixtureDirSync({ role: 'skills-prompt-section', path: skillsDir });
     skillsDir = undefined;
     resetSkillsCache();
   });

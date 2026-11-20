@@ -19,7 +19,6 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
-  rmSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -42,6 +41,7 @@ import { bashPath } from '../../../support/bash-path';
 import { type ChatFixture, insertTestChat, type UserFixture } from '../../../support/factories';
 import { insertUserWithLocalRuntime } from '../../../support/fixtures/local-runtime-user';
 import { gitFixtureEnv } from '../../../support/git-fixture-env';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const hasBash = isShellAvailable('bash');
 const hasGit = Bun.which('git') !== null;
@@ -77,7 +77,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'shell-workspace-checkpoints', path: workdir });
 });
 
 function shellSettings(checkpointWorkspaceWrites: boolean): EffectiveToolSettings {
@@ -276,7 +276,7 @@ describe.skipIf(!runnable)('shell workspace checkpoints', () => {
       await runBash(`printf 'x\\n' > ${bashPath(join(outside, 'o.txt'))}`, true, outside);
       expect(await revert()).toEqual({ revertedFiles: 0, uncheckpointedSources: ['shell'] });
     } finally {
-      rmSync(outside, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'shell-workspace-checkpoints', path: outside });
     }
   });
 

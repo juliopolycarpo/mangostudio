@@ -8,7 +8,7 @@
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, statSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -31,6 +31,7 @@ import { withMutationPersistence } from '../../../../src/services/tools/file-mut
 import type { ToolContext } from '../../../../src/services/tools/types';
 import { type ChatFixture, insertTestChat, type UserFixture } from '../../../support/factories';
 import { insertUserWithLocalRuntime } from '../../../support/fixtures/local-runtime-user';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const MIB = 1024 * 1024;
 
@@ -69,7 +70,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  rmSync(tempDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'large-file-checkpoints', path: tempDir });
 });
 
 function turnContext(): ToolContext {

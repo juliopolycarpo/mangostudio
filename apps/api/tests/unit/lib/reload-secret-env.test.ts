@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -10,6 +10,7 @@ import {
   resetConfig,
   resetSecretEnvTracking,
 } from '../../../src/lib/config';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 describe('isReloadableSecretEnvKey', () => {
   it('accepts connector secret keys', () => {
@@ -47,7 +48,7 @@ describe('reloadSecretEnv', () => {
   });
 
   afterEach(() => {
-    rmSync(TMP_DIR, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'reload-secret-env', path: TMP_DIR });
     for (const key of TOUCHED_KEYS) {
       const original = envVarSnapshot[key];
       if (original === undefined) {

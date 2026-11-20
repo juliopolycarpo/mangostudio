@@ -1,8 +1,9 @@
 import { describe, expect, it, spyOn } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 import { waitUntil } from '../../support/wait-until';
 
 class FakeCondition {
@@ -115,7 +116,7 @@ describe('waitUntil', () => {
       expect(readFileSync(pidFile, 'utf8')).toBe('12345\n');
     } finally {
       clock.mockRestore();
-      rmSync(directory, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'wait-until', path: directory });
     }
   });
 });

@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type OpenAI from 'openai';
 
 import { loadConfigForTest, resetConfig } from '../../../../src/lib/config';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const TMP_DIR = join('/tmp', `mango-provider-image-test-${process.pid}`);
 
@@ -19,7 +20,7 @@ function configureImageDirs(): string {
 
 afterEach(() => {
   resetConfig();
-  rmSync(TMP_DIR, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'generated-image-urls', path: TMP_DIR });
 });
 
 describe('generated image provider URLs', () => {

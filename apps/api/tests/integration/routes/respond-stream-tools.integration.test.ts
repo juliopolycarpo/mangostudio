@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,6 +12,7 @@ import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import { SseRecorder } from '../../support/harness/sse-recorder';
 import { moduleMockerFor } from '../../support/mocks/module-mocks';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 import {
   buildRespondStreamRequest,
   createTestStreamDb,
@@ -56,7 +57,9 @@ afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
   resetStreamTestState();
-  await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    tempDirs.splice(0).map((path) => removeFixtureDir({ role: 'respond-stream-tools', path: path }))
+  );
 });
 
 describe('POST /respond/stream — tools', () => {

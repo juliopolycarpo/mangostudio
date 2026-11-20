@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, realpath, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -28,6 +28,7 @@ import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
 } from '../../support/harness/create-api-test-app';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 const hasGit = Bun.which('git') !== null;
 /**
@@ -110,7 +111,9 @@ function getRoute(app: TestApp, path: string, query: Record<string, string>) {
 afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
-  await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    tempDirs.splice(0).map((path) => removeFixtureDir({ role: 'git-navigation', path: path }))
+  );
 });
 
 describe('Git navigation routes', () => {

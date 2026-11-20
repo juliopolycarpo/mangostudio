@@ -12,7 +12,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 
@@ -28,6 +28,7 @@ import {
 } from '../../../src/services/runtime-client/runtime-connection-manager';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 type OpenApiDocument = {
   paths: Record<
@@ -70,7 +71,7 @@ afterAll(async () => {
   if (!engineShimDirectory) return;
   if (pathBeforeShims === undefined) delete process.env.PATH;
   else process.env.PATH = pathBeforeShims;
-  await rm(engineShimDirectory, { recursive: true, force: true });
+  await removeFixtureDir({ role: 'local-unavailable-guard', path: engineShimDirectory });
 });
 
 beforeEach(async () => {

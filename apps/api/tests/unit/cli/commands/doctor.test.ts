@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, spyOn } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -13,6 +13,7 @@ import type { InstallOriginProbe } from '../../../../src/modules/updates/domain/
 import { resetRuntimeConnectionReleaseForTests } from '../../../../src/services/runtime-client/runtime-connection-release';
 import { FakeProcessController } from '../../../support/mocks/fake-process-controller';
 import { FakeRuntimeSpawner } from '../../../support/mocks/fake-runtime-spawner';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const ALL_OK: FsProbe = { exists: () => true, isWritable: () => true };
 const NOTHING: FsProbe = { exists: () => false, isWritable: () => false };
@@ -376,7 +377,7 @@ describe('runDoctor', () => {
         }
       );
     } finally {
-      rmSync(embedDir, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'doctor', path: embedDir });
     }
 
     const text = lines.join('\n');

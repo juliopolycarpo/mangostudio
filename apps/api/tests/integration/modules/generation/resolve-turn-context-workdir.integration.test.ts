@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -25,6 +25,7 @@ import {
 } from '../../../../src/services/providers/core/provider-registry';
 import type { AgentEvent, AIProvider } from '../../../../src/services/providers/types';
 import { insertTestChat, insertTestUser, type UserFixture } from '../../../support/factories';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const MODEL_ID = 'workdir-scope-model';
 
@@ -131,9 +132,9 @@ afterEach(() => {
   previousProvider = null;
   setThirdPartySkillDirsForTest(null);
   resetSkillsCache();
-  rmSync(agentsDir, { recursive: true, force: true });
-  rmSync(boundWorkdir, { recursive: true, force: true });
-  rmSync(skillsDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'resolve-turn-context-workdir', path: agentsDir });
+  removeFixtureDirSync({ role: 'resolve-turn-context-workdir', path: boundWorkdir });
+  removeFixtureDirSync({ role: 'resolve-turn-context-workdir', path: skillsDir });
 });
 
 describe('resolveTurnContext workdir scope', () => {

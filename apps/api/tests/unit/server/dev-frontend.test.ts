@@ -27,6 +27,7 @@ import { createTailwindInputs, readSourceInventory } from '@mangostudio/shared/f
 import { BUILD_STATE_FILE } from '@mangostudio/shared/utils/dist-files';
 
 import { distIsCurrent, newestSourceMtime, readBuildState } from '../../../src/server/dev-frontend';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 /** Seconds since the epoch, so mtimes are far enough apart to compare. */
 const OLD = 1_000_000;
@@ -143,7 +144,7 @@ describe('newestSourceMtime', () => {
         writeAt(join(root, path), OLD);
       }
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -156,7 +157,7 @@ describe('newestSourceMtime', () => {
       holdDirs(root);
       expect(newestSourceMtime(root)).toBe(OLD * 1000);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -168,7 +169,7 @@ describe('newestSourceMtime', () => {
       holdDirs(root);
       expect(newestSourceMtime(root)).toBe(OLD * 1000);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -184,7 +185,7 @@ describe('newestSourceMtime', () => {
       holdDirs(root);
       expect(newestSourceMtime(root)).toBe(OLD * 1000);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -214,7 +215,7 @@ describe('newestSourceMtime', () => {
         rmSync(join(root, path));
       }
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -229,7 +230,7 @@ describe('newestSourceMtime', () => {
       holdDirs(root);
       expect(newestSourceMtime(root)).toBe(OLD * 1000);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -247,7 +248,7 @@ describe('newestSourceMtime', () => {
       holdDirs(root);
       expect(newestSourceMtime(root)).toBe(NEW * 1000);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -264,7 +265,7 @@ describe('newestSourceMtime', () => {
       holdDirs(root);
       expect(newestSourceMtime(root)).toBe(OLD * 1000);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -280,7 +281,7 @@ describe('newestSourceMtime', () => {
       holdDirs(root);
       expect(newestSourceMtime(root)).toBe(0);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 });
@@ -338,7 +339,7 @@ describe('distIsCurrent', () => {
         blockedReads: 2,
       });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -357,7 +358,7 @@ describe('distIsCurrent', () => {
       writeAt(join(root, 'scripts', 'routes.ts'), NEW + 1);
       expect(distIsCurrent(root, shared, repository)).toBe(false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -376,7 +377,7 @@ describe('distIsCurrent', () => {
       rmSync(join(root, 'scripts', 'routes.ts'));
       expect(distIsCurrent(root, shared, repository)).toBe(false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -396,7 +397,7 @@ describe('distIsCurrent', () => {
       utimesSync(join(root, 'scripts'), NEW + 1, NEW + 1);
       expect(distIsCurrent(root, shared, repository)).toBe(true);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -418,7 +419,7 @@ describe('distIsCurrent', () => {
       writeAt(join(shared, 'src', 'i18n', 'en.ts'), NEW + 1);
       expect(distIsCurrent(root, shared, repository)).toBe(false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -437,7 +438,7 @@ describe('distIsCurrent', () => {
       writeAt(join(shared, 'package.json'), NEW + 1);
       expect(distIsCurrent(root, shared, repository)).toBe(false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -460,7 +461,7 @@ describe('distIsCurrent', () => {
       writeAt(join(repository, 'package.json'), NEW + 1);
       expect(distIsCurrent(root, shared, repository)).toBe(false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -479,7 +480,7 @@ describe('distIsCurrent', () => {
       rmSync(join(repository, 'bun.lock'));
       expect(distIsCurrent(root, shared, repository)).toBe(false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -498,7 +499,7 @@ describe('distIsCurrent', () => {
       writeAt(join(root, 'dist', 'index.html'), NEW);
       expect(distIsCurrent(root, shared, repository)).toBe(true);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -525,7 +526,7 @@ describe('distIsCurrent', () => {
         expect(distIsCurrent(root, shared, repository)).toBe(false);
       }
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -547,7 +548,7 @@ describe('distIsCurrent', () => {
       expect(newestSourceMtime(root)).toBe(0);
       expect(distIsCurrent(root, shared, repository)).toBe(false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -573,7 +574,7 @@ describe('distIsCurrent', () => {
       writeBuildState(root, effectiveApiUrl());
       expect(distIsCurrent(root, shared, repository)).toBe(false);
     } finally {
-      rmSync(parent, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: parent });
     }
   });
 
@@ -593,8 +594,8 @@ describe('distIsCurrent', () => {
       writeFileSync(join(destinationParent, '.ignore'), 'checkout/src/main.tsx');
       expect(distIsCurrent(destination, join(destination, 'shared'), destination)).toBe(false);
     } finally {
-      rmSync(original, { recursive: true, force: true });
-      rmSync(destinationParent, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: original });
+      removeFixtureDirSync({ role: 'dev-frontend', path: destinationParent });
     }
   });
 
@@ -638,7 +639,7 @@ describe('distIsCurrent', () => {
       else process.env.MANGO_API_URL = originalApiUrl;
       if (originalDeprecatedApiUrl === undefined) delete process.env.VITE_API_URL;
       else process.env.VITE_API_URL = originalDeprecatedApiUrl;
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 });
@@ -668,7 +669,7 @@ describe('readBuildState', () => {
       );
       expect(readBuildState(dist)).toEqual({ apiUrl: '', mode: 'production', tailwindInputs });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 
@@ -689,7 +690,7 @@ describe('readBuildState', () => {
         expect(readBuildState(writeState(root, contents))).toBeNull();
       }
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'dev-frontend', path: root });
     }
   });
 });

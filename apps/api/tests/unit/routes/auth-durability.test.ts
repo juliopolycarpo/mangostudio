@@ -4,7 +4,7 @@
  * itself running on a file database.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -21,6 +21,7 @@ import {
   SYNCHRONOUS_FULL as FULL,
   SYNCHRONOUS_NORMAL as NORMAL,
 } from '../../support/observed-file-database';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const ORIGIN = 'http://localhost:3001';
 
@@ -72,7 +73,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await file.destroy();
-  rmSync(directory, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'auth-durability', path: directory });
 });
 
 const authUrl = (endpoint: string) => `${ORIGIN}${AUTH_BASE_PATH}${endpoint}`;

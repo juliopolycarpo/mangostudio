@@ -11,7 +11,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -45,6 +45,7 @@ import {
   PICTURE_TOOL_RESOURCE_TEXT,
   startControlledTurnMcpFixture,
 } from '../../../support/fixtures/mcp/turn-mcp-fixture';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const RESOLVED_MODEL = {
   modelId: 'mcp-e2e-model',
@@ -279,8 +280,8 @@ afterEach(async () => {
   fixture.assertNoOpenServers();
   setThirdPartySkillDirsForTest(null);
   resetSkillsCache();
-  rmSync(skillsDir, { recursive: true, force: true });
-  rmSync(mediaDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'mcp-turn', path: skillsDir });
+  removeFixtureDirSync({ role: 'mcp-turn', path: mediaDir });
 });
 
 describe('MCP tool round trip end-to-end', () => {

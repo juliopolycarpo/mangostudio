@@ -61,6 +61,7 @@ import {
 import { insertTestChat, insertTestUser, type UserFixture } from '../../../support/factories';
 import { connectFakeRuntime } from '../../../support/fake-runtime-host';
 import { makeFakeMcpHandle } from '../../../support/fixtures/mcp/fake-handle';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 import {
   FakeRuntimeDefinition,
   fixedConsent,
@@ -298,8 +299,8 @@ afterEach(async () => {
   await closeAllMcpClients();
   setThirdPartySkillDirsForTest(null);
   resetSkillsCache();
-  rmSync(skillsDir, { recursive: true, force: true });
-  rmSync(agentsDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'capability-inspector', path: skillsDir });
+  removeFixtureDirSync({ role: 'capability-inspector', path: agentsDir });
 });
 
 describe('inspectChatCapabilities', () => {

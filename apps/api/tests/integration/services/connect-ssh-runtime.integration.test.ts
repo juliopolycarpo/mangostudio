@@ -21,13 +21,14 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { SshEnvironmentConfig } from '@mangostudio/shared/environments';
 
 import { connectSshRuntime } from '../../../src/services/runtime-client/connect-ssh-runtime';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 import { resolveRustRuntimeBinary } from '../../support/rust-runtime-binary';
 import {
   probeLocalhostSsh,
@@ -90,7 +91,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (workdir) await rm(workdir, { force: true, recursive: true });
+  if (workdir) await removeFixtureDir({ role: 'connect-ssh-runtime', path: workdir });
 });
 
 describe('connectSshRuntime over a real sshd', () => {

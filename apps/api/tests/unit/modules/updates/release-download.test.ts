@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { ResolvedDownload } from '../../../../src/modules/updates/domain/resolve-target';
 import { downloadVerified } from '../../../../src/modules/updates/infrastructure/release-download';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 import { FakeReleaseHost } from './support/fake-release-host';
 
 const GITHUB = 'https://github.com/juliopolycarpo/mangostudio';
@@ -26,7 +27,7 @@ function tempDestination(): string {
 }
 
 afterEach(() => {
-  for (const dir of tempDirs) rmSync(dir, { force: true, recursive: true });
+  for (const dir of tempDirs) removeFixtureDirSync({ role: 'release-download', path: dir });
   tempDirs = [];
 });
 

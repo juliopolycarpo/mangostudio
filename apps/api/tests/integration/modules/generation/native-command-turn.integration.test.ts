@@ -5,7 +5,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -25,6 +25,7 @@ import type {
 } from '../../../../src/services/providers/types';
 import { makeAgentProfile } from '../../../integration/routes/_respond-stream-helpers';
 import { insertTestChat, insertTestUser, type UserFixture } from '../../../support/factories';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const RESOLVED_MODEL = {
   modelId: 'native-command-model',
@@ -111,7 +112,7 @@ beforeEach(async () => {
 afterEach(() => {
   if (previousProvider) registerProvider(previousProvider);
   previousProvider = null;
-  rmSync(configHome, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'native-command-turn', path: configHome });
   resetLibraryDiscoveryCache();
 });
 

@@ -28,6 +28,7 @@ import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
 } from '../../support/harness/create-api-test-app';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const TEST_USER = {
   id: 'skills-routes-user',
@@ -74,9 +75,9 @@ beforeEach(() => {
 afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
-  rmSync(skillsDir, { recursive: true, force: true });
-  rmSync(agentsDir, { recursive: true, force: true });
-  rmSync(claudeDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'skills', path: skillsDir });
+  removeFixtureDirSync({ role: 'skills', path: agentsDir });
+  removeFixtureDirSync({ role: 'skills', path: claudeDir });
   setThirdPartySkillDirsForTest(null);
   resetSkillsCache();
 });

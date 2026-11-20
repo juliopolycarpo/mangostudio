@@ -1,6 +1,6 @@
 import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { expect, it } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,6 +12,7 @@ import { createBunSqliteDialect } from '../../../src/db/bun-sqlite-dialect';
 import { allMigrations } from '../../../src/db/migrations';
 import type { Database } from '../../../src/db/types';
 import { prepareToolchainDatabase } from '../../../src/server/migrations';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 it.each(['fresh', 'interrupted'] as const)(
   'assigns distinct revisions to saved environments on a %s upgrade',
@@ -134,6 +135,6 @@ it('leaves schema 061 in place while the Hub owns the database and upgrades afte
       await db.destroy();
     }
   } finally {
-    await rm(directory, { recursive: true, force: true });
+    await removeFixtureDir({ role: 'environment-toolchain-revision-migration', path: directory });
   }
 }, 30_000);

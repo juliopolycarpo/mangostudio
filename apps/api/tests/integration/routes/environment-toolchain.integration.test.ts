@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +37,7 @@ import { createEnvironmentToolchainRepository } from '../../../src/modules/envir
 import { RuntimeConnectionManager } from '../../../src/services/runtime-client/runtime-connection-manager';
 import type { SecretStore } from '../../../src/services/secret-store/store';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 const TEST_USER = {
   id: 'environment-toolchain-user',
@@ -592,7 +593,7 @@ describe('environment toolchain route', () => {
       );
       expect(laterEdit.status).toBe(200);
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await removeFixtureDir({ role: 'environment-toolchain', path: root });
     }
   });
 

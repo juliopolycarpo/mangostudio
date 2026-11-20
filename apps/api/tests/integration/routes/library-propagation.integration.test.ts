@@ -36,6 +36,7 @@ import {
   describeLocation,
 } from '../../../src/modules/library/infrastructure/location-probe';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const TEST_USER = {
   id: 'library-propagation-user',
@@ -162,7 +163,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(home, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'library-propagation', path: home });
   for (const restore of authRestores.reverse()) restore();
   authRestores.length = 0;
 });

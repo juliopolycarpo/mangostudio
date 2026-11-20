@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -13,6 +13,7 @@ import {
   PathAccessError,
   resolveAndValidatePath,
 } from '../../../../src/services/tools/builtin/_fs-utils';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const targetPaths = (pathStyle: 'posix' | 'win32', homeDir: string) =>
   createTargetPaths({
@@ -45,7 +46,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tempDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'fs-utils', path: tempDir });
 });
 
 describe('normalizeStringList', () => {

@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 // The tracer injects the same kernel result for libc and direct syscall callers.
 // Other platforms retain the ordinary managed-process tests.
@@ -28,8 +30,9 @@ describe.skipIf(process.platform !== 'linux' || process.arch !== 'x64' || !Bun.w
       expect(await compiler.exited, `native race tracer compilation: ${error}`).toBe(0);
     });
     afterAll(async () => {
-      for (const root of roots) await rm(root, { force: true, recursive: true });
-      if (directory) await rm(directory, { force: true, recursive: true });
+      for (const root of roots)
+        await removeFixtureDir({ role: 'managed-process-rm-race', path: root });
+      if (directory) await removeFixtureDir({ role: 'managed-process-rm-race', path: directory });
     });
 
     async function cleanupWithRace(deny: boolean) {

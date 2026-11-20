@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,6 +14,7 @@ import {
   START_TIME_TOLERANCE_MS,
   writeState,
 } from '../../../src/lib/server-state';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 function makeState(overrides: Partial<ServerState> = {}): ServerState {
   return {
@@ -44,7 +45,7 @@ describe('server-state', () => {
   });
 
   afterEach(async () => {
-    await rm(dir, { force: true, recursive: true });
+    await removeFixtureDir({ role: 'server-state', path: dir });
   });
 
   it('round-trips state through write and read', async () => {
@@ -157,7 +158,7 @@ describe('readState start token', () => {
 
       expect((await readState(path))?.startToken).toBe('boot:123');
     } finally {
-      await rm(dir, { force: true, recursive: true });
+      await removeFixtureDir({ role: 'server-state', path: dir });
     }
   });
 
@@ -172,7 +173,7 @@ describe('readState start token', () => {
       expect(state?.pid).toBe(4242);
       expect(state?.startToken).toBeUndefined();
     } finally {
-      await rm(dir, { force: true, recursive: true });
+      await removeFixtureDir({ role: 'server-state', path: dir });
     }
   });
 });
@@ -274,7 +275,7 @@ describe('server-state control token', () => {
   });
 
   afterEach(async () => {
-    await rm(dir, { force: true, recursive: true });
+    await removeFixtureDir({ role: 'server-state', path: dir });
   });
 
   it('round-trips the control token', async () => {

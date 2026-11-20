@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -10,6 +10,7 @@ import {
   readProcessSnapshot,
   vendorProcessesOf,
 } from '../../support/external-agents/process-tree';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const CODEX = '/home/ada/.codex/bin/codex';
 
@@ -73,7 +74,7 @@ describe('readProcessSnapshot', () => {
         { pid: 42, parentPid: 7 },
       ]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'process-tree', path: root });
     }
   });
 

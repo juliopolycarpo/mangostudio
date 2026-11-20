@@ -11,7 +11,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -28,6 +28,7 @@ import {
   type RuntimeCommandOptions,
   type RuntimeCommandRunner,
 } from '../../../src/modules/environments/domain/runtime-push';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 import {
   probeLocalhostSsh,
   sshCommandRunnerFor,
@@ -43,7 +44,7 @@ let isolatedRunner: RuntimeCommandRunner | null = null;
 // `afterAll` hooks run in registration order and this one still needs the
 // server, so it is registered before the fixture's own stop.
 afterAll(async () => {
-  if (workdir) await rm(workdir, { force: true, recursive: true });
+  if (workdir) await removeFixtureDir({ role: 'ssh-runtime-push', path: workdir });
   if (canReachLocalhost && remoteHome) {
     await runOnTarget(`rm -rf -- ${quoteForRemoteShell(remoteHome)}`).catch(() => undefined);
   }

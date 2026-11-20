@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,6 +12,7 @@ import {
   stagedRemovalDirectory,
   stageResourceRemoval,
 } from '../../../../src/modules/library/infrastructure/tree-removal';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 let root: string;
 
@@ -20,7 +21,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'tree-removal', path: root });
 });
 
 function seedTree(name: string): string {
@@ -143,7 +144,7 @@ describe('findStagedRemovalsForLocations', () => {
 
       expect(leftovers).toHaveLength(1);
     } finally {
-      rmSync(home, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'tree-removal', path: home });
     }
   });
 
@@ -164,7 +165,7 @@ describe('findStagedRemovalsForLocations', () => {
       expect(leftovers).toHaveLength(1);
       expect(leftovers[0]?.locationId).toBe('claude-settings');
     } finally {
-      rmSync(home, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'tree-removal', path: home });
     }
   });
 
@@ -181,7 +182,7 @@ describe('findStagedRemovalsForLocations', () => {
 
       expect(leftovers[0]?.locationId).toBe('claude-instructions');
     } finally {
-      rmSync(home, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'tree-removal', path: home });
     }
   });
 });

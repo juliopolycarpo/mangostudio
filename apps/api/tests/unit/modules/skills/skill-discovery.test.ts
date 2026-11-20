@@ -21,6 +21,7 @@ import {
   setThirdPartySkillDirsForTest,
 } from '../../../../src/modules/skills/application/skill-discovery';
 import { upsertSkillSettings } from '../../../../src/modules/skills/infrastructure/skill-settings-repository';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 let skillsDir: string;
 let agentsDir: string;
@@ -72,9 +73,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(skillsDir, { recursive: true, force: true });
-  rmSync(agentsDir, { recursive: true, force: true });
-  rmSync(claudeDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'skill-discovery', path: skillsDir });
+  removeFixtureDirSync({ role: 'skill-discovery', path: agentsDir });
+  removeFixtureDirSync({ role: 'skill-discovery', path: claudeDir });
   setThirdPartySkillDirsForTest(null);
   resetSkillsCache();
 });
@@ -206,7 +207,7 @@ describe('skill discovery', () => {
       loadConfigForTest({ skills: { dir: otherDir } });
       expect(await listSkills(getDb(), userId)).toEqual([]);
     } finally {
-      rmSync(otherDir, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'skill-discovery', path: otherDir });
     }
   });
 });

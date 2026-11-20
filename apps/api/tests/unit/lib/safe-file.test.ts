@@ -10,7 +10,6 @@ import {
   readFileSync,
   readlinkSync,
   realpathSync,
-  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -29,6 +28,7 @@ import {
   writeFileAtomic,
   writeRegularFileAtomic,
 } from '../../../src/lib/safe-file';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 let dir: string;
 
@@ -38,7 +38,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'safe-file', path: dir });
 });
 
 const isWindows = process.platform === 'win32';
@@ -565,7 +565,7 @@ describe('atomic writer policy divergence', () => {
       } catch {
         syncSucceeded = false;
       }
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'safe-file', path: dir });
       mkdirSync(dir, { recursive: true });
 
       const asyncPath = scenario.setUp();

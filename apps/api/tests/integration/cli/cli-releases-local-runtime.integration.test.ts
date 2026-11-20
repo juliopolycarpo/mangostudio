@@ -12,10 +12,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 import { resolveRustRuntimeBinary } from '../../support/rust-runtime-binary';
 
 const ENTRY = join(import.meta.dir, '../../../src/index.ts');
@@ -41,7 +42,7 @@ describe('CLI commands that reach Local', () => {
   });
 
   afterEach(async () => {
-    await rm(home, { force: true, recursive: true });
+    await removeFixtureDir({ role: 'cli-releases-local-runtime', path: home });
   });
 
   it.skipIf(!binary.available || !isPosix)(

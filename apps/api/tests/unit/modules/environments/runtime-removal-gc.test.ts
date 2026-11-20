@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,6 +8,7 @@ import {
   pruneRuntimeCache,
   RUNTIME_CACHE_DIR_NAME,
 } from '../../../../src/modules/environments/domain/runtime-release-fetch';
+import { removeFixtureDir } from '../../../support/remove-fixture-dir';
 import { FAKE_RUNTIME_CACHE_ROOT, recordingCacheFs } from '../../../support/runtime-cache-fs';
 
 describe('runtimeRemoveSlotBytesScript', () => {
@@ -41,7 +42,7 @@ describe('pruneRuntimeCache', () => {
       const remaining = (await readdir(root)).sort();
       expect(remaining).toEqual(['1.1.0', '1.2.0']);
     } finally {
-      await rm(base, { force: true, recursive: true });
+      await removeFixtureDir({ role: 'runtime-removal-gc', path: base });
     }
   });
 });

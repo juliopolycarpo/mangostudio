@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,11 +8,13 @@ import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { checkRuntimeSlot } from '../../../src/cli/doctor-checks';
 import { probeRuntimeSlots } from '../../../src/cli/runtime-slot-probe';
 import { getHomeMangoDir, getRuntimeHomeMangoDir } from '../../../src/lib/config';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 const homes: string[] = [];
 
 afterEach(async () => {
-  for (const home of homes.splice(0)) await rm(home, { recursive: true, force: true });
+  for (const home of homes.splice(0))
+    await removeFixtureDir({ role: 'runtime-slot-probe', path: home });
 });
 
 async function mangoHome(slots: Readonly<Record<string, string | null>> = {}): Promise<string> {

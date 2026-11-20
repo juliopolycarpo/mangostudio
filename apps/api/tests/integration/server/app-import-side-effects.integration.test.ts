@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 /**
  * Pins what merely *importing* `src/app.ts` is allowed to do to the machine.
@@ -94,7 +96,7 @@ describe('importing src/app.ts', () => {
         // has acquired ownership. Importing the app must leave it absent.
         expect(result.uploadsExists).toBe(false);
       } finally {
-        await rm(result.home, { recursive: true, force: true });
+        await removeFixtureDir({ role: 'app-import-side-effects', path: result.home });
       }
     },
     TEST_TIMEOUT_MS

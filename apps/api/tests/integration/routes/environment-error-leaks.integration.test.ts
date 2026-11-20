@@ -6,7 +6,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -35,6 +35,7 @@ import {
 } from '../../../src/services/secret-store/store';
 import { DiagnosticWarnCapture } from '../../support/diagnostic-warn-capture';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const TEST_USER = {
   id: 'environment-error-leaks-user',
@@ -63,7 +64,7 @@ afterEach(async () => {
   restoreAuth = null;
   setRuntimeTokenStoreForTests(undefined);
   for (const directory of scratchDirectories.splice(0)) {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'environment-error-leaks', path: directory });
   }
   await getDb().deleteFrom('environments').where('userId', '=', TEST_USER.id).execute();
   await getDb().deleteFrom('environment_toolchains').where('userId', '=', TEST_USER.id).execute();

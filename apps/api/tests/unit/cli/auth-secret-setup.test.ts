@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -7,6 +7,7 @@ import {
   ensureServeAuthSecret,
 } from '../../../src/cli/auth-secret-setup';
 import { loadConfigForTest, resetConfig } from '../../../src/lib/config';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const TMP_DIR = join('/tmp', `mango-auth-secret-setup-test-${process.pid}`);
 const CONFIG_PATH = join(TMP_DIR, 'config.toml');
@@ -26,7 +27,7 @@ afterEach(() => {
   if (savedAuthSecret === undefined) delete process.env.BETTER_AUTH_SECRET;
   else process.env.BETTER_AUTH_SECRET = savedAuthSecret;
   resetConfig();
-  rmSync(TMP_DIR, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'auth-secret-setup', path: TMP_DIR });
 });
 
 describe('ensureServeAuthSecret', () => {

@@ -28,7 +28,6 @@ import {
   mkdtemp,
   readFile,
   realpath,
-  rm,
   stat,
   symlink,
   truncate,
@@ -49,6 +48,7 @@ import {
 } from '@mangostudio/shared/runtime-contract';
 
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 import {
   cleanupMangoHome,
   resolveRustRuntimeBinary,
@@ -127,7 +127,7 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
     const sourceRoot = await fixtureRoot(label);
     try {
       if ((await stat(sourceRoot)).dev === (await stat(destinationParent)).dev) {
-        await rm(destinationParent, { force: true, recursive: true });
+        await removeFixtureDir({ role: 'rust-snapshot-compat', path: destinationParent });
         return null;
       }
       const destinationRoot = join(destinationParent, 'rust');
@@ -135,7 +135,7 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
       crossDeviceRoots.push(destinationParent);
       return { sourceRoot, destinationRoot };
     } catch (error) {
-      await rm(destinationParent, { force: true, recursive: true });
+      await removeFixtureDir({ role: 'rust-snapshot-compat', path: destinationParent });
       throw error;
     }
   }
@@ -245,8 +245,10 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
     if (previousHome === undefined) delete process.env.MANGO_HOME;
     else process.env.MANGO_HOME = previousHome;
     if (home) await cleanupMangoHome(home);
-    await Promise.all(crossDeviceRoots.map((path) => rm(path, { force: true, recursive: true })));
-    if (root) await rm(root, { force: true, recursive: true });
+    await Promise.all(
+      crossDeviceRoots.map((path) => removeFixtureDir({ role: 'rust-snapshot-compat', path: path }))
+    );
+    if (root) await removeFixtureDir({ role: 'rust-snapshot-compat', path: root });
   });
 
   it('captures exact binary and Unicode bytes through an in-root link, hashes them, and preserves absence', async () => {

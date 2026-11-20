@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 import { SshFixtureUnavailableError, type ThrowawaySshd } from '../../support/ssh-fixture';
 import {
   probeLocalhostSsh,
@@ -45,7 +46,9 @@ afterEach(async () => {
   else process.env.PATH = originalPath;
   if (originalSshdPath === undefined) delete process.env.MANGOSTUDIO_SSHD_PATH;
   else process.env.MANGOSTUDIO_SSHD_PATH = originalSshdPath;
-  await Promise.all(scratch.splice(0).map((d) => rm(d, { force: true, recursive: true })));
+  await Promise.all(
+    scratch.splice(0).map((d) => removeFixtureDir({ role: 'ssh-fixture-suite', path: d }))
+  );
 });
 
 describe('sshFixtureRequested', () => {

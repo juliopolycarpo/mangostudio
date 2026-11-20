@@ -26,12 +26,14 @@
  */
 
 import { existsSync } from 'node:fs';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { createConnection, createServer } from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
 import { type LaunchedPeer, type SpawnOptions, spawnPort } from '@mangostudio/protocol/spawn';
+
+import { removeFixtureDir } from './remove-fixture-dir';
 
 /** Loopback only: the fixture is never reachable from another machine. */
 const LOOPBACK_HOST = '127.0.0.1';
@@ -279,7 +281,7 @@ export async function startThrowawaySshd(
         await running.exited;
       }
     }
-    await rm(directory, { force: true, recursive: true });
+    await removeFixtureDir({ role: 'ssh-fixture', path: directory });
   };
 
   try {

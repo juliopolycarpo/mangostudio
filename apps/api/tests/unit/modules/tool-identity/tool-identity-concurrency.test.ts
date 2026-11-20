@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
@@ -15,6 +15,7 @@ import {
 } from '../../../../src/modules/tool-identity/application/tool-identity-service';
 import { getToolIdentityRow } from '../../../../src/modules/tool-identity/infrastructure/tool-identity-repository';
 import { insertTestUser } from '../../../support/factories';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const PNG_BYTES = Uint8Array.from(
   atob(
@@ -103,7 +104,10 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  rmSync(join(getConfig().toolImages.dir, userId), { recursive: true, force: true });
+  removeFixtureDirSync({
+    role: 'tool-identity-concurrency',
+    path: join(getConfig().toolImages.dir, userId),
+  });
 });
 
 describe('concurrent tool identity patches', () => {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -9,6 +9,7 @@ import {
   LibraryWriteError,
   resolveContainedResourcePath,
 } from '../../../../src/modules/library/domain/path-safety';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 let tempDir: string;
 let locationRoot: string;
@@ -23,7 +24,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tempDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'path-safety', path: tempDir });
 });
 
 describe('library path containment', () => {

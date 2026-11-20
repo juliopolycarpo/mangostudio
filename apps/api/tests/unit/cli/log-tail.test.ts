@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,6 +14,7 @@ import {
   resolveHubLogFile,
   tailLines,
 } from '../../../src/cli/log-tail';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 describe('tailLines', () => {
   it('returns the last lines and says whether more exist', () => {
@@ -234,7 +235,7 @@ describe('latestHubLogFile', () => {
       await utimes(join(dir, 'service.log'), 2_000, 2_000);
       expect(await latestHubLogFile(dir)).toBe(join(dir, 'service.log'));
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await removeFixtureDir({ role: 'log-tail', path: dir });
     }
   });
 

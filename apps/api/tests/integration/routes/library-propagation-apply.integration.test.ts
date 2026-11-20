@@ -35,6 +35,7 @@ import {
   describeLocation,
 } from '../../../src/modules/library/infrastructure/location-probe';
 import { refuseLibraryApply } from '../../support/mocks/refusing-library-runtime';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const SKILL_LOCATIONS: readonly LibraryLocationId[] = [
   'mango-skills',
@@ -72,7 +73,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(home, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'library-propagation-apply', path: home });
 });
 
 const userId = () => `library-apply-user-${userSeq}`;

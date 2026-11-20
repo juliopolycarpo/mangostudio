@@ -5,7 +5,7 @@
  * assertion names the write that ran at it.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -22,6 +22,7 @@ import {
   SYNCHRONOUS_FULL as FULL,
   SYNCHRONOUS_NORMAL as NORMAL,
 } from '../../support/observed-file-database';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 let directory: string;
 let file: ObservedFileDatabase;
@@ -53,7 +54,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await file.destroy();
-  rmSync(directory, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'durable-revocations', path: directory });
 });
 
 const deleteScratchCredential = () => sql`DELETE FROM credential_scratch`.execute(file.db);
@@ -168,7 +169,7 @@ describe('a database that is not relaxed', () => {
       expect(plain.observed.some((entry) => /PRAGMA synchronous\s*=/i.test(entry.sql))).toBe(false);
     } finally {
       await plain.destroy();
-      rmSync(plainDirectory, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'durable-revocations', path: plainDirectory });
     }
   });
 });

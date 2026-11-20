@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import * as fs from 'node:fs';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,6 +8,7 @@ import {
   collectSkillsDoctorChecks,
   type SkillsDoctorInput,
 } from '../../../src/cli/skills-doctor-checks';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 let root: string;
 let mangoDir: string;
@@ -24,7 +25,7 @@ beforeEach(() => {
 // The three source directories live inside `root`; removing only them left
 // `root` itself behind on every test.
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'skills-doctor-checks', path: root });
 });
 
 function writeSkill(dir: string, slug: string, frontmatter: string): void {

@@ -8,7 +8,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -25,11 +25,13 @@ import { getLogsDir, getRunDir } from '../../../../src/lib/mango-paths';
 import { isStandaloneExecutable } from '../../../../src/lib/runtime-paths';
 import type { ServerState } from '../../../../src/lib/server-state';
 import { FakeProcessController } from '../../../support/mocks/fake-process-controller';
+import { removeFixtureDir } from '../../../support/remove-fixture-dir';
 
 const homes: string[] = [];
 
 afterEach(async () => {
-  for (const home of homes.splice(0)) await rm(home, { recursive: true, force: true });
+  for (const home of homes.splice(0))
+    await removeFixtureDir({ role: 'doctor-core-output', path: home });
 });
 
 const ALL_OK: FsProbe = { exists: () => true, isWritable: () => true };

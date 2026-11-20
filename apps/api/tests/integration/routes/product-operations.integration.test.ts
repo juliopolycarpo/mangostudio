@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,6 +43,7 @@ import {
   type UserFixture,
 } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 import { waitUntil } from '../../support/wait-until';
 
 class ControlledProvider implements AIProvider {
@@ -189,7 +190,7 @@ describe('durable authorized product operations over real routes/storage', () =>
           claimed: false,
         });
       } finally {
-        await rm(directory, { recursive: true, force: true });
+        await removeFixtureDir({ role: 'product-operations', path: directory });
       }
     },
     RESTART_WORKERS_TIMEOUT_MS

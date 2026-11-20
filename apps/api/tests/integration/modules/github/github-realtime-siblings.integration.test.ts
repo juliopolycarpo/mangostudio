@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,6 +12,7 @@ import {
   setRealtimeBusForTests,
 } from '../../../../src/services/realtime/realtime-bus';
 import { insertTestChat, insertTestUser } from '../../../support/factories';
+import { removeFixtureDir } from '../../../support/remove-fixture-dir';
 
 // A junction needs no privilege on Windows, where a directory symlink does; the
 // type argument is ignored everywhere else.
@@ -28,7 +29,7 @@ async function detectCaseInsensitiveTmpdir(): Promise<boolean> {
       () => false
     );
   } finally {
-    await rm(probe, { recursive: true, force: true });
+    await removeFixtureDir({ role: 'github-realtime-siblings', path: probe });
   }
 }
 
@@ -36,7 +37,11 @@ const caseInsensitiveTmpdir = await detectCaseInsensitiveTmpdir();
 
 afterEach(async () => {
   setRealtimeBusForTests(undefined);
-  await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    tempDirs
+      .splice(0)
+      .map((path) => removeFixtureDir({ role: 'github-realtime-siblings', path: path }))
+  );
 });
 
 async function bindChat(userId: string, workdir: string): Promise<string> {

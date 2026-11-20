@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,6 +15,7 @@ import {
   previewRuleFile,
   RuleFileError,
 } from '../../../../src/modules/prompt-rules/application/rule-file-resolver';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 let tmpDir: string;
 
@@ -23,7 +24,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'rule-file-resolver', path: tmpDir });
 });
 
 function createFile(name: string, content: string): string {

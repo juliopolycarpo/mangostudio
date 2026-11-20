@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -24,6 +24,7 @@ import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
 } from '../../support/harness/create-api-test-app';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 const hasGit = Bun.which('git') !== null;
 const tempDirs: string[] = [];
@@ -63,7 +64,9 @@ afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
   setRealtimeBusForTests(undefined);
-  await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    tempDirs.splice(0).map((path) => removeFixtureDir({ role: 'git-state', path: path }))
+  );
 });
 
 describe('git routes', () => {

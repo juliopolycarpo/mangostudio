@@ -12,7 +12,7 @@
  * presence of ~/.mango/config.toml in the developer's environment.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { CliError } from '../../../src/cli/errors';
@@ -26,6 +26,7 @@ import {
   RUNTIME_CONFIG_ENV_KEYS,
   TEST_MANAGED_CONFIG_DIR,
 } from '../../../src/lib/config';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const TMP_DIR = join('/tmp', `mango-config-test-${process.pid}`);
 const TMP_TOML = join(TMP_DIR, 'config.toml');
@@ -86,7 +87,7 @@ describe('config precedence', () => {
   afterEach(() => {
     resetConfig();
     restoreEnv(savedEnv);
-    rmSync(TMP_DIR, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'config-precedence', path: TMP_DIR });
   });
 
   test('loads server.port from config.toml', () => {
@@ -682,7 +683,7 @@ describe('corsOrigins: the server origin plus configured allowed origins', () =>
   afterEach(() => {
     resetConfig();
     restoreEnv(savedEnv);
-    rmSync(TMP_DIR, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'config-precedence', path: TMP_DIR });
   });
 
   test('server localhost origin is included by default', () => {
@@ -846,7 +847,7 @@ describe('auth.url validation', () => {
   afterEach(() => {
     resetConfig();
     restoreEnv(savedEnv);
-    rmSync(TMP_DIR, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'config-precedence', path: TMP_DIR });
   });
 
   // Better Auth reads the scheme (the `__Secure-` cookie prefix) and the host
@@ -912,7 +913,7 @@ describe('frontend.port deprecation warning', () => {
     resetConfig();
     resetFrontendPortDeprecationWarning();
     restoreEnv(savedEnv);
-    rmSync(TMP_DIR, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'config-precedence', path: TMP_DIR });
   });
 
   function deprecationWarnings(): string[] {
