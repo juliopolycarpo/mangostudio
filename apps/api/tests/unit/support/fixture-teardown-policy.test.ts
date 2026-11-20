@@ -114,10 +114,12 @@ interface Violation {
  */
 function findTreeRemovals(source: string, allowedPaths: readonly string[]): Violation[] {
   const code = blankNonCode(source);
-  const names = removerNames(source).map((name) => name.replace(/\$/g, '\\$'));
-  const call = new RegExp(`(?<![\\w$])(?:${names.join('|')})\\s*\\(`, 'g');
+  const names = new Set(removerNames(source));
+  // Any identifier followed by `(`, filtered by name: no name is ever built into a pattern.
+  const call = /(?<![\w$])([\w$]+)\s*\(/g;
   const found: Violation[] = [];
   for (const match of code.matchAll(call)) {
+    if (!names.has(match[1] ?? '')) continue;
     const open = match.index + match[0].length;
     const [, options] = splitArguments(argumentsOf(code, open));
     // Blanking keeps offsets, so the same span of the raw source reads the path expression.
