@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -10,6 +10,7 @@ import { upsertSkillSettings } from '../../../../src/modules/skills/infrastructu
 import { executeTool, getTool } from '../../../../src/services/tools';
 import { register, SKILL_TOOL_NAME } from '../../../../src/services/tools/builtin/skill';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 let skillsDir: string;
 
@@ -32,7 +33,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(skillsDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'skill-tool', path: skillsDir });
   resetSkillsCache();
 });
 

@@ -4,7 +4,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  rmSync,
   statSync,
   utimesSync,
   writeFileSync,
@@ -27,6 +26,7 @@ import {
   restoreBackupEntry,
   writeBackupManifest,
 } from '../../../../src/modules/library/infrastructure/backup-store';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 let root: string;
 let backupRoot: string;
@@ -37,7 +37,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'backup-store', path: root });
 });
 
 function deps(overrides: Partial<BackupStoreDeps> = {}): BackupStoreDeps {

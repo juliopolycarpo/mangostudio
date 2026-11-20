@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -29,6 +29,7 @@ import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
 } from '../../support/harness/create-api-test-app';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 let userSeq = 0;
 let owner: { id: string; name: string; email: string };
@@ -74,9 +75,9 @@ afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
   await closeAllMcpClients();
-  rmSync(secretDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'mcp-portability', path: secretDir });
   for (const directory of extraSecretDirs) {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'mcp-portability', path: directory });
   }
 });
 

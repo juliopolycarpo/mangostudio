@@ -5,7 +5,7 @@
  * statement, so each assertion names the write that ran at it.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -25,6 +25,7 @@ import {
   SYNCHRONOUS_FULL as FULL,
   SYNCHRONOUS_NORMAL as NORMAL,
 } from '../../support/observed-file-database';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 let directory: string;
 let file: ObservedFileDatabase;
@@ -54,7 +55,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await file.destroy();
-  rmSync(directory, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'durable-markers', path: directory });
 });
 
 describe('the external-turn receipt', () => {
@@ -169,7 +170,7 @@ describe('a database that was never relaxed', () => {
       );
     } finally {
       await unrelaxed.destroy();
-      rmSync(unrelaxedDirectory, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'durable-markers', path: unrelaxedDirectory });
     }
   });
 });

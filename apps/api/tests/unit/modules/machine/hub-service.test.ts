@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -11,6 +11,7 @@ import {
   withoutUserinfo,
 } from '../../../../src/modules/machine/application/hub-service';
 import { hubServiceUnitName } from '../../../../src/modules/machine/domain/hub-service-identity';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const isWindows = process.platform === 'win32';
 
@@ -161,7 +162,7 @@ describe('isAuthSecretPersisted', () => {
   });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'hub-service', path: dir });
     resetConfig();
   });
 
@@ -256,7 +257,7 @@ describe('currentInstallOriginProbe', () => {
     expect(probe.readFile(file)).toBe('hello');
     expect(probe.readFile(join(dir, 'absent.txt'))).toBeNull();
 
-    rmSync(dir, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'hub-service', path: dir });
   });
 
   it('accepts overrides for the fields a caller wants to fix', () => {

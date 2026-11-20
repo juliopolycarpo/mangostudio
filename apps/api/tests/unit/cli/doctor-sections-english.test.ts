@@ -8,7 +8,7 @@
  */
 
 import { afterAll, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -53,6 +53,7 @@ import { SecretStorageUnavailableError } from '../../../src/services/secret-stor
 import { makeTokenBundle } from '../../support/chatgpt';
 import { FakeProcessController } from '../../support/mocks/fake-process-controller';
 import { InMemorySecretStore } from '../../support/mocks/mock-secret-store';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 interface EnglishRow {
   readonly label: string;
@@ -551,7 +552,7 @@ const CHATGPT_CASES: readonly SectionCase[] = [
 const SKILLS_ROOT = mkdtempSync(join(tmpdir(), 'doctor-sections-skills-'));
 
 afterAll(() => {
-  rmSync(SKILLS_ROOT, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'doctor-sections-english', path: SKILLS_ROOT });
 });
 
 interface SkillsDirs {
@@ -707,7 +708,7 @@ const SKILLS_CASES: readonly SectionCase[] = [
     rows: () => {
       writeSkill(WITHHELD_DIRS.claude, 'fallback', 'name: fallback\ndescription: Claude');
       // Each group reads its cases more than once, so the setup must be repeatable.
-      rmSync(WITHHELD_DIRS.agents, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'doctor-sections-english', path: WITHHELD_DIRS.agents });
       // A junction, not a 'dir' symlink: Windows creates one without the symlink privilege,
       // and the type is ignored elsewhere, so every platform builds the same dangling link.
       symlinkSync(join(WITHHELD_DIRS.mango, 'missing'), WITHHELD_DIRS.agents, 'junction');

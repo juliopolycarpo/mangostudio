@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,6 +15,7 @@ import { applyLibraryRemoval } from '../../../../src/modules/library/application
 import { LibraryRequestError } from '../../../../src/modules/library/domain/library-request-error';
 import { hashResourceAt } from '../../../../src/modules/library/infrastructure/instance-reader';
 import { refuseLibraryRemove } from '../../../support/mocks/refusing-library-runtime';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 let home: string;
 
@@ -23,7 +24,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(home, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'removal-apply', path: home });
 });
 
 function env(): PathEnv {
@@ -305,7 +306,7 @@ describe('applyLibraryRemoval across machines', () => {
   });
 
   afterEach(() => {
-    rmSync(remoteHome, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'removal-apply', path: remoteHome });
   });
 
   const homeOf = (environmentId: string) => (environmentId === 'local' ? home : remoteHome);

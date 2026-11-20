@@ -1,7 +1,7 @@
 import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +12,7 @@ import {
   createManagedProcessFixture,
   type ManagedProcessFixture,
 } from '../../support/fixtures/managed-process';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 /**
  * Boots the real server via the hidden `__serve` command in an isolated HOME so
@@ -295,7 +296,7 @@ describe('startServer via __serve', () => {
         }
         expect(await readdir(external)).toEqual([]);
       } finally {
-        await rm(external, { recursive: true, force: true });
+        await removeFixtureDir({ role: 'start-server', path: external });
       }
     },
     TEST_TIMEOUT_MS
@@ -634,7 +635,7 @@ describe('waitForState', () => {
       await waitForState(pidFile, 500);
       expect(existsSync(pidFile)).toBe(true);
     } finally {
-      await rm(dir, { force: true, recursive: true });
+      await removeFixtureDir({ role: 'start-server', path: dir });
     }
   });
 

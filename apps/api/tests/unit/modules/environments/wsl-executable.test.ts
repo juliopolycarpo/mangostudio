@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,6 +8,7 @@ import {
   resetWslExecutableCache,
   resolveWslExecutable,
 } from '../../../../src/modules/environments/infrastructure/wsl-executable';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const ORIGINAL_PLATFORM = process.platform;
 const ENV_KEYS = ['ProgramFiles', 'ProgramW6432', 'SystemRoot'] as const;
@@ -46,7 +47,7 @@ afterEach(() => {
     if (originalEnv[key] === undefined) delete process.env[key];
     else process.env[key] = originalEnv[key];
   }
-  rmSync(dir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'wsl-executable', path: dir });
 });
 
 describe('resolveWslExecutable', () => {

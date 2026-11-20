@@ -20,6 +20,7 @@ import { executeWriteFile } from '../../../../src/services/tools/builtin/write-f
 import { registerTools } from '../../../../src/services/tools/register-tools';
 import { clearRegistry, executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 let tempDir: string;
 
@@ -34,7 +35,7 @@ beforeEach(() => {
 afterEach(() => {
   clearRegistry();
   registerTools();
-  rmSync(tempDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'apply-patch-tool', path: tempDir });
 });
 
 function makeContext(parameters: Record<string, unknown> = {}): ToolContext {

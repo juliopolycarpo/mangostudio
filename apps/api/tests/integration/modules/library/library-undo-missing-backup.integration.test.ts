@@ -9,7 +9,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -17,6 +17,7 @@ import { rejectionOf } from '@mangostudio/protocol/testing';
 import { createBackupStoreDeps } from '@mangostudio/shared/library/machine';
 
 import { undoLibraryPropagation } from '../../../../src/modules/library/application/propagation-apply';
+import { removeFixtureDir } from '../../../support/remove-fixture-dir';
 import {
   resolveRustRuntimeBinary,
   skipWithoutRustBinary,
@@ -31,7 +32,7 @@ let backupRoot: string | undefined;
 afterEach(async () => {
   await runtime?.close();
   runtime = undefined;
-  if (backupRoot) await rm(backupRoot, { force: true, recursive: true });
+  if (backupRoot) await removeFixtureDir({ role: 'library-undo-missing-backup', path: backupRoot });
   backupRoot = undefined;
 });
 

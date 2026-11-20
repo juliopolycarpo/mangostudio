@@ -1,5 +1,13 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 
@@ -14,6 +22,7 @@ import {
   REAL_HOME_ENV,
   runWithTestHome,
   shellExitCode,
+  TEST_GIT_CONFIG,
   TEST_HOME_KIND,
   TEST_HOME_PREFIX,
   TEST_TMP_PREFIX,
@@ -52,6 +61,19 @@ class FakeEnvRecordingChild implements TestHomeChild, TestHomeDependencies {
     return this;
   };
   env: NodeJS.ProcessEnv = {};
+  kill(): void {}
+}
+
+/** Reads the global Git config the launcher named, at the moment the lane would start. */
+class FakeGitConfigReadingChild implements TestHomeChild, TestHomeDependencies {
+  readonly exited = Promise.resolve(0);
+  readonly signalCode = null;
+  readonly spawn = (_command: readonly string[], env: NodeJS.ProcessEnv) => {
+    const path = env.GIT_CONFIG_GLOBAL ?? '';
+    this.config = existsSync(path) ? readFileSync(path, 'utf8') : `missing: ${path}`;
+    return this;
+  };
+  config = '';
   kill(): void {}
 }
 
@@ -395,6 +417,17 @@ describe('runWithTestHome', () => {
     expect(seen.rustupHome).toBe(process.env.RUSTUP_HOME?.trim() || join(original, '.rustup'));
     expect(seen.bunInstall).toBe(process.env.BUN_INSTALL?.trim() || join(original, '.bun'));
     expect(seen.gitGlobal).toBe(join(seen.home, '.gitconfig'));
+  });
+
+  test('seeds the global git config so test git never leaves a background process', async () => {
+    const child = new FakeGitConfigReadingChild();
+
+    await runWithTestHome(['bun', 'run', 'lane'], process.env, child);
+
+    expect(
+      child.config,
+      `expected GIT_CONFIG_GLOBAL to hold gc.auto=0, maintenance.auto=false, core.fsmonitor=false | received: ${child.config}`
+    ).toBe(TEST_GIT_CONFIG);
   });
 
   test("returns the child's exit code and still removes the home", async () => {

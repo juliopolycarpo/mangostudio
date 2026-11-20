@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -21,6 +21,7 @@ import {
   TomlParseError,
 } from '../../../src/lib/toml';
 import { redactSettingsDocument } from '../../../src/modules/library/domain/settings-redaction';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const API_ROOT = resolve(import.meta.dir, '../../..');
 const ADAPTER = 'src/lib/toml.ts';
@@ -61,7 +62,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(directory, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'toml', path: directory });
 });
 
 describe('stringifyTomlDocument', () => {

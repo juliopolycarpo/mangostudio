@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,6 +14,7 @@ import {
 } from '../../../../src/modules/library/application/library-discovery';
 import { MAX_LIBRARY_FILE_BYTES } from '../../../../src/modules/library/infrastructure/instance-reader';
 import { LibraryCache } from '../../../../src/modules/library/infrastructure/library-cache';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 let root: string;
 
@@ -23,7 +24,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'library-discovery', path: root });
   resetLibraryDiscoveryCache();
 });
 

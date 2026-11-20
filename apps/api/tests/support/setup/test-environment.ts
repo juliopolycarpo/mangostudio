@@ -28,7 +28,7 @@
  */
 
 import { afterAll, afterEach, beforeEach } from 'bun:test';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 
 import { DEFAULT_LIBRARY_LOCATION_SETTINGS } from '@mangostudio/shared/app-settings';
 import { Migrator } from 'kysely/migration';
@@ -45,6 +45,7 @@ import { setChatGptLoopbackPortForTest } from '../../../src/modules/connectors/i
 import { setProviderSecretSyncTtlForTest } from '../../../src/services/providers/core/secret-service';
 import { registerApplicationServices } from '../../../src/services/register-application-services';
 import { restoreMockedModules } from '../mocks/module-mocks';
+import { removeFixtureDirSync } from '../remove-fixture-dir';
 import { captureToolRegistryBaseline, restoreToolRegistryBaseline } from './tool-registry-baseline';
 
 /**
@@ -104,7 +105,7 @@ function installBaseTestConfig(): void {
  * (which expect a parent dir) keep working.
  */
 function resetManagedConfigFile(): void {
-  rmSync(TEST_MANAGED_CONFIG_DIR, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'test-environment', path: TEST_MANAGED_CONFIG_DIR });
   mkdirSync(TEST_MANAGED_CONFIG_DIR, { recursive: true });
 }
 
@@ -116,7 +117,7 @@ function resetManagedConfigFile(): void {
  * without it.
  */
 function removeManagedConfigDir(): void {
-  rmSync(TEST_MANAGED_CONFIG_DIR, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'test-environment', path: TEST_MANAGED_CONFIG_DIR });
 }
 
 /** Runs every migration against the in-memory test database. */

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { loadConfigForTest, resetConfig } from '../../../src/lib/config';
@@ -16,13 +16,14 @@ import {
   type GeneratedImageDirectory,
   useGeneratedImageDirectory,
 } from '../../support/generated-image-fixtures';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const TMP_DIR = join('/tmp', `mango-generated-images-test-${process.pid}`);
 
 describe('generated-image-storage', () => {
   afterEach(() => {
     resetConfig();
-    rmSync(TMP_DIR, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'generated-image-storage', path: TMP_DIR });
   });
 
   it('creates the configured images directory and returns an /images URL', async () => {

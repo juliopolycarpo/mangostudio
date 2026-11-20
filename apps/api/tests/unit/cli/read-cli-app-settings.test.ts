@@ -1,6 +1,6 @@
 import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,6 +12,7 @@ import {
 
 import { readCliAppSettings } from '../../../src/cli/read-cli-app-settings';
 import type { MangoConfig } from '../../../src/lib/config';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 function makeConfig(dbPath: string): MangoConfig {
   return {
@@ -51,7 +52,7 @@ describe('readCliAppSettings', () => {
 
   afterEach(() => {
     for (const dir of dirs.splice(0)) {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'read-cli-app-settings', path: dir });
     }
   });
 

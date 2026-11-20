@@ -29,6 +29,7 @@ import {
 } from '../../../src/server/embedded-frontend';
 import { clearFrontendFallback, frontendNotFound } from '../../../src/server/frontend-fallback';
 import { registerFrontend } from '../../../src/server/frontend-static';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const INDEX_HTML = `<!doctype html><html><body>${'<p>embedded shell</p>'.repeat(40)}</body></html>`;
 const MAIN_JS = 'console.log("embedded main chunk");\n'.repeat(60);
@@ -192,7 +193,7 @@ async function startServer(): Promise<EncodingServer> {
     send: (path, headers = {}, method = 'GET') => raw(port, path, headers, method),
     stop: async () => {
       await app.stop();
-      rmSync(uploadsDir, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'frontend-static-encoding', path: uploadsDir });
     },
   };
 }
@@ -208,7 +209,7 @@ afterEach(async () => {
   server = null;
   resetEmbeddedFrontend();
   clearFrontendFallback();
-  rmSync(fixtureDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'frontend-static-encoding', path: fixtureDir });
 });
 
 function send(path: string, headers?: Record<string, string>, method?: string) {

@@ -9,7 +9,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -61,6 +61,7 @@ import {
 import { insertTestChat, insertTestUser, type UserFixture } from '../../../support/factories';
 import { connectFakeRuntime } from '../../../support/fake-runtime-host';
 import { makeFakeMcpHandle } from '../../../support/fixtures/mcp/fake-handle';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 import {
   FakeRuntimeDefinition,
   fixedConsent,
@@ -298,8 +299,8 @@ afterEach(async () => {
   await closeAllMcpClients();
   setThirdPartySkillDirsForTest(null);
   resetSkillsCache();
-  rmSync(skillsDir, { recursive: true, force: true });
-  rmSync(agentsDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'capability-inspector', path: skillsDir });
+  removeFixtureDirSync({ role: 'capability-inspector', path: agentsDir });
 });
 
 describe('inspectChatCapabilities', () => {
@@ -504,7 +505,7 @@ describe('inspectChatCapabilities', () => {
   it.skipIf(process.platform === 'win32')(
     'distinguishes an unverified skill from a known shadowed copy',
     async () => {
-      rmSync(skillsDir, { recursive: true });
+      removeFixtureDirSync({ role: 'capability-inspector', path: skillsDir });
       symlinkSync(join(agentsDir, 'missing'), skillsDir, 'dir');
       writeSkill(agentsDir, 'fallback');
       const invalid = join(agentsDir, 'invalid-copy');

@@ -5,7 +5,7 @@
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -31,6 +31,7 @@ import { executeWriteFile } from '../../../../src/services/tools/builtin/write-f
 import type { ToolContext } from '../../../../src/services/tools/types';
 import { type ChatFixture, insertTestChat, type UserFixture } from '../../../support/factories';
 import { insertUserWithLocalRuntime } from '../../../support/fixtures/local-runtime-user';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 let tempDir: string;
 let outsideDir: string;
@@ -74,8 +75,8 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  rmSync(tempDir, { recursive: true, force: true });
-  rmSync(outsideDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'revert-file-checkpoints', path: tempDir });
+  removeFixtureDirSync({ role: 'revert-file-checkpoints', path: outsideDir });
 });
 
 /** Turn context as the generation layer builds it: message-scoped, db-backed. */

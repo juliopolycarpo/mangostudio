@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,6 +8,7 @@ import { sql } from 'kysely';
 import { allMigrations } from '../../../src/db/migrations';
 import { MigratedDatabaseTemplate } from '../../support/migrated-database-template';
 import { ObservedFileDatabase } from '../../support/observed-file-database';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 let template: MigratedDatabaseTemplate | undefined;
 let directories: string[];
@@ -28,7 +29,8 @@ beforeEach(() => {
 
 afterEach(async () => {
   for (const database of opened) await database.destroy();
-  for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+  for (const directory of directories)
+    removeFixtureDirSync({ role: 'migrated-database-template', path: directory });
 });
 
 function openCopy(): ObservedFileDatabase {

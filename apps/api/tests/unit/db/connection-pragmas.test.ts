@@ -4,11 +4,12 @@
  */
 import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { applyConnectionPragmas } from '../../../src/db/database';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 /** `PRAGMA synchronous` answers with the numeric level: 0 off, 1 normal, 2 full, 3 extra. */
 const SYNCHRONOUS_OFF = 0;
@@ -32,7 +33,7 @@ beforeEach(() => {
 afterEach(() => {
   sqlite?.close();
   sqlite = undefined;
-  rmSync(directory, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'connection-pragmas', path: directory });
 });
 
 describe('applyConnectionPragmas', () => {

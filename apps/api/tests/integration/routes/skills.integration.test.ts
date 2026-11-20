@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -28,6 +28,7 @@ import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
 } from '../../support/harness/create-api-test-app';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const TEST_USER = {
   id: 'skills-routes-user',
@@ -74,9 +75,9 @@ beforeEach(() => {
 afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
-  rmSync(skillsDir, { recursive: true, force: true });
-  rmSync(agentsDir, { recursive: true, force: true });
-  rmSync(claudeDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'skills', path: skillsDir });
+  removeFixtureDirSync({ role: 'skills', path: agentsDir });
+  removeFixtureDirSync({ role: 'skills', path: claudeDir });
   setThirdPartySkillDirsForTest(null);
   resetSkillsCache();
 });
@@ -156,7 +157,7 @@ describe('skills routes', () => {
   it.skipIf(process.platform === 'win32')(
     'reports an observed fallback without claiming it is shadowed',
     async () => {
-      rmSync(skillsDir, { recursive: true });
+      removeFixtureDirSync({ role: 'skills', path: skillsDir });
       symlinkSync(join(agentsDir, 'missing'), skillsDir, 'dir');
       const fallback = join(agentsDir, 'fallback');
       mkdirSync(fallback);

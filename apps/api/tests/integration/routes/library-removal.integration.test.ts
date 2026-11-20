@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -32,6 +32,7 @@ import {
 } from '../../../src/modules/library/infrastructure/location-probe';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import { refuseLibraryRemove } from '../../support/mocks/refusing-library-runtime';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const TEST_USER = {
   id: 'library-removal-user',
@@ -199,7 +200,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(home, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'library-removal', path: home });
   for (const restore of authRestores.reverse()) restore();
   authRestores.length = 0;
 });

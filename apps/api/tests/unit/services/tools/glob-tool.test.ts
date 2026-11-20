@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,6 +18,7 @@ import {
 } from '../../../../src/services/tools/builtin/glob';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 import {
   skipWithoutRustBinary,
   targetHomeRuntime,
@@ -41,7 +42,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tempDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'glob-tool', path: tempDir });
 });
 
 function makeContext(parameters: Record<string, unknown> = {}): ToolContext {
@@ -119,7 +120,7 @@ describe('executeGlob', () => {
         message: expect.stringContaining(`"${outside}" resolves outside the paths`),
       });
     } finally {
-      rmSync(base, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'glob-tool', path: base });
     }
   });
 

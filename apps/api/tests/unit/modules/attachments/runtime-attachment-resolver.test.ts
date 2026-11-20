@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { Kysely } from 'kysely';
@@ -10,13 +10,14 @@ import {
   ChatAttachmentFileUnavailableError,
   resolveProviderRuntimeAttachments,
 } from '../../../../src/modules/attachments/application/runtime-attachment-resolver';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const TMP_DIR = join('/tmp', `mango-runtime-attachments-test-${process.pid}`);
 
 describe('resolveProviderRuntimeAttachments', () => {
   afterEach(() => {
     resetConfig();
-    rmSync(TMP_DIR, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'runtime-attachment-resolver', path: TMP_DIR });
   });
 
   it('loads linked attachment bytes in requested order without exposing storage fields', async () => {

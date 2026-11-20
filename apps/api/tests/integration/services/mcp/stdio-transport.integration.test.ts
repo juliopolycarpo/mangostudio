@@ -6,7 +6,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -20,6 +20,7 @@ import {
 import { connectMcpClient } from '../../../../src/services/mcp/runtime-session';
 import type { McpServerRuntimeConfig } from '../../../../src/services/mcp/types';
 import { waitForProcessExit } from '../../../support/fixtures/managed-process';
+import { removeFixtureDir } from '../../../support/remove-fixture-dir';
 
 const FIXTURE_PATH = join(import.meta.dir, '../../../support/fixtures/mcp/echo-stdio-server.ts');
 const USER_ID = 'stdio-transport-user';
@@ -78,7 +79,7 @@ describe('mcp stdio transport', () => {
       expect(() => process.kill(pid, 0)).toThrow();
     } finally {
       await handle.close().catch(() => undefined);
-      await rm(tempDir, { force: true, recursive: true });
+      await removeFixtureDir({ role: 'stdio-transport', path: tempDir });
     }
   });
 

@@ -5,7 +5,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -24,6 +24,7 @@ import {
   type UserFixture,
 } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 let user: UserFixture;
 let chat: ChatFixture;
@@ -65,8 +66,8 @@ beforeEach(async () => {
 afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
-  rmSync(workdir, { recursive: true, force: true });
-  rmSync(outsideDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'file-checkpoints', path: workdir });
+  removeFixtureDirSync({ role: 'file-checkpoints', path: outsideDir });
 });
 
 function turnContext(): ToolContext {

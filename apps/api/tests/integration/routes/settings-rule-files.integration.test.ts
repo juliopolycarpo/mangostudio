@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,6 +14,7 @@ import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
 } from '../../support/harness/create-api-test-app';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const TEST_USER = {
   id: 'rule-files-integration-user',
@@ -28,7 +29,7 @@ afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
   if (tmpDir) {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'settings-rule-files', path: tmpDir });
   }
 });
 

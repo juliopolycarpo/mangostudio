@@ -13,7 +13,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdir, mkdtemp, readlink, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readlink, stat, writeFile } from 'node:fs/promises';
 import { tmpdir, type } from 'node:os';
 import { join } from 'node:path';
 
@@ -27,12 +27,14 @@ import {
   VERSION_SCRIPT,
   WRITE_CONFIG_SCRIPT,
 } from '../../../../src/modules/environments/domain/wsl-runtime-release';
+import { removeFixtureDir } from '../../../support/remove-fixture-dir';
 
 const hasPosixShell = process.platform !== 'win32';
 const homes: string[] = [];
 
 afterEach(async () => {
-  for (const home of homes.splice(0)) await rm(home, { recursive: true, force: true });
+  for (const home of homes.splice(0))
+    await removeFixtureDir({ role: 'wsl-runtime-scripts', path: home });
 });
 
 async function distroHome(): Promise<string> {

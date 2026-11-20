@@ -9,7 +9,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -40,6 +40,7 @@ import type {
 } from '../../../../src/services/providers/types';
 import { makeAgentProfile } from '../../../integration/routes/_respond-stream-helpers';
 import { insertTestChat, insertTestUser, type UserFixture } from '../../../support/factories';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const RESOLVED_MODEL = {
   modelId: 'skills-e2e-model',
@@ -209,8 +210,8 @@ afterEach(() => {
   if (previousProvider) registerProvider(previousProvider);
   previousProvider = null;
   captured = false;
-  rmSync(skillsDir, { recursive: true, force: true });
-  rmSync(agentsDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'skills-turn', path: skillsDir });
+  removeFixtureDirSync({ role: 'skills-turn', path: agentsDir });
   setThirdPartySkillDirsForTest(null);
   resetSkillsCache();
 });

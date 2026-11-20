@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -23,6 +23,7 @@ import {
 } from '../../../../src/services/realtime/realtime-bus';
 import { makeAgentProfile } from '../../../integration/routes/_respond-stream-helpers';
 import { insertTestChat, insertTestUser, type UserFixture } from '../../../support/factories';
+import { removeFixtureDir } from '../../../support/remove-fixture-dir';
 
 const RESOLVED_MODEL = {
   modelId: 'git-realtime-model',
@@ -110,7 +111,7 @@ afterEach(async () => {
   resetGitRealtimeInvalidationsForTests();
   setRealtimeBusForTests(undefined);
   registerProvider(previousProvider);
-  await rm(workdir, { recursive: true, force: true });
+  await removeFixtureDir({ role: 'git-realtime', path: workdir });
 });
 
 describe('Git realtime invalidation during generation', () => {

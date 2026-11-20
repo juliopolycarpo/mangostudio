@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -19,6 +19,7 @@ import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
 } from '../../support/harness/create-api-test-app';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 // The in-memory database is shared by every test in this process, so each
 // test gets a fresh user id to keep its server list and slug space isolated.
@@ -74,8 +75,8 @@ afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
   await closeAllMcpClients();
-  rmSync(secretDir, { recursive: true, force: true });
-  rmSync(sourceDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'mcp-import', path: secretDir });
+  removeFixtureDirSync({ role: 'mcp-import', path: sourceDir });
 });
 
 function authedApp() {

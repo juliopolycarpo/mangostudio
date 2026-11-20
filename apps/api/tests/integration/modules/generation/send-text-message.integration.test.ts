@@ -20,6 +20,7 @@ import {
   installRecordingRealtimeBus,
   restoreRealtimeBus,
 } from '../../../support/mocks/recording-realtime-bus';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const TEST_USER = {
   id: 'test-user-send-text-attachments',
@@ -62,7 +63,7 @@ beforeAll(async () => {
 
 afterAll(() => {
   getConfig().uploads.dir = originalUploadsDir;
-  rmSync(uploadsDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'send-text-message', path: uploadsDir });
 });
 
 afterEach(() => {

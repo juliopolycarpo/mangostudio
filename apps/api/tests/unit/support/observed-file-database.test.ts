@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ObservedFileDatabase } from '../../support/observed-file-database';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 let directory: string;
 
@@ -12,7 +13,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(directory, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'observed-file-database', path: directory });
 });
 
 describe('ObservedFileDatabase.destroy', () => {

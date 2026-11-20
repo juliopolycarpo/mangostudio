@@ -9,7 +9,7 @@
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, statSync } from 'node:fs';
 import { mkdir, open, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -31,6 +31,7 @@ import { snapshotCaptureParams } from '../../../../src/services/tools/file-mutat
 import type { ToolContext } from '../../../../src/services/tools/types';
 import { type ChatFixture, insertTestChat, type UserFixture } from '../../../support/factories';
 import { insertUserWithLocalRuntime } from '../../../support/fixtures/local-runtime-user';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const MIB = 1024 * 1024;
 
@@ -71,7 +72,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  rmSync(tempDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'message-checkpoint-budget', path: tempDir });
   await Promise.all(sparseBlobPaths.map((path) => rm(path, { force: true })));
 });
 

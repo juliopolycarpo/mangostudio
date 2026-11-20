@@ -4,7 +4,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,6 +14,7 @@ import {
   validateWorkdir,
   WorkdirValidationError,
 } from '../../../../src/modules/workspaces/application/workdir-validation';
+import { removeFixtureDir } from '../../../support/remove-fixture-dir';
 
 const tempDirs: string[] = [];
 
@@ -24,7 +25,9 @@ async function createTempDir(): Promise<string> {
 }
 
 afterEach(async () => {
-  await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    tempDirs.splice(0).map((path) => removeFixtureDir({ role: 'directory-browser', path: path }))
+  );
 });
 
 describe('workspace facades', () => {

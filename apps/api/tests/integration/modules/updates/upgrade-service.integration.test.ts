@@ -13,16 +13,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import {
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  readlink,
-  rm,
-  symlink,
-  writeFile,
-} from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, readlink, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -41,6 +32,7 @@ import {
 } from '../../../../src/modules/updates/domain/resolve-target';
 import { downloadVerified } from '../../../../src/modules/updates/infrastructure/release-download';
 import { runScript } from '../../../../src/modules/updates/infrastructure/run-script';
+import { removeFixtureDir } from '../../../support/remove-fixture-dir';
 import { FakeReleaseHost } from '../../../unit/modules/updates/support/fake-release-host';
 
 const hasPosixShell = process.platform !== 'win32';
@@ -49,7 +41,8 @@ const PLATFORM_ID = resolveBuildPlatformId();
 const cleanupPaths: string[] = [];
 
 afterEach(async () => {
-  for (const path of cleanupPaths.splice(0)) await rm(path, { recursive: true, force: true });
+  for (const path of cleanupPaths.splice(0))
+    await removeFixtureDir({ role: 'upgrade-service', path: path });
 });
 
 async function tempDir(prefix: string): Promise<string> {

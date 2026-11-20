@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, jest } from 'bun:test';
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,6 +7,7 @@ import {
   probeRuntimeBinary,
   type RuntimeVersionProcess,
 } from '../../../src/cli/runtime-binary-probe';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 let workdir = '';
 
@@ -15,7 +16,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (workdir) await rm(workdir, { force: true, recursive: true });
+  if (workdir) await removeFixtureDir({ role: 'runtime-binary-probe', path: workdir });
 });
 
 describe('probeRuntimeBinary', () => {

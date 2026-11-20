@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,6 +15,7 @@ import {
   runLibrary,
 } from '../../../src/cli/commands/library';
 import { CliError } from '../../../src/cli/errors';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const divergentResource: LibraryResource = {
   key: 'skill/demo',
@@ -72,7 +73,7 @@ describe('runLibrary', () => {
     } finally {
       if (previousClaudeHome === undefined) delete process.env.CLAUDE_CONFIG_DIR;
       else process.env.CLAUDE_CONFIG_DIR = previousClaudeHome;
-      rmSync(home, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'library', path: home });
     }
     const output = lines.join('\n');
     if (json) {

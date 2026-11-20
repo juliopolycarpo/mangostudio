@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -17,6 +17,7 @@ import { TODO_WRITE_TOOL_NAME } from '../../../../src/services/tools/builtin/tod
 import { buildToolExecutionTimeoutDescriptor } from '../../../../src/services/tools/execution-timeout';
 import { clearRegistry, getAllTools, registerTool } from '../../../../src/services/tools/registry';
 import type { RegisteredTool } from '../../../../src/services/tools/types';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 import { waitUntil } from '../../../support/wait-until';
 
 const hasBash = isShellAvailable('bash');
@@ -113,7 +114,7 @@ describe('executeStandardToolCallsWithProgress timeouts', () => {
 
   afterEach(() => {
     restoreRegistry(snapshot);
-    rmSync(tempDir, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'standard-tool-execution', path: tempDir });
   });
 
   it.skipIf(!hasBash)(

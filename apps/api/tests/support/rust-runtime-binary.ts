@@ -19,11 +19,12 @@
  */
 
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { newestRuntimeBuild, workspaceRuntimeBinaryCandidates } from '../../src/lib/runtime-paths';
+import { removeFixtureDir } from './remove-fixture-dir';
 
 /**
  * The workspace builds production would launch in a source checkout, so a
@@ -75,7 +76,7 @@ export async function scratchMangoHome(prefix: string): Promise<string> {
 }
 
 export async function cleanupMangoHome(path: string): Promise<void> {
-  await rm(path, { force: true, recursive: true });
+  await removeFixtureDir({ role: 'rust-runtime-binary', path: path });
 }
 
 /**

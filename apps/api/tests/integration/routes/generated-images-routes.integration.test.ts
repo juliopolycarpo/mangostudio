@@ -1,16 +1,17 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
   createGeneratedImageRoutes,
   resolveGeneratedImagePath,
 } from '../../../src/routes/generated-images';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const TMP_DIR = join('/tmp', `mango-generated-image-routes-${process.pid}`);
 
 afterEach(() => {
-  rmSync(TMP_DIR, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'generated-images-routes', path: TMP_DIR });
 });
 
 describe('generated image routes', () => {

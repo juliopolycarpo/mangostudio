@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -21,6 +21,7 @@ import {
   installRunner,
 } from '../../../src/modules/environments/infrastructure/install-runner';
 import { insertTestUser } from '../../support/factories';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 import { resolveRustRuntimeBinary, skipWithoutRustBinary } from '../../support/rust-runtime-binary';
 import { type RustStdioRuntime, spawnRustStdioRuntime } from '../../support/rust-stdio-runtime';
 
@@ -47,7 +48,11 @@ const tempDirs: string[] = [];
 const userIds: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    tempDirs
+      .splice(0)
+      .map((path) => removeFixtureDir({ role: 'environment-install-execution', path: path }))
+  );
   if (userIds.length > 0) {
     await getDb().deleteFrom('user').where('id', 'in', userIds.splice(0)).execute();
   }

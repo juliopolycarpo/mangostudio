@@ -8,7 +8,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
-import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
 import { ERROR_CODES } from '@mangostudio/shared/errors';
@@ -32,6 +32,7 @@ import { toolIdentityRoutes } from '../../../src/modules/tool-identity/http/tool
 import { getToolIdentityRow } from '../../../src/modules/tool-identity/infrastructure/tool-identity-repository';
 import { errorHandler } from '../../../src/plugins/error-handler';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 /** A real 1×1 PNG — `file-type` reads magic bytes, so the header must be true. */
 const PNG_BYTES = Uint8Array.from(
@@ -121,7 +122,10 @@ beforeEach(() => {
 afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
-  rmSync(join(getConfig().toolImages.dir, testUser.id), { recursive: true, force: true });
+  removeFixtureDirSync({
+    role: 'tool-identity-images',
+    path: join(getConfig().toolImages.dir, testUser.id),
+  });
 });
 
 describe('tool identity image upload', () => {

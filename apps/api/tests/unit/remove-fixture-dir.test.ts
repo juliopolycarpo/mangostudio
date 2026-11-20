@@ -4,7 +4,9 @@ import type { RemovalRetryDependencies } from '../support/github-fixture-cleanup
 import {
   type FixtureDirectory,
   removeFixtureDir,
+  removeFixtureDirSync,
   removeTrackedFixtureDirs,
+  type SyncRemovalDependencies,
 } from '../support/remove-fixture-dir';
 
 /** A file system that refuses removal with `code` for the first `refusals` attempts, per path. */
@@ -92,5 +94,54 @@ describe('removeTrackedFixtureDirs', () => {
       `expected only the stuck directory tracked | received: ${JSON.stringify(tracked)}`
     ).toEqual([stuck]);
     expect(fileSystem.attempts.get(fine.path)).toBe(1);
+  });
+});
+
+/** A synchronous file system that refuses removal with `code` for the first `refusals` attempts. */
+class RefusingSyncFixtureFileSystem implements SyncRemovalDependencies {
+  clock = 0;
+  attempts = 0;
+
+  constructor(
+    private readonly refusals: number,
+    private readonly code = 'EBUSY'
+  ) {}
+
+  remove = (path: string): void => {
+    this.attempts += 1;
+    if (this.attempts <= this.refusals) {
+      throw Object.assign(new Error(`${this.code}: resource busy or locked, rm '${path}'`), {
+        code: this.code,
+      });
+    }
+  };
+  sleep = (milliseconds: number): void => {
+    this.clock += milliseconds;
+  };
+  now = (): number => this.clock;
+}
+
+describe('removeFixtureDirSync', () => {
+  it('succeeds once EBUSY clears within the retry window', () => {
+    const fileSystem = new RefusingSyncFixtureFileSystem(3);
+
+    removeFixtureDirSync(WORK, fileSystem);
+
+    expect(fileSystem.attempts).toBe(4);
+  });
+
+  it('names the role, path and errno when removal never succeeds', () => {
+    const fileSystem = new RefusingSyncFixtureFileSystem(Infinity, 'EPERM');
+
+    expect(() => removeFixtureDirSync(WORK, fileSystem)).toThrow(
+      /fake-gh-build fixture "\/controlled\/work": expected removal \| received EPERM/
+    );
+  });
+
+  it('does not retry an error that is not a transient Windows refusal', () => {
+    const fileSystem = new RefusingSyncFixtureFileSystem(Infinity, 'EACCES');
+
+    expect(() => removeFixtureDirSync(WORK, fileSystem)).toThrow('EACCES');
+    expect(fileSystem.attempts).toBe(1);
   });
 });

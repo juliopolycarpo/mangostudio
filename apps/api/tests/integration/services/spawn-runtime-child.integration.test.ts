@@ -8,7 +8,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,6 +18,7 @@ import { rejectionOf } from '@mangostudio/protocol/testing';
 import { resolveRuntimeLaunchCommand } from '../../../src/lib/runtime-paths';
 import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';
 import { LEGACY_HELLO_1_0_1_NDJSON_LINE } from '../../fixtures/legacy-hello-1-0-1';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 import { resolveRustRuntimeBinary, rustRuntimeVersion } from '../../support/rust-runtime-binary';
 
 const binary = resolveRustRuntimeBinary();
@@ -52,7 +53,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (workdir) await rm(workdir, { force: true, recursive: true });
+  if (workdir) await removeFixtureDir({ role: 'spawn-runtime-child', path: workdir });
 });
 
 describe('spawnRuntimeChild', () => {

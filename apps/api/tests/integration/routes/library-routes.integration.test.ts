@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -27,6 +27,7 @@ import {
 } from '../../../src/modules/library/http/library-routes';
 import { LibraryCache } from '../../../src/modules/library/infrastructure/library-cache';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const TEST_USER = {
   id: 'library-routes-user',
@@ -616,7 +617,7 @@ describe('library routes over real command locations', () => {
   });
 
   afterEach(() => {
-    rmSync(home, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'library-routes', path: home });
     restoreAuth?.();
     restoreAuth = null;
   });

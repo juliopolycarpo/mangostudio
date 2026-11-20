@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { access, mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 import { startRustServe } from '../../support/rust-serve-runtime';
 
 class NativeServeStartupFixture {
@@ -57,7 +58,7 @@ class NativeServeStartupFixture {
 const native = new NativeServeStartupFixture();
 beforeAll(() => native.compile());
 afterAll(async () => {
-  await rm(native.directory, { recursive: true, force: true });
+  await removeFixtureDir({ role: 'rust-serve-runtime', path: native.directory });
 });
 
 describe('native serve readiness cleanup', () => {

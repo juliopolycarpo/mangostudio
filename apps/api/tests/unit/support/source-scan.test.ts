@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 import { scanSourcePaths, toPosixSourcePath } from '../../support/source-scan';
 
 describe('toPosixSourcePath', () => {
@@ -31,7 +32,7 @@ describe('scanSourcePaths', () => {
   });
 
   afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'source-scan', path: root });
   });
 
   test('lists nested files relative to the root with forward slashes', async () => {

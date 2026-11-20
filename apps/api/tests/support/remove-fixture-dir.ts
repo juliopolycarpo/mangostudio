@@ -1,3 +1,5 @@
+import { rmSync } from 'node:fs';
+
 import { type RemovalRetryDependencies, removeDirectoryWithRetry } from './github-fixture-cleanup';
 
 /** A temp directory a test owns, kept in a tracking list until its removal has succeeded. */
@@ -39,6 +41,58 @@ export async function removeFixtureDir(
       `${directory.role} fixture ${JSON.stringify(directory.path)}: expected removal | received ${errnoOf(cause)}: ${String(cause)}`,
       { cause }
     );
+  }
+}
+
+/** The effects {@link removeFixtureDirSync} owns, replaceable by a test. */
+export interface SyncRemovalDependencies {
+  readonly remove: (path: string) => void;
+  readonly sleep: (milliseconds: number) => void;
+  readonly now: () => number;
+}
+
+const SYNC_RETRY_DEADLINE_MS = 5_000;
+const SYNC_RETRY_FIRST_DELAY_MS = 50;
+const SYNC_RETRY_MAX_DELAY_MS = 500;
+const SYNC_TRANSIENT_CODES: ReadonlySet<string> = new Set(['EBUSY', 'EPERM', 'ENOTEMPTY']);
+
+const defaultSyncRemovalDependencies: SyncRemovalDependencies = {
+  remove: (path) => rmSync(path, { recursive: true, force: true }),
+  sleep: (milliseconds) => {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+  },
+  now: () => Date.now(),
+};
+
+/**
+ * The synchronous twin of {@link removeFixtureDir}, for `afterEach` hooks and `finally` blocks that
+ * are not async. Same transient codes, same bounded backoff, same error shape.
+ *
+ * @example
+ * removeFixtureDirSync({ role: 'toml-fixture', path: directory });
+ */
+export function removeFixtureDirSync(
+  directory: FixtureDirectory,
+  dependencies: SyncRemovalDependencies = defaultSyncRemovalDependencies
+): void {
+  const startedAt = dependencies.now();
+  let delay = SYNC_RETRY_FIRST_DELAY_MS;
+  for (;;) {
+    try {
+      dependencies.remove(directory.path);
+      return;
+    } catch (cause) {
+      const code = errnoOf(cause);
+      const elapsed = dependencies.now() - startedAt;
+      if (!SYNC_TRANSIENT_CODES.has(code) || elapsed >= SYNC_RETRY_DEADLINE_MS) {
+        throw new Error(
+          `${directory.role} fixture ${JSON.stringify(directory.path)}: expected removal | received ${code}: ${String(cause)}`,
+          { cause }
+        );
+      }
+      dependencies.sleep(Math.min(delay, SYNC_RETRY_DEADLINE_MS - elapsed));
+      delay = Math.min(delay * 2, SYNC_RETRY_MAX_DELAY_MS);
+    }
   }
 }
 

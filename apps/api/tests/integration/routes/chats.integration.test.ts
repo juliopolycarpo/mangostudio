@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -24,6 +24,7 @@ import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
 } from '../../support/harness/create-api-test-app';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 let TEST_USER!: UserFixture;
 
@@ -42,7 +43,9 @@ afterEach(async () => {
     registerProvider(previousOpenAICompatibleProvider);
   }
   previousOpenAICompatibleProvider = null;
-  await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    tempDirs.splice(0).map((path) => removeFixtureDir({ role: 'chats', path: path }))
+  );
 });
 
 async function createTempDir(): Promise<string> {

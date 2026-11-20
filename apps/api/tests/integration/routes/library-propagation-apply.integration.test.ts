@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -35,6 +35,7 @@ import {
   describeLocation,
 } from '../../../src/modules/library/infrastructure/location-probe';
 import { refuseLibraryApply } from '../../support/mocks/refusing-library-runtime';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const SKILL_LOCATIONS: readonly LibraryLocationId[] = [
   'mango-skills',
@@ -72,7 +73,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(home, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'library-propagation-apply', path: home });
 });
 
 const userId = () => `library-apply-user-${userSeq}`;
@@ -424,7 +425,7 @@ describe('propagation apply — request validation', () => {
     };
     const taken = await preview(request);
     const entry = onlyEntry(taken);
-    rmSync(skillPath('mango-skills'), { recursive: true });
+    removeFixtureDirSync({ role: 'library-propagation-apply', path: skillPath('mango-skills') });
 
     await expect(
       applyLibraryPropagation(

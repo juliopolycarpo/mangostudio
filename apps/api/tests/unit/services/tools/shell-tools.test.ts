@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 
@@ -26,6 +26,7 @@ import {
 } from '../../../../src/services/tools/registry';
 import { mergeToolSettings } from '../../../../src/services/tools/settings-policy';
 import type { RegisteredTool, ToolContext } from '../../../../src/services/tools/types';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 import { waitUntil } from '../../../support/wait-until';
 
 const hasBash = isShellAvailable('bash');
@@ -225,7 +226,7 @@ describe('shell tool registration and execution', () => {
         );
       } finally {
         await environmentToolchainRepository.remove(context.userId, LOCAL_ENVIRONMENT_ID);
-        rmSync(toolchainDir, { recursive: true, force: true });
+        removeFixtureDirSync({ role: 'shell-tools', path: toolchainDir });
       }
     }
   );
@@ -276,7 +277,7 @@ describe('shell tool registration and execution', () => {
 
       expect(result.stdout.trim()).toBe(realpathSync(join(workdir, 'nested')));
     } finally {
-      rmSync(workdir, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'shell-tools', path: workdir });
     }
   });
 
@@ -315,7 +316,7 @@ describe('shell tool registration and execution', () => {
       }
       expect(threw).toBe(true);
     } finally {
-      rmSync(workdir, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'shell-tools', path: workdir });
     }
   });
 
@@ -394,7 +395,7 @@ describe('shell tool registration and execution', () => {
       } finally {
         controller.abort();
         await run;
-        rmSync(workdir, { recursive: true, force: true });
+        removeFixtureDirSync({ role: 'shell-tools', path: workdir });
       }
     },
     15_000

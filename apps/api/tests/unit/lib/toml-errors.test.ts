@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -13,6 +13,7 @@ import {
 import { createSubagentAdapter } from '../../../src/modules/library/application/adapters/subagent-frontmatter';
 import { createGeminiSecretService } from '../../../src/services/providers/gemini/secret';
 import { InMemorySecretStore } from '../../support/mocks/mock-secret-store';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const SECRET = 'sk-private-fixture-SECRET';
 const INVALID_DOCUMENT = `secret = ${SECRET}`;
@@ -88,7 +89,7 @@ beforeEach(() => {
 afterEach(() => {
   warnSpy.mockRestore();
   resetConfig();
-  rmSync(directory, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'toml-errors', path: directory });
 });
 
 describe('TOML parser errors', () => {

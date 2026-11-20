@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +7,7 @@ import { getDb } from '../../src/db/database';
 import { loadConfigForTest } from '../../src/lib/config';
 import { insertCheckpointDelta } from '../../src/modules/messages/infrastructure/message-checkpoint-deltas';
 import { saveGeneratedImage } from '../../src/services/generated-images/generated-image-storage';
+import { removeFixtureDirSync } from './remove-fixture-dir';
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
 
@@ -40,7 +41,7 @@ export function useGeneratedImageDirectory(): GeneratedImageDirectory {
       await utimes(fileOf(imageUrl), then, then);
     },
     exists: (imageUrl) => existsSync(fileOf(imageUrl)),
-    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+    cleanup: () => removeFixtureDirSync({ role: 'generated-image-fixtures', path: dir }),
   };
 }
 

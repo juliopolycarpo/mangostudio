@@ -7,7 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -37,6 +37,7 @@ import {
   type McpStdioLaunch,
   startMcpRelayHost,
 } from '../../../support/fixtures/mcp/mcp-relay-host';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 let user: UserFixture;
 let uploadsDir: string;
@@ -84,7 +85,7 @@ afterEach(async () => {
   await closeAllMcpClients();
   await relay.close();
   relay.assertNoOpenServers();
-  rmSync(uploadsDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'resource-prompt', path: uploadsDir });
 });
 
 describe('capability gating', () => {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { existsSync, lstatSync, readdirSync } from 'node:fs';
-import { mkdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, rename, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 
@@ -10,6 +10,7 @@ import {
   type ManagedProcessFixture,
 } from '../../support/fixtures/managed-process';
 import { createReleaseDiagnostics } from '../../support/fixtures/managed-process-diagnostics';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 const fixtures: ManagedProcessFixture[] = [];
 const extraDirectories: string[] = [];
@@ -32,11 +33,11 @@ afterEach(async () => {
     }
     // Some cases deliberately retain a failed cleanup promise/root. The test
     // owns their final disposal independently of the code under test.
-    await rm(fixture.tempDir, { force: true, recursive: true });
+    await removeFixtureDir({ role: 'managed-process', path: fixture.tempDir });
     await fixture.assertReleased();
   }
   for (const directory of extraDirectories.splice(0)) {
-    await rm(directory, { force: true, recursive: true });
+    await removeFixtureDir({ role: 'managed-process', path: directory });
   }
 });
 
@@ -51,7 +52,7 @@ describe('createManagedProcessFixture', () => {
 
   it('accepts storage already removed before cleanup starts', async () => {
     const fixture = await createFixture();
-    await rm(fixture.tempDir, { recursive: true });
+    await removeFixtureDir({ role: 'managed-process', path: fixture.tempDir });
     await fixture.cleanup();
     await fixture.assertReleased();
   });
@@ -197,7 +198,7 @@ describe('createManagedProcessFixture', () => {
       removeTempDir: async (path) => {
         removing.resolve();
         await release.promise;
-        await rm(path, { force: true, recursive: true });
+        await removeFixtureDir({ role: 'managed-process', path: path });
       },
     });
 

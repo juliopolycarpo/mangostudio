@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,6 +12,7 @@ import {
 import { resetSkillsCache } from '../../../../src/modules/skills/application/skill-discovery';
 import { SkillError } from '../../../../src/modules/skills/domain/skill';
 import { upsertSkillSettings } from '../../../../src/modules/skills/infrastructure/skill-settings-repository';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 const USER_ID = 'user-skill-content-test';
 const DISABLED_USER_ID = 'user-skill-content-disabled-test';
@@ -38,8 +39,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(skillsDir, { recursive: true, force: true });
-  rmSync(outsideDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'skill-content', path: skillsDir });
+  removeFixtureDirSync({ role: 'skill-content', path: outsideDir });
   resetSkillsCache();
 });
 

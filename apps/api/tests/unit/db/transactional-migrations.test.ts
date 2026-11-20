@@ -1,6 +1,6 @@
 import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -11,6 +11,7 @@ import { createBunSqliteDialect } from '../../../src/db/bun-sqlite-dialect';
 import { applyConnectionPragmas } from '../../../src/db/database';
 import { allMigrations } from '../../../src/db/migrations';
 import type { Database } from '../../../src/db/types';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 const INJECTED_FAILURE = 'injected failure: fake migration 003 refuses to run';
 
@@ -248,7 +249,7 @@ describe('upgrading an older file database in one transaction', () => {
   });
 
   afterEach(async () => {
-    await rm(directory, { recursive: true, force: true });
+    await removeFixtureDir({ role: 'transactional-migrations', path: directory });
   });
 
   /** Opens the file the way the hub does: WAL, `synchronous = FULL`, foreign keys on. */

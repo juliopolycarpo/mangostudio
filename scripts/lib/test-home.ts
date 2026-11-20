@@ -21,7 +21,7 @@
  * a process killed before it could clean up still leaves nothing behind.
  */
 
-import { readdirSync } from 'node:fs';
+import { readdirSync, writeFileSync } from 'node:fs';
 import { constants } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -241,6 +241,22 @@ function createTestHome(host: TemporaryHomeHost = launcherHost()): string {
   return createTemporaryHome(TEST_HOME_KIND, host);
 }
 
+/**
+ * What the lane's global Git config says. Nothing of the developer's, and nothing that lets Git
+ * leave a process behind: `gc --auto` and `maintenance` detach from the command that started them,
+ * and a filesystem monitor daemon outlives it. Either keeps a handle on the fixture repository after
+ * the request that ran Git has answered, which Windows reports as EBUSY when the test removes it.
+ * Repository fixtures forward `GIT_CONFIG_GLOBAL` and the runtime's Git keeps it, so one file
+ * covers both.
+ */
+export const TEST_GIT_CONFIG =
+  '[gc]\n\tauto = 0\n[maintenance]\n\tauto = false\n[core]\n\tfsmonitor = false\n';
+
+/** Writes {@link TEST_GIT_CONFIG} to the file `GIT_CONFIG_GLOBAL` names inside `root`. */
+function writeTestGitConfig(root: string): void {
+  writeFileSync(join(root, '.gitconfig'), TEST_GIT_CONFIG);
+}
+
 /** Removes a test home, after proving it is one. */
 function removeTestHome(root: string, host: TemporaryHomeHost = launcherHost()): void {
   removeTemporaryHome(root, TEST_HOME_KIND, host);
@@ -321,6 +337,7 @@ export async function runWithTestHome(
   const forwarders: (() => void)[] = [];
   try {
     root = createTestHome(tempHost);
+    writeTestGitConfig(root);
     const child = dependencies.spawn(
       // The same Bun that runs the launcher, not whatever PATH says next.
       [program === 'bun' ? process.execPath : program, ...args],

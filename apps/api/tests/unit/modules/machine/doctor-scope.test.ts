@@ -14,7 +14,7 @@
 
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -22,6 +22,7 @@ import type { McpServerSelect } from '../../../../src/db/types';
 import type { MangoConfig } from '../../../../src/lib/config';
 import { collectDoctorChecks } from '../../../../src/modules/machine/application/doctor-service';
 import { FakeProcessController } from '../../../support/mocks/fake-process-controller';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 let dir: string;
 let dbPath: string;
@@ -145,7 +146,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'doctor-scope', path: dir });
 });
 
 describe('collectDoctorChecks scoping', () => {

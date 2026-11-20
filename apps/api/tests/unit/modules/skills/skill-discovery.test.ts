@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -21,6 +21,7 @@ import {
   setThirdPartySkillDirsForTest,
 } from '../../../../src/modules/skills/application/skill-discovery';
 import { upsertSkillSettings } from '../../../../src/modules/skills/infrastructure/skill-settings-repository';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 let skillsDir: string;
 let agentsDir: string;
@@ -72,9 +73,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(skillsDir, { recursive: true, force: true });
-  rmSync(agentsDir, { recursive: true, force: true });
-  rmSync(claudeDir, { recursive: true, force: true });
+  removeFixtureDirSync({ role: 'skill-discovery', path: skillsDir });
+  removeFixtureDirSync({ role: 'skill-discovery', path: agentsDir });
+  removeFixtureDirSync({ role: 'skill-discovery', path: claudeDir });
   setThirdPartySkillDirsForTest(null);
   resetSkillsCache();
 });
@@ -206,7 +207,7 @@ describe('skill discovery', () => {
       loadConfigForTest({ skills: { dir: otherDir } });
       expect(await listSkills(getDb(), userId)).toEqual([]);
     } finally {
-      rmSync(otherDir, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'skill-discovery', path: otherDir });
     }
   });
 });
@@ -241,7 +242,7 @@ describe('skill discovery third-party sources', () => {
   });
 
   it('keeps a usable fallback when a higher-precedence path is a file', async () => {
-    rmSync(agentsDir, { recursive: true });
+    removeFixtureDirSync({ role: 'skill-discovery', path: agentsDir });
     writeFileSync(agentsDir, 'not a directory');
     writeSkillIn(claudeDir, 'fallback', 'name: fallback\ndescription: Readable copy');
     const userId = nextUserId();
@@ -259,7 +260,7 @@ describe('skill discovery third-party sources', () => {
   it.skipIf(process.platform === 'win32')(
     'withholds the fallback when a failed scan could hide a preferred copy',
     async () => {
-      rmSync(agentsDir, { recursive: true });
+      removeFixtureDirSync({ role: 'skill-discovery', path: agentsDir });
       symlinkSync(join(skillsDir, 'missing-directory'), agentsDir, 'dir');
       writeSkillIn(claudeDir, 'fallback', 'name: fallback\ndescription: Readable copy');
       writeSkill('preferred', 'name: preferred\ndescription: Higher-priority copy');
@@ -289,7 +290,7 @@ describe('skill discovery third-party sources', () => {
   it.skipIf(process.platform === 'win32')(
     'reports unverified precedence when the observed fallback is invalid',
     async () => {
-      rmSync(agentsDir, { recursive: true });
+      removeFixtureDirSync({ role: 'skill-discovery', path: agentsDir });
       symlinkSync(join(skillsDir, 'missing-directory'), agentsDir, 'dir');
       writeSkillIn(claudeDir, 'fallback', 'name: wrong-name\ndescription: Invalid copy');
       const userId = nextUserId();
@@ -308,7 +309,7 @@ describe('skill discovery third-party sources', () => {
   it.skipIf(process.platform === 'win32')(
     'reports incomplete discovery when no observed skill matches the requested name',
     async () => {
-      rmSync(agentsDir, { recursive: true });
+      removeFixtureDirSync({ role: 'skill-discovery', path: agentsDir });
       symlinkSync(join(skillsDir, 'missing-directory'), agentsDir, 'dir');
       const userId = nextUserId();
       await enableSources(userId, { agents: true });
@@ -331,7 +332,7 @@ describe('skill discovery third-party sources', () => {
       writeFileSync(join(skillsDir, 'blocked'), 'not a skill directory');
       writeFileSync(join(skillsDir, 'file-only'), 'not a skill directory');
       writeSkillIn(agentsDir, 'blocked', 'name: blocked\ndescription: Shadowed copy');
-      rmSync(claudeDir, { recursive: true });
+      removeFixtureDirSync({ role: 'skill-discovery', path: claudeDir });
       symlinkSync(join(skillsDir, 'missing-directory'), claudeDir, 'dir');
       const userId = nextUserId();
       await enableSources(userId, { agents: true, claude: true });

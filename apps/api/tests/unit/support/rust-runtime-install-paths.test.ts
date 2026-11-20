@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { type WindowsInterpreter, writeFakeInstaller } from '../../support/controlled-installer';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 const scratch: string[] = [];
 const children: Bun.Subprocess<'ignore', 'pipe', 'pipe'>[] = [];
@@ -13,7 +14,11 @@ afterEach(async () => {
     if (child.exitCode === null) child.kill('SIGKILL');
     await child.exited;
   }
-  await Promise.all(scratch.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    scratch
+      .splice(0)
+      .map((path) => removeFixtureDir({ role: 'rust-runtime-install-paths', path: path }))
+  );
 });
 
 /** Allocate a real host path that exercises both quoting and script-file decoding. */

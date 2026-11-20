@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -23,6 +23,7 @@ import { insertTestChat, insertTestUser } from '../../support/factories';
 import { gitFixtureEnv } from '../../support/git-fixture-env';
 import { asGitPath } from '../../support/git-path';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 const hasGit = Bun.which('git') !== null;
 // This suite runs real `git` against the actual filesystem rather than a
@@ -47,7 +48,7 @@ async function detectCaseInsensitiveTmpdir(): Promise<boolean> {
       () => false
     );
   } finally {
-    await rm(probe, { recursive: true, force: true });
+    await removeFixtureDir({ role: 'git-worktrees', path: probe });
   }
 }
 
@@ -126,7 +127,9 @@ afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
   setRealtimeBusForTests(undefined);
-  await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    tempDirs.splice(0).map((path) => removeFixtureDir({ role: 'git-worktrees', path: path }))
+  );
 });
 
 describe('Git worktree routes', () => {

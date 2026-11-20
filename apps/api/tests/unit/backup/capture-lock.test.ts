@@ -1,17 +1,18 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { chmod, link, mkdir, mkdtemp, rm, stat, symlink } from 'node:fs/promises';
+import { chmod, link, mkdir, mkdtemp, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { acquireCaptureLock } from '../../../src/backup/capture-lock';
+import { removeFixtureDir } from '../../support/remove-fixture-dir';
 
 let directory = '';
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'mango-lock-'));
 });
 afterEach(async () => {
-  await rm(directory, { recursive: true, force: true });
+  await removeFixtureDir({ role: 'capture-lock', path: directory });
 });
 
 function createDatabase(path: string): void {

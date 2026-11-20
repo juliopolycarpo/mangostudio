@@ -1492,10 +1492,16 @@ What the launcher sets, besides the home:
   values (an exported one wins), so a moved home does not hide the toolchain or make Bun
   re-download its cache. `MANGOSTUDIO_RUNTIME_BINARY` and other inherited variables outside the standard
   home/storage roots pass through untouched.
-- `GIT_CONFIG_GLOBAL` names a global Git config that does not exist, so the developer's
+- `GIT_CONFIG_GLOBAL` names a global Git config the launcher writes inside the home. It carries
+  only `gc.auto=0`, `maintenance.auto=false` and `core.fsmonitor=false`, so Git never leaves a
+  detached process holding a fixture repository after a request, and the developer's
   signing policy, identity and `core.hooksPath` never reach the fixture repositories the tests
   build. A fixture that builds its own `env` for `git` must forward it
   (`tests/support/git-fixture-env.ts`), or Git falls back to the real `~/.gitconfig`.
+- API tests remove recursive temp directories with `removeFixtureDir` / `removeFixtureDirSync`
+  (`tests/support/remove-fixture-dir.ts`), which retry Windows `EBUSY`/`EPERM`/`ENOTEMPTY` with a
+  bound and name the role, path and errno. `fixture-teardown-policy.test.ts` fails on any other
+  recursive `rm`/`rmSync` in `apps/api/tests`.
 - `MANGOSTUDIO_REAL_HOME` carries the launcher's original home. The API preload aborts the lane
   with the received and expected values when `homedir()` still equals it, which is how a
   launcher whose `HOME` did not take effect is caught before the first test. A run without the

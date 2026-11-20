@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -13,6 +13,7 @@ import {
 } from '../../../../src/services/providers/core/secret-service';
 import type { SecretMetadataInput } from '../../../../src/services/secret-store/metadata';
 import { InMemorySecretStore } from '../../../support/mocks/mock-secret-store';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 function createMetadataHarness(initial: SecretMetadataRow[] = []) {
   let rows: SecretMetadataRow[] = [...initial];
@@ -83,7 +84,7 @@ function writeTempToml(contents: string): string {
 afterEach(() => {
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
-    if (dir) rmSync(dir, { recursive: true, force: true });
+    if (dir) removeFixtureDirSync({ role: 'secret-service', path: dir });
   }
 });
 

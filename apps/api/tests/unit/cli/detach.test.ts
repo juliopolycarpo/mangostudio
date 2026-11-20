@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,6 +18,7 @@ import {
 import type { ServerState } from '../../../src/lib/server-state';
 import { installerArgv } from '../../../src/modules/updates/infrastructure/installer-invocation';
 import { FakeProcessController } from '../../support/mocks/fake-process-controller';
+import { removeFixtureDirSync } from '../../support/remove-fixture-dir';
 
 const CHILD_PID = 100;
 
@@ -409,7 +410,7 @@ describe('ensureLogDir', () => {
       ensureLogDir(logFile);
       expect(existsSync(nested)).toBe(true);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'detach', path: root });
     }
   });
 
@@ -418,7 +419,7 @@ describe('ensureLogDir', () => {
     try {
       expect(() => ensureLogDir(join(root, 'upgrade-1.log'))).not.toThrow();
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDirSync({ role: 'detach', path: root });
     }
   });
 });

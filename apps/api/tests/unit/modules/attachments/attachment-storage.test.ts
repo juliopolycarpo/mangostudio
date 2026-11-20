@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -9,6 +9,7 @@ import {
   removeAttachmentFile,
   sanitizePathSegment,
 } from '../../../../src/modules/attachments/application/attachment-storage';
+import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 
 describe('attachment storage paths', () => {
   it('sanitizes unsafe path segments for upload paths', () => {
@@ -44,7 +45,7 @@ describe('removeAttachmentFile', () => {
   });
 
   afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'attachment-storage', path: root });
   });
 
   it('removes an existing file', async () => {

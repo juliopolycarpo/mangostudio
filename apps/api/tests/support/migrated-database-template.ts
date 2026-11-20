@@ -1,9 +1,10 @@
-import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { runMigrations } from '../../src/server/migrations';
 import { DATABASE_FILE_NAME, ObservedFileDatabase } from './observed-file-database';
+import { removeFixtureDirSync } from './remove-fixture-dir';
 
 /**
  * A fully migrated database file, built once, that tests copy instead of migrating a
@@ -44,7 +45,7 @@ export class MigratedDatabaseTemplate {
   }
 
   dispose(): void {
-    rmSync(this.directory, { recursive: true, force: true });
+    removeFixtureDirSync({ role: 'migrated-database-template', path: this.directory });
   }
 
   private get databasePath(): string {
