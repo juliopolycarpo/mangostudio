@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -242,7 +242,7 @@ describe('skill discovery third-party sources', () => {
   });
 
   it('keeps a usable fallback when a higher-precedence path is a file', async () => {
-    removeFixtureDirSync({ role: 'skill-discovery', path: agentsDir });
+    rmSync(agentsDir, { recursive: true });
     writeFileSync(agentsDir, 'not a directory');
     writeSkillIn(claudeDir, 'fallback', 'name: fallback\ndescription: Readable copy');
     const userId = nextUserId();
@@ -260,7 +260,7 @@ describe('skill discovery third-party sources', () => {
   it.skipIf(process.platform === 'win32')(
     'withholds the fallback when a failed scan could hide a preferred copy',
     async () => {
-      removeFixtureDirSync({ role: 'skill-discovery', path: agentsDir });
+      rmSync(agentsDir, { recursive: true });
       symlinkSync(join(skillsDir, 'missing-directory'), agentsDir, 'dir');
       writeSkillIn(claudeDir, 'fallback', 'name: fallback\ndescription: Readable copy');
       writeSkill('preferred', 'name: preferred\ndescription: Higher-priority copy');
@@ -290,7 +290,7 @@ describe('skill discovery third-party sources', () => {
   it.skipIf(process.platform === 'win32')(
     'reports unverified precedence when the observed fallback is invalid',
     async () => {
-      removeFixtureDirSync({ role: 'skill-discovery', path: agentsDir });
+      rmSync(agentsDir, { recursive: true });
       symlinkSync(join(skillsDir, 'missing-directory'), agentsDir, 'dir');
       writeSkillIn(claudeDir, 'fallback', 'name: wrong-name\ndescription: Invalid copy');
       const userId = nextUserId();
@@ -309,7 +309,7 @@ describe('skill discovery third-party sources', () => {
   it.skipIf(process.platform === 'win32')(
     'reports incomplete discovery when no observed skill matches the requested name',
     async () => {
-      removeFixtureDirSync({ role: 'skill-discovery', path: agentsDir });
+      rmSync(agentsDir, { recursive: true });
       symlinkSync(join(skillsDir, 'missing-directory'), agentsDir, 'dir');
       const userId = nextUserId();
       await enableSources(userId, { agents: true });
@@ -332,7 +332,7 @@ describe('skill discovery third-party sources', () => {
       writeFileSync(join(skillsDir, 'blocked'), 'not a skill directory');
       writeFileSync(join(skillsDir, 'file-only'), 'not a skill directory');
       writeSkillIn(agentsDir, 'blocked', 'name: blocked\ndescription: Shadowed copy');
-      removeFixtureDirSync({ role: 'skill-discovery', path: claudeDir });
+      rmSync(claudeDir, { recursive: true });
       symlinkSync(join(skillsDir, 'missing-directory'), claudeDir, 'dir');
       const userId = nextUserId();
       await enableSources(userId, { agents: true, claude: true });

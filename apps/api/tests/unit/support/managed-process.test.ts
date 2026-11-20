@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { existsSync, lstatSync, readdirSync } from 'node:fs';
-import { mkdir, rename, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 
@@ -52,7 +52,8 @@ describe('createManagedProcessFixture', () => {
 
   it('accepts storage already removed before cleanup starts', async () => {
     const fixture = await createFixture();
-    await removeFixtureDir({ role: 'managed-process', path: fixture.tempDir });
+    // An external deletion, not teardown: it must fail loudly if the storage is already gone.
+    await rm(fixture.tempDir, { recursive: true });
     await fixture.cleanup();
     await fixture.assertReleased();
   });

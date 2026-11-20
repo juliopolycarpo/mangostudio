@@ -569,7 +569,7 @@ describe('distIsCurrent', () => {
       rmSync(join(parent, '.ignore'));
       writeBuildState(root, effectiveApiUrl());
       expect(distIsCurrent(root, shared, repository)).toBe(true);
-      removeFixtureDirSync({ role: 'dev-frontend', path: join(root, '.git') });
+      rmSync(join(root, '.git'), { recursive: true });
       writeFileSync(join(root, '.git'), 'gitdir: elsewhere');
       writeBuildState(root, effectiveApiUrl());
       expect(distIsCurrent(root, shared, repository)).toBe(false);

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -157,7 +157,7 @@ describe('skills routes', () => {
   it.skipIf(process.platform === 'win32')(
     'reports an observed fallback without claiming it is shadowed',
     async () => {
-      removeFixtureDirSync({ role: 'skills', path: skillsDir });
+      rmSync(skillsDir, { recursive: true });
       symlinkSync(join(agentsDir, 'missing'), skillsDir, 'dir');
       const fallback = join(agentsDir, 'fallback');
       mkdirSync(fallback);

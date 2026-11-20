@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -418,7 +418,7 @@ describe('library divergence acknowledgements', () => {
     );
 
     const blockedDirectory = join(home, '.claude', 'skills');
-    removeFixtureDirSync({ role: 'library-propagation', path: blockedDirectory });
+    rmSync(blockedDirectory, { recursive: true });
     writeFileSync(blockedDirectory, 'not a directory');
     const partial = entry.sourceGroups
       .filter(({ locationIds }) => !locationIds.includes('claude-skills'))

@@ -9,7 +9,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -505,7 +505,7 @@ describe('inspectChatCapabilities', () => {
   it.skipIf(process.platform === 'win32')(
     'distinguishes an unverified skill from a known shadowed copy',
     async () => {
-      removeFixtureDirSync({ role: 'capability-inspector', path: skillsDir });
+      rmSync(skillsDir, { recursive: true });
       symlinkSync(join(agentsDir, 'missing'), skillsDir, 'dir');
       writeSkill(agentsDir, 'fallback');
       const invalid = join(agentsDir, 'invalid-copy');

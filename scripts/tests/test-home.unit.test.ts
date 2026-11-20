@@ -146,6 +146,12 @@ describe('testHomeEnv', () => {
     expect(testHomeEnv(root, {}, host).GIT_CONFIG_GLOBAL).toBe(join(root, '.gitconfig'));
   });
 
+  test('skips the system git config so an image cannot turn the global settings back on', () => {
+    const received = testHomeEnv(root, {}, host).GIT_CONFIG_NOSYSTEM;
+
+    expect(received, `expected GIT_CONFIG_NOSYSTEM: 1 | received: ${received}`).toBe('1');
+  });
+
   test('pins the toolchain homes to the real ones', () => {
     const env = testHomeEnv(root, {}, host);
 

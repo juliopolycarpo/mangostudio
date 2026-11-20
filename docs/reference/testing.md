@@ -1496,7 +1496,8 @@ What the launcher sets, besides the home:
   only `gc.auto=0`, `maintenance.auto=false` and `core.fsmonitor=false`, so Git never leaves a
   detached process holding a fixture repository after a request, and the developer's
   signing policy, identity and `core.hooksPath` never reach the fixture repositories the tests
-  build. A fixture that builds its own `env` for `git` must forward it
+  build. `GIT_CONFIG_NOSYSTEM=1` keeps a CI image's system config from undoing them; the
+  runtime's Git allowlist forwards it. A fixture that builds its own `env` for `git` must forward it
   (`tests/support/git-fixture-env.ts`), or Git falls back to the real `~/.gitconfig`.
 - API tests remove recursive temp directories with `removeFixtureDir` / `removeFixtureDirSync`
   (`tests/support/remove-fixture-dir.ts`), which retry Windows `EBUSY`/`EPERM`/`ENOTEMPTY` with a

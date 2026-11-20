@@ -93,6 +93,9 @@ export function testHomeEnv(
     // signing stands down for a harness that discards the user configuration
     // this way, which is what a CI runner looks like to it.
     GIT_CONFIG_GLOBAL: join(root, '.gitconfig'),
+    // The system config of a CI image (Git for Windows ships one) can set what the global file
+    // turns off, such as `core.fsmonitor`. Skip it, as the global one is skipped for the developer's.
+    GIT_CONFIG_NOSYSTEM: '1',
     [REAL_HOME_ENV]: host.realHome,
     ...toolchainEnv(ambient, host),
     BUN_INSTALL: bunInstall,
