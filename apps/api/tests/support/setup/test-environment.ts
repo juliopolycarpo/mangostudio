@@ -42,6 +42,7 @@ import {
 } from '../../../src/lib/config';
 import { setLibraryLocationDefaultsForTest } from '../../../src/modules/app-settings/application/app-settings-service';
 import { setChatGptLoopbackPortForTest } from '../../../src/modules/connectors/infrastructure/chatgpt/loopback-server';
+import { resetGitRealtimeInvalidationsForTests } from '../../../src/modules/git/application/git-realtime-service';
 import { setProviderSecretSyncTtlForTest } from '../../../src/services/providers/core/secret-service';
 import { registerApplicationServices } from '../../../src/services/register-application-services';
 import { restoreMockedModules } from '../mocks/module-mocks';
@@ -179,6 +180,10 @@ export function setupTestEnvironment(): Promise<void> {
     // A suite that clears or swaps tools without restoring them would hide
     // `generate_image` (and the rest) from every later file in this process.
     restoreToolRegistryBaseline(toolRegistryBaseline);
+    // A file mutation arms a 500 ms git refresh. Left pending, it fired in the
+    // next file and resolved its repository through Local as the old file's
+    // user, which withdrew the new file's attestation mid-test (#2662).
+    resetGitRealtimeInvalidationsForTests();
     // Per test rather than `afterAll`: a preload-registered `afterAll` fires once per
     // process in the unisolated lane, not once per file, so it would not stop a fake
     // leaking into the next file. A no-op unless a test faked a module.
