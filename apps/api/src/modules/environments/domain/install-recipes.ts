@@ -3,6 +3,7 @@ import type {
   InstallPlatform,
   InstallProbeEvent,
   InstallRecipeId,
+  InstallUninstallTarget,
   InstallUnrunnableReason,
   RecipeInput,
   RuntimeId,
@@ -127,6 +128,13 @@ export interface InstallRecipe {
    */
   readonly argv?: (input: RecipeInput, context: InstallRecipeBuildContext) => readonly string[];
   readonly copyCommand: (input: RecipeInput, platform: InstallPlatform) => string;
+  /**
+   * What an uninstall deletes on this machine, when that depends on the
+   * detected installation. The preview carries it to the confirmation dialog,
+   * and the argv builder reads the same resolution, so the dialog never names
+   * a path the run will not touch.
+   */
+  readonly uninstallTarget?: (context: InstallRecipeBuildContext) => InstallUninstallTarget;
   readonly unrunnableReason?: InstallUnrunnableReason;
 }
 
@@ -475,6 +483,13 @@ export function bunRootOf(binaryPath: string): string | null {
   return root && /(?:^|[\\/])\.bun$/.test(root) ? root : null;
 }
 
+/** The Bun root the uninstall removes for a detected binary, and whether it will. */
+export function bunUninstallTarget(context: InstallRecipeBuildContext): InstallUninstallTarget {
+  const detectedPath = context.binaryPaths.bun ?? '';
+  const root = bunRootOf(detectedPath);
+  return { detectedPath, root, removable: root !== null };
+}
+
 /** A PowerShell single-quoted literal: nothing inside is expanded. */
 function powershellQuote(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
@@ -489,8 +504,7 @@ function powershellQuote(value: string): string {
 const BUN_UNINSTALL_ARGV = platformArgv(
   (input, context) => {
     assertRecipeInput(input, 'none');
-    const detected = context.binaryPaths.bun ?? '';
-    const root = bunRootOf(detected);
+    const { detectedPath: detected, root } = bunUninstallTarget(context);
     if (root === null) {
       return [
         'bash',
@@ -510,8 +524,7 @@ const BUN_UNINSTALL_ARGV = platformArgv(
   },
   (input, context) => {
     assertRecipeInput(input, 'none');
-    const detected = context.binaryPaths.bun ?? '';
-    const root = bunRootOf(detected);
+    const { detectedPath: detected, root } = bunUninstallTarget(context);
     if (root === null) {
       return [
         ...POWERSHELL_ARGV_PREFIX,
@@ -591,6 +604,7 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
     probe: [{ kind: 'runtime', runtimeId: 'bun' }],
     argv: BUN_UNINSTALL_ARGV,
+    uninstallTarget: bunUninstallTarget,
     // What a user types for the default root; the run itself removes the root
     // of the detected installation, which a copy has no machine to resolve.
     copyCommand: (_input, platform) =>

@@ -25,6 +25,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { cn } from '@/lib/utils';
 
+import { environmentsMessages } from '../../environments-i18n';
 import { machineGuardReasonLabel, upgradeRefusalReasonLabel } from '../format';
 import { useUpgradeStream, type UseUpgradeStreamResult } from '../hooks/use-upgrade-stream';
 import { invalidateMachineUpdate } from '../queries';
@@ -97,7 +98,7 @@ function UpgradeProgress({
   readonly isTerminal: boolean;
   readonly onClose: () => void;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const m = t.environments.machine.update;
   const isRunning = stream.phase === 'connecting' || stream.phase === 'streaming';
   const currentStage = stream.stages.at(-1);
@@ -156,7 +157,7 @@ function UpgradeProgress({
 }
 
 function UpgradeOutcome({ stream }: { readonly stream: UseUpgradeStreamResult }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const m = t.environments.machine.update;
 
   if (stream.phase === 'refused' && stream.refusal) {

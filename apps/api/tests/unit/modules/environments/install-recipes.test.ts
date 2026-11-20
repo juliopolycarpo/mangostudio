@@ -5,6 +5,7 @@ import { AGENT_CLI_DEFINITIONS } from '@mangostudio/shared/environments/detectio
 
 import {
   bunRootOf,
+  bunUninstallTarget,
   getInstallRecipe,
   hasInstallRecipeForRuntime,
   INSTALL_RECIPES,
@@ -356,6 +357,22 @@ describe('install recipes', () => {
     expect(bunRootOf('C:\\Users\\me\\.bun\\bin\\bun.exe')).toBe('C:\\Users\\me\\.bun');
     expect(bunRootOf('/home/me/.bun/bin/node')).toBeNull();
     expect(bunRootOf('/usr/local/bin/bun')).toBeNull();
+  });
+
+  it('resolves the uninstall target the argv acts on, and the recipe exposes it', () => {
+    expect(getInstallRecipe('bun.uninstall').uninstallTarget).toBe(bunUninstallTarget);
+    expect(bunUninstallTarget(BUN_POSIX_CONTEXT)).toEqual({
+      detectedPath: '/srv/tools/.bun/bin/bun',
+      root: '/srv/tools/.bun',
+      removable: true,
+    });
+    expect(
+      bunUninstallTarget({ platform: 'linux', binaryPaths: { bun: '/usr/local/bin/bun' } })
+    ).toEqual({
+      detectedPath: '/usr/local/bin/bun',
+      root: null,
+      removable: false,
+    });
   });
 
   it('refuses to remove a default root that does not hold a Bun binary', () => {

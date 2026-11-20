@@ -16,6 +16,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useI18n } from '@/hooks/use-i18n';
 
 import { CopyLine } from '../../components/CopyLine';
+import { environmentsMessages } from '../../environments-i18n';
 import { actionRefusalLines } from '../format';
 
 interface MachineActionButtonProps {
@@ -48,7 +49,7 @@ export function MachineActionButton({
   alreadyStated,
   testId,
 }: MachineActionButtonProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const m = t.environments.machine.actions;
   const [confirming, setConfirming] = useState(false);
   const entry = status.actions[action];

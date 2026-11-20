@@ -13,6 +13,7 @@ import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
+import { environmentsMessages } from '../environments-i18n';
 import { guardReasonLabel, runtimeNameList } from '../format';
 import { useToolIdentities } from '../identity/use-tool-identities';
 import { CopyLine } from './CopyLine';
@@ -32,7 +33,7 @@ interface CopyCommandBlockProps {
 }
 
 export function CopyCommandBlock({ recipe, message, environmentId }: CopyCommandBlockProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const s = t.environments.install;
   const { resolve } = useToolIdentities();
 

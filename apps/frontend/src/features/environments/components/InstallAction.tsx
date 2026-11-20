@@ -21,6 +21,7 @@ import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
+import { environmentsMessages } from '../environments-i18n';
 import { chainStepLabel, runtimeNameList } from '../format';
 import { chainStopped, useInstallFlow } from '../hooks/use-install-flow';
 import { useInstallStream } from '../hooks/use-install-stream';
@@ -65,7 +66,7 @@ export function InstallAction({
   environmentId,
   followUpSteps,
 }: InstallActionProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const s = t.environments.install;
   const { resolve } = useToolIdentities();
   const flow = useInstallFlow(environmentId);

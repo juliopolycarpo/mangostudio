@@ -563,6 +563,12 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
           },
         }),
         ...(profileSetup && { profileSetup }),
+        // Only from a resolved binary: the display fallback above is a bare
+        // name, which would read as "not removable" for a Bun that is merely missing.
+        ...(recipe.uninstallTarget &&
+          requirements.missing.length === 0 && {
+            uninstallTarget: recipe.uninstallTarget(context),
+          }),
       },
     };
   };

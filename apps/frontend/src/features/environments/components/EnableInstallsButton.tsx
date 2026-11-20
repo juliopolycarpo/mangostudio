@@ -17,10 +17,11 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
 
+import { environmentsMessages } from '../environments-i18n';
 import { useEnableInstallsMutation } from '../queries';
 
 export function EnableInstallsButton() {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const s = t.environments.install;
   const enable = t.environments.install.enableInstalls;
   const [confirming, setConfirming] = useState(false);

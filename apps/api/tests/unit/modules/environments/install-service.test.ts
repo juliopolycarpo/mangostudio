@@ -1058,6 +1058,56 @@ describe('install service', () => {
     expect(scopes.every((environmentId) => environmentId === 'ubuntu')).toBe(true);
   });
 
+  describe('bun.uninstall preview target', () => {
+    async function prepareUninstallFor(binaryPath: string) {
+      const installation = { ...BUN_INSTALLATION, path: binaryPath, rawPath: binaryPath };
+      const status: RuntimeStatus = {
+        ...BUN_STATUS,
+        installations: [installation],
+        effective: installation,
+      };
+      const detection = createDetectionServices();
+      const service = createInstallService({
+        toolchain: NO_OP_TOOLCHAIN,
+        recipes: [getInstallRecipe('bun.uninstall')],
+        ...detection,
+        probingService: {
+          ...detection.probingService,
+          getRuntimeStatus: () => Promise.resolve(status),
+        },
+        repository: createMemoryRepository().repository,
+        runner: succeedingRunner(),
+        resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
+        generateId: () => 'uninstall-target-run',
+        now: () => 1_700_000_000_000,
+        platform: 'linux',
+      });
+      return (
+        await service.prepare({ recipeId: 'bun.uninstall', input: NO_INPUT }, REQUEST_CONTEXT)
+      ).recipe;
+    }
+
+    it('reports the detected .bun root as removable', async () => {
+      const recipe = await prepareUninstallFor('/srv/tools/.bun/bin/bun');
+
+      expect(recipe.uninstallTarget).toEqual({
+        detectedPath: '/srv/tools/.bun/bin/bun',
+        root: '/srv/tools/.bun',
+        removable: true,
+      });
+    });
+
+    it('reports a Bun outside a .bun directory as not removable, with no root', async () => {
+      const recipe = await prepareUninstallFor('/usr/local/bin/bun');
+
+      expect(recipe.uninstallTarget).toEqual({
+        detectedPath: '/usr/local/bin/bun',
+        root: null,
+        removable: false,
+      });
+    });
+  });
+
   describe('per-runtime exclusion', () => {
     function createBunService(controlled: ReturnType<typeof deferredRunner>) {
       let nextId = 0;

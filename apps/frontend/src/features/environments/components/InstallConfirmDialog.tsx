@@ -21,6 +21,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 
+import { environmentsMessages } from '../environments-i18n';
 import { chainStepLabel, formatBytes } from '../format';
 import { useToolIdentities } from '../identity/use-tool-identities';
 import type { InstallChainStep } from '../install-chain';
@@ -41,7 +42,7 @@ export function InstallConfirmDialog({
   onConfirm,
   onCancel,
 }: InstallConfirmDialogProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const s = t.environments.install;
   const { resolve } = useToolIdentities();
 
@@ -61,10 +62,18 @@ export function InstallConfirmDialog({
           target: resolve('runtime', primaryRecipe.runtimeId).name,
         })
       : s.confirmTitle;
+  // The API resolved what the run will delete from the detected installation;
+  // fall back to the recipe's declared paths only when it did not.
+  const uninstallTarget = isUninstall ? primaryRecipe?.uninstallTarget : undefined;
+  const isRefused = uninstallTarget?.removable === false;
   const description = isChain
     ? formatMessage(s.chainDescription, { count: String(recipes.length) })
     : isUninstall && primaryRecipe
-      ? formatMessage(s.confirmUninstallDescription, { paths: primaryRecipe.writes.join(', ') })
+      ? isRefused
+        ? formatMessage(s.uninstallRefused, { path: uninstallTarget?.detectedPath ?? '' })
+        : formatMessage(s.confirmUninstallDescription, {
+            paths: uninstallTarget?.root ?? primaryRecipe.writes.join(', '),
+          })
       : s.confirmDescription;
 
   return (
@@ -90,6 +99,7 @@ export function InstallConfirmDialog({
             variant={isUninstall ? 'danger' : 'primary'}
             onClick={onConfirm}
             loading={isStarting}
+            disabled={isRefused}
           >
             {isUninstall ? s.runUninstall : s.run}
           </Button>
@@ -115,8 +125,15 @@ export function InstallConfirmDialog({
 }
 
 function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const s = t.environments.install;
+  // A resolved uninstall target replaces the declared (assumed) paths; a
+  // refused one deletes nothing, so it lists nothing.
+  const writes = recipe.uninstallTarget
+    ? recipe.uninstallTarget.root
+      ? [recipe.uninstallTarget.root]
+      : []
+    : recipe.writes;
 
   return (
     <>
@@ -132,11 +149,11 @@ function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
         </code>
       </section>
 
-      {recipe.writes.length > 0 && (
+      {writes.length > 0 && (
         <section className="space-y-2">
           <SectionLabel icon={<FolderPen size={ICON_SM} />} label={s.willWrite} />
           <ul className="space-y-1">
-            {recipe.writes.map((target) => (
+            {writes.map((target) => (
               <li key={target} className="break-all font-mono text-xs text-fg-muted">
                 {target}
               </li>
