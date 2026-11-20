@@ -27,6 +27,7 @@ import { createHubWorkspaceAuthorizeHandler } from '../../../src/services/runtim
 import { capabilityManifestFromHealth } from '../../../src/services/runtime-client/manifest-from-health';
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
+  connectCallerFrames,
   createLocalRuntimeConnector,
   getRuntimeClient,
   localLaunchFailure,
@@ -1982,6 +1983,25 @@ describe('RuntimeConnectionManager', () => {
     return new Promise((resolve) => setTimeout(resolve, 30));
   }
 
+  it('keeps the frames of a connect request without its message line, at most twelve', () => {
+    const request = new Error('Local connect requested');
+    request.stack = [
+      'Error: Local connect requested',
+      ...Array.from({ length: 15 }, (_, index) => `    at caller${index} (file.ts:${index}:1)`),
+      '',
+    ].join('\n');
+    const frames = connectCallerFrames(request);
+    expect(frames, `received: ${JSON.stringify(frames)}`).toHaveLength(12);
+    expect(frames[0]).toBe('at caller0 (file.ts:0:1)');
+    expect(frames.some((frame) => frame.includes('Local connect requested'))).toBe(false);
+  });
+
+  it('gives no frames for a connect request without a stack', () => {
+    const request = new Error('Local connect requested');
+    request.stack = undefined;
+    expect(connectCallerFrames(request)).toEqual([]);
+  });
+
   // #2662: a second user's Local connect closes the first user's attested
   // connection, which its caller sees as `closed with 4000` and no reason.
   it('logs which users lost their attestation, and to whom, when a second owner connects', async () => {
@@ -2003,6 +2023,11 @@ describe('RuntimeConnectionManager', () => {
       expect(explanation, explanation).toContain('"event":"attestation_withdrawn"');
       expect(explanation).toContain('"arrivingUserId":"user-2"');
       expect(explanation).toContain('"closedUserIds":["user-1"]');
+      // The frames name this file, the code that asked for user-2's connect.
+      expect(
+        explanation,
+        'expected arrivingCallerFrames to name runtime-connection-manager.test.ts'
+      ).toMatch(/"arrivingCallerFrames":\[[^\]]*runtime-connection-manager\.test\.ts/);
       await secondConnection.close();
     } finally {
       watch.stop();

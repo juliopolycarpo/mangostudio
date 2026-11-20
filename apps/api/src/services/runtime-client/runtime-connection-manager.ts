@@ -1761,6 +1761,22 @@ interface LocalCredentialClaim {
   withdrawn: boolean;
 }
 
+const CONNECT_CALLER_FRAMES = 12;
+
+/**
+ * The call frames that asked for a Local connect, without the message line, so
+ * a withdrawal can name the code that caused it.
+ * @example connectCallerFrames(new Error('Local connect requested')); // => ['at getClient (...)', ...]
+ */
+export function connectCallerFrames(request: Error): string[] {
+  return (request.stack ?? '')
+    .split('\n')
+    .slice(1)
+    .map((frame) => frame.trim())
+    .filter((frame) => frame.length > 0)
+    .slice(0, CONNECT_CALLER_FRAMES);
+}
+
 /**
  * Binds the hub process's OS credential home to one MangoStudio user.
  *
@@ -1797,7 +1813,10 @@ export function createLocalRuntimeConnector(
     (ownerUserId !== undefined && ownerUserId !== userId) ||
     [...claims].some((claim) => claim.userId !== userId);
 
-  const withdrawAttestation = async (arrivingUserId: string): Promise<void> => {
+  const withdrawAttestation = async (
+    arrivingUserId: string,
+    arrivingRequest: Error
+  ): Promise<void> => {
     for (const claim of claims) {
       claim.withdrawn = true;
     }
@@ -1808,6 +1827,9 @@ export function createLocalRuntimeConnector(
       localLaunchLogger.warn('attestation_withdrawn', {
         arrivingUserId,
         closedUserIds: attested.map((entry) => entry.userId),
+        // Names who asked for the arriving connect; in #2662 it was not the
+        // test that lost its connection.
+        arrivingCallerFrames: connectCallerFrames(arrivingRequest),
       });
     }
     const closed = await Promise.allSettled(
@@ -1876,6 +1898,8 @@ export function createLocalRuntimeConnector(
   };
 
   return (definition, onUnavailable, context) => {
+    // Captured before the serial chain, whose frames would hide the caller.
+    const request = new Error('Local connect requested');
     const attempt = connectSerial.then(async () => {
       if (definition.id !== LOCAL_ENVIRONMENT_ID) {
         throw unavailable('Single-user-host attestation is reserved for the Local environment.');
@@ -1904,7 +1928,7 @@ export function createLocalRuntimeConnector(
       const claim: LocalCredentialClaim = { userId, withdrawn: multipleOwners };
       claims.add(claim);
       try {
-        if (multipleOwners) await withdrawAttestation(userId);
+        if (multipleOwners) await withdrawAttestation(userId, request);
         return await admit(userId, onUnavailable, context, claim);
       } finally {
         claims.delete(claim);
