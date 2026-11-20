@@ -1787,6 +1787,7 @@ export function createLocalRuntimeConnector(
   let connectSerial: Promise<void> = Promise.resolve();
   const claims = new Set<LocalCredentialClaim>();
   const active = new Set<{
+    readonly userId: string;
     readonly connection: ManagedRuntimeConnection;
     readonly identityAttested: boolean;
     readonly onUnavailable: () => void;
@@ -1796,11 +1797,19 @@ export function createLocalRuntimeConnector(
     (ownerUserId !== undefined && ownerUserId !== userId) ||
     [...claims].some((claim) => claim.userId !== userId);
 
-  const withdrawAttestation = async (): Promise<void> => {
+  const withdrawAttestation = async (arrivingUserId: string): Promise<void> => {
     for (const claim of claims) {
       claim.withdrawn = true;
     }
     const attested = [...active].filter((entry) => entry.identityAttested);
+    // Closing these reaches their callers as `closed with 4000` and no reason,
+    // the same text a crashed child gives. This line is what tells them apart.
+    if (attested.length > 0) {
+      localLaunchLogger.warn('attestation_withdrawn', {
+        arrivingUserId,
+        closedUserIds: attested.map((entry) => entry.userId),
+      });
+    }
     const closed = await Promise.allSettled(
       attested.map(async (entry) => {
         try {
@@ -1850,6 +1859,7 @@ export function createLocalRuntimeConnector(
     // whether it can prove anything about its credential home, and a hub that
     // asked for an attestation it did not get must not act as though it had.
     const entry = {
+      userId,
       connection,
       identityAttested: connection.client.manifest.identityIsolation !== undefined,
       onUnavailable,
@@ -1894,7 +1904,7 @@ export function createLocalRuntimeConnector(
       const claim: LocalCredentialClaim = { userId, withdrawn: multipleOwners };
       claims.add(claim);
       try {
-        if (multipleOwners) await withdrawAttestation();
+        if (multipleOwners) await withdrawAttestation(userId);
         return await admit(userId, onUnavailable, context, claim);
       } finally {
         claims.delete(claim);

@@ -7,7 +7,7 @@
  * checkpoints costs no disk.
  */
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, statSync } from 'node:fs';
 import { mkdir, open, rm, writeFile } from 'node:fs/promises';
@@ -32,6 +32,7 @@ import { snapshotCaptureParams } from '../../../../src/services/tools/file-mutat
 import type { ToolContext } from '../../../../src/services/tools/types';
 import { type ChatFixture, insertTestChat, type UserFixture } from '../../../support/factories';
 import { insertUserWithLocalRuntime } from '../../../support/fixtures/local-runtime-user';
+import { LocalRuntimeLossWatch } from '../../../support/local-runtime-loss-watch';
 import { removeFixtureDirSync } from '../../../support/remove-fixture-dir';
 import { explainStagedSnapshotSupport } from '../../../support/staged-snapshot-probe';
 
@@ -43,8 +44,16 @@ let messageId: string;
 let user: UserFixture;
 let sparseBlobPaths: string[];
 
+// Recording before the connect, so the log also holds how this connection began.
+const lossWatch = new LocalRuntimeLossWatch();
+
 beforeAll(async () => {
+  lossWatch.start();
   user = await insertUserWithLocalRuntime();
+});
+
+afterAll(() => {
+  lossWatch.stop();
 });
 
 beforeEach(async () => {
@@ -91,7 +100,9 @@ function turnContext(): ToolContext {
 
 /** Why the Local runtime does or does not stage snapshots, for an assertion message. */
 function stagingExplanation(): Promise<string> {
-  return explainStagedSnapshotSupport(getRuntimeConnectionManager(), chat.userId, 'local');
+  return explainStagedSnapshotSupport(getRuntimeConnectionManager(), chat.userId, 'local').then(
+    (staging) => `${staging} | ${lossWatch.explain()}`
+  );
 }
 
 /** Records an edit whose before-content is a `size`-byte blob, without writing its bytes. */
@@ -207,7 +218,9 @@ describe('a large file once the message budget is spent', () => {
     const small = join(tempDir, 'small.bin');
     const smallMoved = join(tempDir, 'small-moved.bin');
     await writeFile(small, Buffer.alloc(64 * 1024, 3));
-    await executeMoveFile({ from: small, to: smallMoved }, turnContext());
+    await lossWatch.explaining(() =>
+      executeMoveFile({ from: small, to: smallMoved }, turnContext())
+    );
     expect(existsSync(smallMoved)).toBe(true);
   });
 });
