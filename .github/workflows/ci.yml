@@ -214,6 +214,9 @@ jobs:
     name: Release Dry Run
     needs: [changes, distribution]
     if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+      actions: read # the called workflow downloads this run's artifacts with gh
     uses: $/.github/workflows/release-dry-run.yml
     with:
       reuse_distribution: true
@@ -293,6 +296,9 @@ jobs:
     name: Smoke — Binary
     needs: [distribution, changes]
     if: ${{ needs.changes.outputs.distribution == 'true' }}
+    permissions:
+      contents: read
+      actions: read # the called workflow downloads this run's artifacts with gh
     uses: $/.github/workflows/smoke-binary.yml
     with:
       version: ${{ needs.changes.outputs.version }}
@@ -307,6 +313,9 @@ jobs:
     name: Smoke — Container
     needs: [distribution, changes]
     if: ${{ needs.changes.outputs.distribution == 'true' }}
+    permissions:
+      contents: read
+      actions: read # the called workflow downloads this run's artifacts with gh
     uses: $/.github/workflows/smoke-container.yml
     with:
       version: ${{ needs.changes.outputs.version }}

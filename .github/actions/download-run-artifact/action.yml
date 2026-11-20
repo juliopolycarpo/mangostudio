@@ -1,0 +1,26 @@
+name: Download run artifact
+description: >
+  Download one artifact of the current run through the GitHub CLI, under a bound
+  and with one retry, and check its ZIP against the digest recorded at upload.
+  Replaces actions/download-artifact, which stalled after finishing (#1735).
+  Call setup-bun or setup-mango first. The calling job needs actions: read.
+
+inputs:
+  name:
+    description: Exact artifact name.
+    required: true
+  path:
+    description: Directory the artifact entries are extracted into.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Download run artifact
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        ARTIFACT_NAME: ${{ inputs.name }}
+        DOWNLOAD_DIR: ${{ inputs.path }}
+        EXTRACT_MODE: tree
+      run: bun --no-install ./scripts/ci/download-run-artifact.ts

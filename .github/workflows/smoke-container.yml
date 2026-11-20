@@ -36,6 +36,7 @@ on:
 
 permissions:
   contents: read
+  actions: read # list and download this run's artifacts with gh
 
 jobs:
   container:

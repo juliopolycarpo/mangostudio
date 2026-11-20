@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
-import { createHash } from 'node:crypto';
-import { appendFileSync, createReadStream, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -9,9 +8,11 @@ import {
   distributionBundleMember,
   validateArtifactEvidence,
 } from '../lib/distribution-artifact';
+import { DOWNLOAD_ATTEMPTS, fetchArtifactZip, withAttempts } from '../lib/run-artifact';
 
 // The cross-run promotion path deliberately requires unzip (Ubuntu consumers).
-// Same-run smoke consumers continue using actions/download-artifact unchanged.
+// Same-run consumers go through download-run-artifact.ts, which shares the
+// bounded fetch below.
 const approval: ApprovedArtifact = {
   repository: process.env.GITHUB_REPOSITORY ?? '',
   sourceSha: process.env.SOURCE_SHA ?? '',
@@ -59,20 +60,16 @@ const directory = process.env.DOWNLOAD_DIR;
 if (!directory) throw new Error('DOWNLOAD_DIR: expected download directory | received empty');
 mkdirSync(directory, { recursive: true });
 const archive = join(directory, `artifact-${approval.artifactId}.zip`);
-const download = Bun.spawn(['gh', 'api', `${base}/artifacts/${approval.artifactId}/zip`], {
-  stdout: Bun.file(archive),
-  stderr: 'inherit',
-});
-if ((await download.exited) !== 0)
-  throw new Error(`Artifact ${approval.artifactId}: download failed`);
-const hash = createHash('sha256');
-for await (const chunk of createReadStream(archive)) hash.update(chunk);
-const actual = `sha256:${hash.digest('hex')}`;
-if (actual !== approval.digest) {
-  throw new Error(
-    `Artifact ${approval.artifactId} ZIP digest: expected ${approval.digest} | received ${actual}`
-  );
-}
+// Bounded and retried once, and the ZIP bytes must match the approved digest.
+await withAttempts(DOWNLOAD_ATTEMPTS, `Artifact ${approval.artifactId}`, () =>
+  fetchArtifactZip({
+    repository: approval.repository,
+    artifactId: approval.artifactId,
+    digest: approval.digest,
+    archive,
+  })
+);
+const actual = approval.digest;
 const listing = Bun.spawnSync(['unzip', '-Z1', archive]);
 if (listing.exitCode !== 0)
   throw new Error(`Artifact ${approval.artifactId}: expected readable ZIP`);

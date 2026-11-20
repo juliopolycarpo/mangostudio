@@ -276,6 +276,7 @@ jobs:
     # Bun setup can wait four minutes for a republished canary asset.
     timeout-minutes: 9
     permissions:
+      actions: read # list and download this run's distribution artifact with gh
       attestations: read # fetch build provenance for gh attestation verify
       contents: read
     steps:
@@ -315,6 +316,7 @@ jobs:
     environment: release
     timeout-minutes: 10
     permissions:
+      actions: read # list and download this run's distribution artifact with gh
       attestations: write # verify build provenance, then attest the published checksums
       contents: write # create the tagged GitHub Release and upload assets
       id-token: write # sign the SHA256SUMS and install-script attestation
@@ -399,6 +401,7 @@ jobs:
     environment: release
     timeout-minutes: 15
     permissions:
+      actions: read # list and download this run's distribution artifact with gh
       attestations: read # fetch build provenance for gh attestation verify
       contents: read # checkout of Dockerfiles and staging scripts
       packages: write # push release images to GHCR
@@ -529,6 +532,7 @@ jobs:
       auth: ${{ steps.publish.outputs.auth }}
       provenance: ${{ steps.publish.outputs.provenance }}
     permissions:
+      actions: read # list and download this run's distribution artifact with gh
       attestations: read # fetch build provenance for gh attestation verify
       contents: read # checkout only; publish goes to npm, not the repo
       id-token: write # npm Trusted Publishing OIDC and provenance attestation
@@ -583,6 +587,7 @@ jobs:
     environment: release
     timeout-minutes: 10
     permissions:
+      actions: read # list and download this run's distribution artifact with gh
       attestations: read # fetch build provenance for gh attestation verify
       contents: read
     steps:
@@ -638,6 +643,7 @@ jobs:
     environment: release
     timeout-minutes: 10
     permissions:
+      actions: read # list and download this run's distribution artifact with gh
       attestations: read # fetch build provenance for gh attestation verify
       contents: read
     steps:
