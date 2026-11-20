@@ -129,13 +129,18 @@ test('independent delayed writes restart backoff within the shared total wait bu
   expect(clock.delays).toEqual(Array.from({ length: 15 }, () => 1000));
 });
 
+// The window still arms a real timer for the TTL it reads off the fake clock,
+// so fake-clock cases keep that TTL long enough that the real timer cannot
+// fire first on a loaded runner and pass or fail them for the wrong reason.
+const FAKE_CLOCK_TTL_MS = 60_000;
+
 test('wall-clock TTL includes time spent inside a successful registry read', async () => {
   let now = 0;
-  const window = new CanaryVisibilityWindow({ ttlMs: 50, now: () => now });
+  const window = new CanaryVisibilityWindow({ ttlMs: FAKE_CLOCK_TTL_MS, now: () => now });
   await expect(
     window.read(
       () => {
-        now += 51;
+        now += FAKE_CLOCK_TTL_MS + 1;
         return Promise.resolve(true);
       },
       confirmed,
@@ -146,16 +151,16 @@ test('wall-clock TTL includes time spent inside a successful registry read', asy
 
 test('one wall-clock deadline is shared across independent reads', async () => {
   let now = 0;
-  const window = new CanaryVisibilityWindow({ ttlMs: 50, now: () => now });
+  const window = new CanaryVisibilityWindow({ ttlMs: FAKE_CLOCK_TTL_MS, now: () => now });
   expect(
     await window.read(() => {
-      now += 30;
+      now += FAKE_CLOCK_TTL_MS / 2;
       return Promise.resolve(true);
     }, confirmed)
   ).toBe(true);
   await expect(
     window.read(() => {
-      now += 21;
+      now += FAKE_CLOCK_TTL_MS / 2 + 1;
       return Promise.resolve(true);
     }, confirmed)
   ).rejects.toThrow('TTL expired');
@@ -171,8 +176,8 @@ test('clamps a wait to the remaining wall-clock TTL and stops before the next re
   const reader = new FakeVisibilityReader([false, true]);
   const logs: string[] = [];
   const window = new CanaryVisibilityWindow({
-    ttlMs: 10,
-    retryDelaysMs: [20],
+    ttlMs: FAKE_CLOCK_TTL_MS,
+    retryDelaysMs: [FAKE_CLOCK_TTL_MS * 2],
     now: () => now,
     sleep: (delay) => {
       delays.push(delay);
@@ -184,9 +189,9 @@ test('clamps a wait to the remaining wall-clock TTL and stops before the next re
   await expect(window.read(reader.read.bind(reader), confirmed, 'bounded package')).rejects.toThrow(
     'TTL expired'
   );
-  expect(delays).toEqual([10]);
+  expect(delays).toEqual([FAKE_CLOCK_TTL_MS]);
   expect(reader.calls).toBe(1);
-  expect(logs.join('\n')).toContain('remaining=10ms');
+  expect(logs.join('\n')).toContain(`remaining=${FAKE_CLOCK_TTL_MS}ms`);
   expect(logs.join('\n')).toContain('TTL expired');
   expect(logs.join('\n')).toContain('bounded package');
 });

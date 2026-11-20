@@ -25,6 +25,10 @@ const OLD = 'b'.repeat(40);
 const VERSION = '1.2.3-canary.aaaaaaa';
 const OLD_VERSION = '1.2.3-canary.bbbbbbb';
 const NAMES = [...NPM_PLATFORMS.map(platformPackageName), MAIN_PACKAGE];
+// The visibility window still arms a real timer for the TTL it reads off the
+// fake clock, so fake-clock cases keep that TTL long enough that the real
+// timer cannot fire first on a loaded runner.
+const FAKE_CLOCK_TTL_MS = 60_000;
 const OIDC_ENV = {
   GITHUB_ACTIONS: 'true',
   ACTIONS_ID_TOKEN_REQUEST_URL: 'https://token.actions.githubusercontent.com/request',
@@ -907,12 +911,12 @@ test('one TTL includes planning and stops before the first dist-tag mutation', a
       ...dependencies,
       ancestry: {
         resolveCommit: async (prefix) => {
-          now += 51;
+          now += FAKE_CLOCK_TTL_MS + 1;
           return ancestry.resolveCommit(prefix);
         },
         compare: (base, head) => ancestry.compare(base, head),
       },
-      visibility: { ttlMs: 50, retryDelaysMs: [], now: () => now },
+      visibility: { ttlMs: FAKE_CLOCK_TTL_MS, retryDelaysMs: [], now: () => now },
     })
   ).rejects.toThrow('TTL expired');
   expect(runner.writes).toEqual([]);
@@ -930,8 +934,8 @@ test('permanent absence expires with the package and last HTTP status without an
     promoteCanaryTags(manifest, {
       ...dependencies,
       visibility: {
-        ttlMs: 100,
-        retryDelaysMs: [30, 30, 50],
+        ttlMs: FAKE_CLOCK_TTL_MS,
+        retryDelaysMs: [0.3, 0.3, 0.5].map((share) => share * FAKE_CLOCK_TTL_MS),
         now: () => now,
         sleep: (delay) => {
           now += delay;
@@ -941,7 +945,7 @@ test('permanent absence expires with the package and last HTTP status without an
       },
     })
   ).rejects.toThrow('TTL expired');
-  expect(now).toBe(100);
+  expect(now).toBe(FAKE_CLOCK_TTL_MS);
   expect(logs.join('\n')).toContain('HTTP 404');
   expect(logs.join('\n')).toContain(NAMES[0] ?? MAIN_PACKAGE);
   expect(logs.join('\n')).toContain('TTL expired');
@@ -958,13 +962,13 @@ test('expiry during a tag command preserves that side effect and never starts th
         run: async (command, signal) => {
           const result = await runner.run(command);
           if (command[4] === 'dist-tag') {
-            now += 51;
+            now += FAKE_CLOCK_TTL_MS + 1;
             expect(signal?.aborted).toBe(false);
           }
           return result;
         },
       },
-      visibility: { ttlMs: 50, retryDelaysMs: [], now: () => now },
+      visibility: { ttlMs: FAKE_CLOCK_TTL_MS, retryDelaysMs: [], now: () => now },
     })
   ).rejects.toThrow('TTL expired');
   expect(runner.writes).toHaveLength(1);
