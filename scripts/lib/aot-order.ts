@@ -177,35 +177,99 @@ export function placeRuntimeBeside(recordingBinary: string, runtimeBinary: strin
   return sibling;
 }
 
+/** One live process: its pid, its parent's pid and the words of its command line. */
+export interface ProcessRow {
+  readonly pid: number;
+  readonly ppid: number;
+  readonly argv: readonly string[];
+}
+
+/** Lists the live processes of the machine. Replaceable so a test can use a fake process table. */
+export type ProcessLister = () => readonly ProcessRow[];
+
 /**
- * Pids of the direct children of `parentPid` whose command line names `runtimeName`, read from
- * procfs (Linux, which is the only place an order is recorded). The hub launches Local as a
- * `<runtime> --stdio` child, so this is how a recording proves the runtime was attached and not
- * refused or never started, which the hub survives without a word. `procRoot` is replaceable so a
- * test can use a fake procfs.
+ * Lists processes from a procfs directory. `procRoot` is replaceable so a test can use a fake one.
+ * Example: procfsProcessLister('/proc')() // [{ pid: 4243, ppid: 4242, argv: ['/opt/mangostudio-runtime', '--stdio'] }]
+ */
+export function procfsProcessLister(procRoot = '/proc'): ProcessLister {
+  return () => {
+    const rows: ProcessRow[] = [];
+    for (const entry of readdirSync(procRoot)) {
+      if (!/^\d+$/.test(entry)) continue;
+      try {
+        const stat = readFileSync(join(procRoot, entry, 'stat'), 'utf8');
+        // The command name is parenthesised and may hold spaces: count fields from the last `)`.
+        const ppid = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
+        const argv = readFileSync(join(procRoot, entry, 'cmdline'), 'utf8').split('\0');
+        rows.push({ pid: Number(entry), ppid, argv });
+      } catch {
+        // The process ended while it was being read.
+      }
+    }
+    return rows;
+  };
+}
+
+/**
+ * Parses the output of `ps -A -ww -o pid=,ppid=,command=`. `ps` joins the arguments with spaces, so
+ * `argv` is the command split on whitespace: enough to find a binary name, not to rebuild argv.
+ * Example: parsePsProcessTable(' 4243  4242 /opt/mangostudio-runtime --stdio\n') // [{ pid: 4243, ppid: 4242, argv: ['/opt/mangostudio-runtime', '--stdio'] }]
+ */
+export function parsePsProcessTable(output: string): ProcessRow[] {
+  return output.split('\n').flatMap((line) => {
+    const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+    if (!match) return [];
+    return [{ pid: Number(match[1]), ppid: Number(match[2]), argv: (match[3] ?? '').split(/\s+/) }];
+  });
+}
+
+/** Lists processes through `ps`, for POSIX hosts without procfs (macOS). */
+export const psProcessLister: ProcessLister = () => {
+  const ps = Bun.spawnSync(['ps', '-A', '-ww', '-o', 'pid=,ppid=,command='], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  if (ps.exitCode !== 0) {
+    throw new Error(
+      `aot order: expected ps to list the process table | received: exit ${ps.exitCode}: ${ps.stderr.toString().trim()}`
+    );
+  }
+  return parsePsProcessTable(ps.stdout.toString());
+};
+
+/**
+ * The lister for a host: procfs on Linux, `ps` on other POSIX hosts. Windows has neither and Bun
+ * never records an order there, so it is refused by name instead of failing on a missing path.
+ * Example: systemProcessLister('darwin') // psProcessLister
+ */
+export function systemProcessLister(hostPlatform: string = process.platform): ProcessLister {
+  if (hostPlatform === 'win32') {
+    throw new Error(
+      'aot order: expected a Linux or POSIX host to list child processes | received: win32, where AOT order recording is not supported'
+    );
+  }
+  return hostPlatform === 'linux' ? procfsProcessLister() : psProcessLister;
+}
+
+/**
+ * Pids of the direct children of `parentPid` whose command line names `runtimeName`. The hub
+ * launches Local as a `<runtime> --stdio` child, so this is how a recording proves the runtime was
+ * attached and not refused or never started, which the hub survives without a word. `list` is
+ * replaceable so a test can use a fake process table.
  * Example: runtimeChildPids(4242, 'mangostudio-runtime') // [4243]
  */
 export function runtimeChildPids(
   parentPid: number,
   runtimeName: string,
-  procRoot = '/proc'
+  list: ProcessLister = systemProcessLister()
 ): number[] {
-  const found: number[] = [];
-  for (const entry of readdirSync(procRoot)) {
-    if (!/^\d+$/.test(entry)) continue;
-    try {
-      const stat = readFileSync(join(procRoot, entry, 'stat'), 'utf8');
-      // The command name is parenthesised and may hold spaces: count fields from the last `)`.
-      const parent = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
-      if (parent !== parentPid) continue;
+  return (
+    list()
+      .filter((row) => row.ppid === parentPid)
       // A script runs as `<interpreter> <script>`, a binary as itself: accept the name anywhere.
-      const argv = readFileSync(join(procRoot, entry, 'cmdline'), 'utf8').split('\0');
-      if (argv.some((argument) => basename(argument) === runtimeName)) found.push(Number(entry));
-    } catch {
-      // The process ended while it was being read.
-    }
-  }
-  return found;
+      .filter((row) => row.argv.some((argument) => basename(argument) === runtimeName))
+      .map((row) => row.pid)
+  );
 }
 
 /** How long a hub that has finished the workload gets to have launched its runtime. */
@@ -221,7 +285,8 @@ async function waitForRuntimeChild(
   deadlineMs: number
 ): Promise<void> {
   const until = Date.now() + deadlineMs;
-  while (runtimeChildPids(hubPid, runtimeName).length === 0) {
+  const list = systemProcessLister();
+  while (runtimeChildPids(hubPid, runtimeName, list).length === 0) {
     if (Date.now() > until) {
       throw new Error(
         `aot order: expected the recording hub to launch ${runtimeName} within ${deadlineMs} ms of the workload | received: no child process of pid ${hubPid} with that name, so the order would not cover a hub with Local attached`
