@@ -59,8 +59,9 @@ const ROOT_LANE_WEIGHTS: FileWeights = {
  * Root lane on Windows, from the JUnit `time` of each file in native qualification
  * run 44730340513 (one process per file, two workers). The order is not Linux's:
  * the install layout tests, `check-cache` and the watchdog tests spawn a process per
- * step, which costs seconds there and milliseconds on Linux. `check-cache` is the
- * figure of that run (226 s) scaled by the shared warm pass (about 0.86).
+ * step, which costs seconds there and milliseconds on Linux. `check-cache` is from
+ * run 44735730857 (112.7 s), after its cycle cases began sharing one warm pass;
+ * the first run measured it at 226.5 s.
  */
 const ROOT_LANE_WINDOWS_WEIGHTS: FileWeights = {
   'apps/api/tests/unit/modules/environments/runtime-slot-scripts.test.ts': 6,
@@ -81,7 +82,7 @@ const ROOT_LANE_WINDOWS_WEIGHTS: FileWeights = {
   'scripts/tests/canary-tags.unit.test.ts': 4,
   'scripts/tests/canary-validation.unit.test.ts': 4,
   'scripts/tests/changed-paths.unit.test.ts': 7,
-  'scripts/tests/check-cache.unit.test.ts': 195,
+  'scripts/tests/check-cache.unit.test.ts': 115,
   'scripts/tests/check-report.unit.test.ts': 9,
   'scripts/tests/distribution-artifact.unit.test.ts': 3,
   'scripts/tests/fixture-command.unit.test.ts': 7,
@@ -161,7 +162,7 @@ export const WINDOWS_LANE_WEIGHTS: Readonly<Partial<Record<TestLaneId, FileWeigh
  * The weights a lane splits by on a platform, or undefined for a lane that keeps `--shard`.
  *
  * @example
- * laneWeights('root', 'win32')?.['scripts/tests/check-cache.unit.test.ts']; // => 195
+ * laneWeights('root', 'win32')?.['scripts/tests/check-cache.unit.test.ts']; // => 115
  * laneWeights('api-unit', 'linux'); // => undefined
  */
 export function laneWeights(
