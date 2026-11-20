@@ -18,6 +18,7 @@ import {
 } from '@mangostudio/shared/runtime-contract';
 
 import { getDb } from '../../db/database';
+import { SYSTEM_OWNER_USER_ID } from '../../db/system-owner';
 import { raceAgainstAbort } from '../../lib/abort-race';
 
 /** Who a hub session speaks for, as the hub recorded it when it opened. */
@@ -30,7 +31,7 @@ export interface HubWorkspaceBinding {
  * The user id CLI and setup probes run under when no authenticated user
  * exists. It owns no chats, so it can never authorize a workspace.
  */
-export const STAND_IN_USER_ID = 'local';
+export const STAND_IN_USER_ID = SYSTEM_OWNER_USER_ID;
 
 /** Answers whether `binding` may use `canonicalPath`; injectable for tests. */
 export type EnvironmentWorkspacePolicy = (

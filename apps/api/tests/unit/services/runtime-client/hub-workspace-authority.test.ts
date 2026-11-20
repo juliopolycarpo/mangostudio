@@ -75,7 +75,7 @@ describe('isAuthorizedEnvironmentWorkspace', () => {
   });
 
   it('refuses the stand-in user even when it owns a matching chat', async () => {
-    await insertTestUser({ id: STAND_IN_USER_ID });
+    // The stand-in is the reserved system owner, a `user` row migration 071 creates.
     await seedChat(STAND_IN_USER_ID, ENVIRONMENT, WORKDIR);
     const answer = await isAuthorizedEnvironmentWorkspace(
       { userId: STAND_IN_USER_ID, environmentId: ENVIRONMENT },

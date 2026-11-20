@@ -40,6 +40,7 @@ import Value from 'typebox/value';
 
 import { acquireToolchainCredentialLock } from '../../backup/capture-lock';
 import { getDb } from '../../db/database';
+import { SYSTEM_OWNER_USER_ID } from '../../db/system-owner';
 import { getConfig } from '../../lib/config';
 import {
   createInstallService,
@@ -88,8 +89,12 @@ export interface EnvDeps {
   readonly log: (line: string) => void;
 }
 
-/** The scope every CLI install run is recorded under; there is no signed-in session to key it to. */
-const CLI_INSTALL_USER_ID = 'local';
+/**
+ * The owner of a CLI install run on a hub with no account yet: the reserved
+ * system row migration 071 creates, which satisfies the audit table's foreign
+ * key and cannot sign in.
+ */
+const CLI_INSTALL_USER_ID = SYSTEM_OWNER_USER_ID;
 
 export interface EnvInstallDeps {
   readonly service: Pick<InstallService, 'prepare' | 'start' | 'getRunStream' | 'listRuns'>;
@@ -316,8 +321,12 @@ export interface EnvToolchainDeps {
  * exactly one, which is the machine these commands exist for. `fallback`
  * stands in when no account exists at all; a command that needs a real
  * account (the toolchain selection nobody else would read) passes none.
+ *
+ * The reserved system owner is not an account: it is never counted or picked
+ * here, only returned as the `fallback` a caller names.
+ * // Usage: await resolveCliUserId(undefined, { fallback: SYSTEM_OWNER_USER_ID })
  */
-async function resolveCliUserId(
+export async function resolveCliUserId(
   email: string | undefined,
   options: { readonly fallback?: string } = {}
 ): Promise<string> {
@@ -327,11 +336,17 @@ async function resolveCliUserId(
       .selectFrom('user')
       .select('id')
       .where('email', '=', email)
+      .where('id', '!=', SYSTEM_OWNER_USER_ID)
       .executeTakeFirst();
     if (!user) throw new CliError(`No account with email ${email}.`);
     return user.id;
   }
-  const users = await db.selectFrom('user').select(['id', 'email']).limit(2).execute();
+  const users = await db
+    .selectFrom('user')
+    .select(['id', 'email'])
+    .where('id', '!=', SYSTEM_OWNER_USER_ID)
+    .limit(2)
+    .execute();
   const [sole] = users;
   if (!sole) {
     if (options.fallback !== undefined) return options.fallback;
