@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -74,7 +75,9 @@ async function insertSummaryConnector(modelId: string) {
   await getDb()
     .insertInto('secret_metadata')
     .values({
-      id: `summary-connector-${modelId}-${Date.now()}`,
+      // Several tests insert a connector for the same model and the table is
+      // not cleared between them, so a timestamp suffix can repeat.
+      id: `summary-connector-${modelId}-${randomUUID()}`,
       name: `Summary ${modelId}`,
       provider: 'openai-compatible',
       configured: 1,
