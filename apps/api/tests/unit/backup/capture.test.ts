@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { afterEach, expect, it, spyOn } from 'bun:test';
+import { afterAll, afterEach, expect, it, spyOn } from 'bun:test';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import {
@@ -32,13 +32,22 @@ import { type FixtureDirectory, removeTrackedFixtureDirs } from '../../support/r
 
 const cleanups: (() => Promise<void>)[] = [];
 const captureRoots: FixtureDirectory[] = [];
+const retainedCaptureRoots: FixtureDirectory[] = [];
 afterEach(async () => {
   try {
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-  } finally {
-    // Handles (the databases) close first; a root that refuses removal stays tracked.
+    // Handles (the databases) close first.
     await removeTrackedFixtureDirs(captureRoots);
+  } finally {
+    // A refused root fails only the test that hit it: keep it for the final report
+    // and do not retry it in later hooks.
+    retainedCaptureRoots.push(...captureRoots);
+    captureRoots.length = 0;
   }
+});
+afterAll(() => {
+  if (retainedCaptureRoots.length)
+    console.error('[remove-fixture-dir] retained capture roots', retainedCaptureRoots);
 });
 
 async function capturePaths() {
