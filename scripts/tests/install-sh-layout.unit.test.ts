@@ -247,7 +247,11 @@ function buildReleaseArchive(dir: string, name: string, printedVersion: string):
 function buildFailingArchive(
   dir: string,
   name: string,
-  failure: { readonly stderr: string; readonly exitCode: number; readonly stdout?: string }
+  failure: {
+    readonly stderr: string;
+    readonly exitCode: number;
+    readonly stdout?: string;
+  }
 ): string {
   const srcDir = join(dir, `src-failing-${name}`);
   mkdirSync(srcDir, { recursive: true });
@@ -313,7 +317,10 @@ function layout(): Layout {
     workDir,
     root,
     bin,
-    env: { MANGOSTUDIO_INSTALL_DIR: shellPath(root), MANGOSTUDIO_BIN_DIR: shellPath(bin) },
+    env: {
+      MANGOSTUDIO_INSTALL_DIR: shellPath(root),
+      MANGOSTUDIO_BIN_DIR: shellPath(bin),
+    },
   };
 }
 
@@ -356,7 +363,10 @@ describe('install.sh layout', () => {
     const { workDir, root, env } = layout();
     const archive = buildReleaseArchive(workDir, `mangostudio-0.1.0-${PLATFORM}.tar.gz`, '0.1.0');
 
-    run(['--local', archive], { ...env, MANGOSTUDIO_INSTALL_ORIGIN: 'upgrade' });
+    run(['--local', archive], {
+      ...env,
+      MANGOSTUDIO_INSTALL_ORIGIN: 'upgrade',
+    });
 
     expect(originRecord(root).origin).toBe('upgrade');
   });
@@ -840,7 +850,7 @@ describe.skipIf(!PERL)('install.sh version lock', () => {
     const lock = await holdLauncherLock(root, '0.1.0');
     const installer = runInBackground(['--local', archive], env);
     try {
-      await waitForExit(installer, 1500);
+      await waitForExit(installer, 600);
 
       expect(
         installer.exitCode,
@@ -862,7 +872,10 @@ describe.skipIf(!PERL)('install.sh version lock', () => {
     const { root, env, archive, marker } = installedWithMarker();
     const lock = await holdLauncherLock(root, '0.1.0');
     try {
-      const result = run(['--local', archive], { ...env, MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '2' });
+      const result = run(['--local', archive], {
+        ...env,
+        MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '0.5',
+      });
 
       expect(result.exitCode, JSON.stringify(result)).toBe(1);
       expectNamesPath(result.stderr, launcherLockPath(root, '0.1.0'));
@@ -913,12 +926,36 @@ describe.skipIf(!PERL)('install.sh version lock', () => {
     );
   }
 
+  // A lock freed mid-wait must be taken within a poll interval, not up to a second later.
+  test('an install takes a lock freed after 0.3 s well before a second has passed', async () => {
+    const { root, env, archive, marker } = installedWithMarker();
+    const lock = await holdLauncherLock(root, '0.1.0');
+    const started = performance.now();
+    const installer = runInBackground(['--local', archive], env);
+    await Bun.sleep(300);
+    await lock.release();
+
+    const exitCode = await installer.exited;
+    const elapsed = performance.now() - started;
+
+    expect(exitCode, await new Response(installer.stderr).text()).toBe(0);
+    expect(existsSync(marker), `expected ${marker} replaced once the lock was released`).toBe(
+      false
+    );
+    expect(
+      elapsed,
+      `expected the install to finish within 900 ms of starting, the lock freed at 300 ms | received: ${Math.round(elapsed)} ms`
+    ).toBeLessThan(900);
+  }, 30000);
   test('the lock is per version: another version installs while one is held', async () => {
     const { workDir, root, env } = layout();
     const archive = buildReleaseArchive(workDir, `mangostudio-0.2.0-${PLATFORM}.tar.gz`, '0.2.0');
     const lock = await holdLauncherLock(root, '0.1.0');
     try {
-      const result = run(['--local', archive], { ...env, MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '2' });
+      const result = run(['--local', archive], {
+        ...env,
+        MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '0.5',
+      });
 
       expect(result.exitCode, JSON.stringify(result)).toBe(0);
       expect(readlinkSync(join(root, 'current'))).toBe('0.2.0');
@@ -934,7 +971,10 @@ describe.skipIf(!PERL)('install.sh version lock', () => {
     mkdirSync(join(root, '0.0.9'));
     const lock = await holdLauncherLock(root, '0.0.9');
     try {
-      const held = run(['--prune'], { ...env, MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '1' });
+      const held = run(['--prune'], {
+        ...env,
+        MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '0.3',
+      });
 
       expect(held.exitCode, JSON.stringify(held)).toBe(0);
       expect(held.stdout).toContain('Could not remove 0.0.9');
@@ -1071,37 +1111,96 @@ describe('install.sh lock primitive', () => {
   });
 
   test.each([
-    { value: '0', kept: true },
-    { value: '7', kept: true },
-    { value: '123456789', kept: true },
-    { value: '10s', kept: false },
-    { value: '-1', kept: false },
-    { value: '1.5', kept: false },
-    { value: '+5', kept: false },
-    { value: ' 5', kept: false },
-    { value: '1234567890', kept: false },
-  ])('MANGOSTUDIO_INSTALL_LOCK_TIMEOUT=$value is kept: $kept', ({ value, kept }) => {
+    { value: '0', ms: 0 },
+    { value: '7', ms: 7000 },
+    { value: '08', ms: 8000 },
+    { value: '123456789', ms: 123456789000 },
+    { value: '0.5', ms: 500 },
+    { value: '1.25', ms: 1250 },
+    { value: '0.001', ms: 1 },
+    { value: '0.08', ms: 80 },
+    { value: '10s', ms: null },
+    { value: '-1', ms: null },
+    { value: '+5', ms: null },
+    { value: ' 5', ms: null },
+    { value: '.5', ms: null },
+    { value: '1.', ms: null },
+    { value: '1.5.2', ms: null },
+    { value: '1.2345', ms: null },
+    { value: '1234567890', ms: null },
+  ])(
+    'MANGOSTUDIO_INSTALL_LOCK_TIMEOUT=$value parses to $ms ms (null: default)',
+    ({ value, ms }) => {
+      const result = sourceAndCall(
+        `INSTALL_LOCK_TIMEOUT='${value}'; validate_install_lock_timeout; echo "timeout=$INSTALL_LOCK_TIMEOUT ms=$INSTALL_LOCK_TIMEOUT_MS"`
+      );
+
+      expect(
+        result.stdout.trim(),
+        `expected ${JSON.stringify(value)} to ${ms === null ? 'fall back to 3600' : `be ${ms} ms`} | received: ${JSON.stringify(result)}`
+      ).toBe(ms === null ? 'timeout=3600 ms=3600000' : `timeout=${value} ms=${ms}`);
+      expect(
+        result.stderr.includes('is not a number of seconds'),
+        `expected a warning naming ${JSON.stringify(value)} only when it is rejected | received: ${JSON.stringify(result)}`
+      ).toBe(ms === null);
+      if (ms === null) expect(result.stderr).toContain(`LOCK_TIMEOUT=${value} is not`);
+    }
+  );
+
+  test.each([
+    { ms: 0, text: '0' },
+    { ms: 5000, text: '5' },
+    { ms: 600, text: '0.600' },
+    { ms: 1250, text: '1.250' },
+  ])('lock_seconds_text prints $ms ms as $text', ({ ms, text }) => {
+    const result = sourceAndCall(`lock_seconds_text ${ms}`);
+
+    expect(result.stdout, JSON.stringify(result)).toBe(text);
+  });
+
+  // sleep stands in for the host's: one that takes fractions, and one (POSIX, some busybox)
+  // that refuses anything but whole seconds.
+  const FRACTIONAL_SLEEP = 'sleep() { echo "sleep $*"; }';
+  const WHOLE_SECOND_SLEEP =
+    'sleep() { case "$1" in *[!0-9]*) return 1 ;; esac; echo "sleep $*"; }';
+
+  test.each([
+    {
+      name: 'a sleep that takes fractions',
+      fake: FRACTIONAL_SLEEP,
+      poll: 200,
+      calls: ['sleep 0.2', 'sleep 0.2'],
+    },
+    {
+      name: 'a sleep that takes whole seconds only',
+      fake: WHOLE_SECOND_SLEEP,
+      poll: 1000,
+      calls: ['sleep 1', 'sleep 1'],
+    },
+  ])('sleep_between_lock_attempts with $name polls every $poll ms', ({ fake, poll, calls }) => {
     const result = sourceAndCall(
-      `INSTALL_LOCK_TIMEOUT='${value}'; validate_install_lock_timeout; echo "timeout=$INSTALL_LOCK_TIMEOUT"`
+      `${fake}; sleep_between_lock_attempts; sleep_between_lock_attempts; echo "poll=$INSTALL_LOCK_POLL_MS"`
     );
 
-    expect(
-      result.stdout.trim(),
-      `expected ${JSON.stringify(value)} to ${kept ? 'be kept' : 'fall back to 3600'} | received: ${JSON.stringify(result)}`
-    ).toBe(`timeout=${kept ? value : '3600'}`);
-    expect(result.stderr.includes('not a whole number of seconds'), JSON.stringify(result)).toBe(
-      !kept
-    );
+    expect(result.stdout.trim().split('\n'), JSON.stringify(result)).toEqual([
+      ...calls,
+      `poll=${poll}`,
+    ]);
   });
 
   test('an install with a non-numeric lock timeout warns and installs instead of looping', () => {
     const { workDir, root, env } = layout();
     const archive = buildReleaseArchive(workDir, `mangostudio-0.1.0-${PLATFORM}.tar.gz`, '0.1.0');
 
-    const result = run(['--local', archive], { ...env, MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '10s' });
+    const result = run(['--local', archive], {
+      ...env,
+      MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '10s',
+    });
 
     expect(result.exitCode, JSON.stringify(result)).toBe(0);
-    expect(result.stderr).toContain('MANGOSTUDIO_INSTALL_LOCK_TIMEOUT=10s is not a whole number');
+    expect(result.stderr).toContain(
+      'MANGOSTUDIO_INSTALL_LOCK_TIMEOUT=10s is not a number of seconds'
+    );
     expect(readlinkSync(join(root, 'current'))).toBe('0.1.0');
   });
 });
@@ -1161,7 +1260,10 @@ describe('install.sh internals (network-free)', () => {
 
   test.each([
     { name: 'empty response', payload: '' },
-    { name: 'partial response with a tag', payload: '[{"tag_name":"v0.1.1-canary.abc1234"}]' },
+    {
+      name: 'partial response with a tag',
+      payload: '[{"tag_name":"v0.1.1-canary.abc1234"}]',
+    },
   ])('failed canary lookup rejects $name and preserves curl failure', ({ payload }) => {
     const result = sourceAndCall(`
       fixture_failed_curl() {
@@ -1272,7 +1374,10 @@ describe('install.sh internals (network-free)', () => {
   });
 
   test('a secondary-limit 429 without a reset header still reads as a rate limit', () => {
-    const result = resolveCanaryFromGithub({ status: 429, headers: ['retry-after: 60'] });
+    const result = resolveCanaryFromGithub({
+      status: 429,
+      headers: ['retry-after: 60'],
+    });
 
     expect(result.exitCode, JSON.stringify(result)).toBe(1);
     expect(result.stderr).toContain('GitHub API rate limit exceeded (HTTP 429)');
@@ -1360,7 +1465,10 @@ describe('install.sh internals (network-free)', () => {
       const log = newCurlLog();
       const result = resolveCanaryFromGithub(
         { status: 200, body: CANARY_BODY },
-        { curlLog: log, tokens: { GITHUB_TOKEN: TOKEN, GH_TOKEN: OTHER_TOKEN } }
+        {
+          curlLog: log,
+          tokens: { GITHUB_TOKEN: TOKEN, GH_TOKEN: OTHER_TOKEN },
+        }
       );
 
       expect(result.exitCode, JSON.stringify(result)).toBe(0);
@@ -1423,7 +1531,9 @@ describe('install.sh internals (network-free)', () => {
     });
 
     test('a rate-limited lookup that already sent a token does not suggest one', () => {
-      const result = resolveCanaryFromGithub(RATE_LIMITED, { tokens: { GH_TOKEN: TOKEN } });
+      const result = resolveCanaryFromGithub(RATE_LIMITED, {
+        tokens: { GH_TOKEN: TOKEN },
+      });
 
       expect(result.exitCode, JSON.stringify(result)).toBe(1);
       expect(result.stderr).toContain('GitHub API rate limit exceeded (HTTP 403)');
@@ -1462,14 +1572,22 @@ describe('install.sh internals (network-free)', () => {
         const target = Bun.serve({
           port: 0,
           fetch(request) {
-            seen.push({ origin: 'target', authorization: request.headers.get('authorization') });
-            return new Response(CANARY_BODY, { headers: { 'content-type': 'application/json' } });
+            seen.push({
+              origin: 'target',
+              authorization: request.headers.get('authorization'),
+            });
+            return new Response(CANARY_BODY, {
+              headers: { 'content-type': 'application/json' },
+            });
           },
         });
         const api = Bun.serve({
           port: 0,
           fetch(request) {
-            seen.push({ origin: 'api', authorization: request.headers.get('authorization') });
+            seen.push({
+              origin: 'api',
+              authorization: request.headers.get('authorization'),
+            });
             return Response.redirect(`http://127.0.0.1:${target.port}/releases`, 302);
           },
         });
@@ -1629,7 +1747,9 @@ function dockerUnavailableReason(): string {
   if (check.exitCode !== 0) return 'docker daemon is not reachable';
   // Pull up front: a first `docker run` otherwise pulls inline, and its
   // progress lands on the stderr the cases below assert is empty.
-  const pull = Bun.spawnSync({ cmd: [DOCKER, 'pull', '--quiet', BASH32_IMAGE] });
+  const pull = Bun.spawnSync({
+    cmd: [DOCKER, 'pull', '--quiet', BASH32_IMAGE],
+  });
   if (pull.exitCode !== 0) {
     return `could not pull ${BASH32_IMAGE}: ${pull.stderr.toString().trim()}`;
   }

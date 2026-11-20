@@ -67,7 +67,7 @@ function Show-Usage {
   Write-Host '  MANGOSTUDIO_INSTALL_ORIGIN  Set to "upgrade" when the hub itself runs this script'
   Write-Host '  MANGOSTUDIO_INSTALL_LOCK_TIMEOUT'
   Write-Host '                              Seconds to wait for another installer or launcher of the same'
-  Write-Host '                              version before giving up (digits only, default 3600)'
+  Write-Host '                              version before giving up (e.g. 30 or 0.5, default 3600)'
   Write-Host '  GITHUB_TOKEN                Authenticates api.github.com requests (GH_TOKEN if unset); raises the'
   Write-Host '                              rate limit. Release downloads never receive it.'
 }
@@ -581,15 +581,19 @@ function Set-CurrentJunction([string]$InstallRoot, [string]$Version) {
 # launcher's whole-file lock. A process that dies drops it with its handle.
 #
 # Seconds to wait for another installer of the same version before giving up.
-# The launcher's own ceiling is an hour; the variable exists for tests.
-# Plain digits only, up to 9 of them, the same rule as install.sh: anything else
-# ("10s", "-1", " 5", "1.5") warns and falls back to the default.
+# The launcher's own ceiling is an hour; the variable exists for tests, which
+# give it a fraction of a second.
+# Up to 9 digits with an optional fraction of up to 3, the same rule as
+# install.sh: anything else ("10s", "-1", " 5", ".5", "1.5.2") warns and falls
+# back to the default. Returns seconds as a [double].
 function Get-InstallLockTimeoutSeconds {
   $raw = [string][Environment]::GetEnvironmentVariable('MANGOSTUDIO_INSTALL_LOCK_TIMEOUT')
-  if ($raw -eq '') { return 3600 }
-  if ($raw -cmatch '\A[0-9]{1,9}\z') { return [int]$raw }
-  Write-Warning "MANGOSTUDIO_INSTALL_LOCK_TIMEOUT=$raw is not a whole number of seconds; using 3600"
-  return 3600
+  if ($raw -eq '') { return [double]3600 }
+  if ($raw -cmatch '\A[0-9]{1,9}(\.[0-9]{1,3})?\z') {
+    return [double]::Parse($raw, [System.Globalization.CultureInfo]::InvariantCulture)
+  }
+  Write-Warning "MANGOSTUDIO_INSTALL_LOCK_TIMEOUT=$raw is not a number of seconds (digits with an optional .fraction of up to 3 digits, such as 30 or 0.5); using 3600"
+  return [double]3600
 }
 
 # ERROR_LOCK_VIOLATION (33): another handle holds a conflicting byte-range lock.
@@ -637,7 +641,7 @@ function Enter-VersionLock([string]$InstallRoot, [string]$Version) {
 
     if ($waited.Elapsed.TotalSeconds -ge $timeout) {
       $stream.Dispose()
-      Fail "another installer is still using $Version after $([int]$waited.Elapsed.TotalSeconds)s (lock $lockPath); not waiting longer. Run the command again once it finishes."
+      Fail "another installer is still using $Version after $([math]::Round($waited.Elapsed.TotalSeconds, 1))s (lock $lockPath); not waiting longer. Run the command again once it finishes."
     }
     if ($waited.Elapsed.TotalSeconds -ge $nextNotice) {
       Write-Host "Waiting for another installer to finish with $Version ($([int]$waited.Elapsed.TotalSeconds)s so far)..."

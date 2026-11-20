@@ -1633,13 +1633,30 @@ describe('install.ps1 version lock', () => {
     };
   }
 
-  // The same rule as install.sh: plain digits (at most 9) are kept, anything else warns and
-  // falls back to 3600. Each answer is "<value>=<seconds>/<warned>".
+  // The same rule as install.sh: digits (at most 9) with an optional fraction of at most 3
+  // digits are kept, anything else warns and falls back to 3600. Each answer is
+  // "<value>=<seconds>/<warned>".
   test.skipIf(!POWERSHELL)(
     'Get-InstallLockTimeoutSeconds keeps plain digits and warns about anything else',
     () => {
       const l = layout();
-      const values = ['0', '7', '123456789', '10s', '-1', '1.5', '+5', ' 5', '1234567890'];
+      const values = [
+        '0',
+        '7',
+        '123456789',
+        '0.5',
+        '1.25',
+        '0.001',
+        '10s',
+        '-1',
+        '+5',
+        ' 5',
+        '.5',
+        '1.',
+        '1.5.2',
+        '1.2345',
+        '1234567890',
+      ];
       const script = values
         .map(
           (value) =>
@@ -1656,11 +1673,17 @@ describe('install.ps1 version lock', () => {
         '[0]=0/False',
         '[7]=7/False',
         '[123456789]=123456789/False',
+        '[0.5]=0.5/False',
+        '[1.25]=1.25/False',
+        '[0.001]=0.001/False',
         '[10s]=3600/True',
         '[-1]=3600/True',
-        '[1.5]=3600/True',
         '[+5]=3600/True',
         '[ 5]=3600/True',
+        '[.5]=3600/True',
+        '[1.]=3600/True',
+        '[1.5.2]=3600/True',
+        '[1.2345]=3600/True',
         '[1234567890]=3600/True',
       ];
       expect(
@@ -1679,7 +1702,7 @@ describe('install.ps1 version lock', () => {
 
       const result = runDotSourced(
         l.scriptPath,
-        `$env:MANGOSTUDIO_INSTALL_LOCK_TIMEOUT = '1'; ` +
+        `$env:MANGOSTUDIO_INSTALL_LOCK_TIMEOUT = '0.3'; ` +
           `$first = Enter-VersionLock ${psQuote(l.root)} '0.1.0'; ` +
           `Write-Output ('first=' + ($null -ne $first)); ` +
           `try { Enter-VersionLock ${psQuote(l.root)} '0.1.0' | Out-Null; Write-Output 'second=taken' } catch { Write-Output ('second=' + $_.Exception.Message) }; ` +
@@ -1710,7 +1733,7 @@ describe('install.ps1 version lock', () => {
       try {
         const held = run(l.scriptPath, ['-Prune'], {
           ...l.env,
-          MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '1',
+          MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '0.3',
         });
 
         expect(held.exitCode, JSON.stringify(held)).toBe(0);
@@ -1735,7 +1758,7 @@ describe('install.ps1 version lock', () => {
       craftInstalledState(l, '0.2.0', { previousVersion: '0.1.0' });
       mkdirSync(join(l.rootLinux, '0.1.0'), { recursive: true });
       mkdirSync(join(l.rootLinux, '0.0.9'), { recursive: true });
-      const lock = await holdLauncherLock(l.root, '0.0.9', 6);
+      const lock = await holdLauncherLock(l.root, '0.0.9', 3);
       try {
         const result = run(l.scriptPath, ['-Prune'], l.env);
 
@@ -1764,7 +1787,7 @@ describe('install.ps1 version lock', () => {
       try {
         const result = run(l.scriptPath, ['-Local', archive], {
           ...l.env,
-          MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '1',
+          MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '0.3',
         });
 
         expect(result.exitCode, JSON.stringify(result)).not.toBe(0);

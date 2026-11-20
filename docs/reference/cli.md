@@ -290,8 +290,10 @@ was missing and leaves it behind: the empty `.launcher-<version>.lock` files of
 pruned versions stay in the dist root. They are harmless and are not deleted,
 because unlinking a lock file while another process holds it would let two
 installers lock different files of the same name. `MANGOSTUDIO_INSTALL_LOCK_TIMEOUT`
-(whole seconds, default 3600) bounds how long a script waits for the lock; a
-value that is not plain digits is replaced with the default after a warning.
+(seconds, default 3600; up to 9 digits and an optional fraction of up to 3 digits, such as
+`0.5`) bounds how long a script waits for the lock, which it retries every
+200 ms (every second where `sleep` takes no fractions); a value of any other
+shape is replaced with the default after a warning.
 No executable code is ever downloaded — only archives, verified before the
 script sees them. The script receives `MANGOSTUDIO_INSTALL_ORIGIN=upgrade`,
 `MANGOSTUDIO_INSTALL_DIR` (the detected dist root) and, when the origin record

@@ -52,7 +52,7 @@ Environment:
   MANGOSTUDIO_INSTALL_ORIGIN  Set to "upgrade" when the hub itself runs this script
   MANGOSTUDIO_INSTALL_LOCK_TIMEOUT
                               Seconds to wait for another installer or launcher of the same
-                              version before giving up (digits only, default 3600)
+                              version before giving up (e.g. 30 or 0.5, default 3600)
   GITHUB_TOKEN                Authenticates api.github.com requests (GH_TOKEN if unset); raises the
                               rate limit. Release downloads never receive it.
 USAGE
@@ -624,23 +624,74 @@ print_next_steps() {
 # A launcher or script that dies drops the lock with its descriptors.
 
 # Seconds to wait for another installer of the same version before giving up.
-# The launcher's own ceiling is an hour; the variable exists for tests.
+# The launcher's own ceiling is an hour; the variable exists for tests, which
+# give it a fraction of a second.
 INSTALL_LOCK_TIMEOUT="${MANGOSTUDIO_INSTALL_LOCK_TIMEOUT:-3600}"
 INSTALL_LOCK_TIMEOUT_DEFAULT=3600
-INSTALL_LOCK_NOTICE_EVERY=30
+INSTALL_LOCK_NOTICE_EVERY_MS=30000
+# Milliseconds between two attempts at the lock; set by sleep_between_lock_attempts.
+INSTALL_LOCK_POLL_MS=''
+# INSTALL_LOCK_TIMEOUT in milliseconds; set by validate_install_lock_timeout.
+INSTALL_LOCK_TIMEOUT_MS=''
 
-# A value that is not a plain count of seconds ("10s", "-1", "1.5") would make
-# the `[ -ge ]` comparison in acquire_version_lock fail on every pass and the
-# wait never end, so it is replaced with the default, as install.ps1 does. At
-# most 9 digits, so the comparison stays inside a shell's integer range.
+# Seconds as plain digits (at most 9) with an optional fraction of at most 3
+# digits ("30", "0.5", "1.25"). Anything else ("10s", "-1", ".5", "1.5.2") would
+# make the millisecond comparison in acquire_version_lock fail on every pass and
+# the wait never end, so it is replaced with the default, as install.ps1 does.
+# This is the one place the value is parsed: it leaves INSTALL_LOCK_TIMEOUT_MS.
 validate_install_lock_timeout() {
+  local whole fraction=''
+  whole="${INSTALL_LOCK_TIMEOUT%%.*}"
   case "$INSTALL_LOCK_TIMEOUT" in
-    '' | *[!0-9]* | ??????????*)
-      printf 'Warning: MANGOSTUDIO_INSTALL_LOCK_TIMEOUT=%s is not a whole number of seconds; using %s\n' \
-        "$INSTALL_LOCK_TIMEOUT" "$INSTALL_LOCK_TIMEOUT_DEFAULT" >&2
-      INSTALL_LOCK_TIMEOUT="$INSTALL_LOCK_TIMEOUT_DEFAULT"
-      ;;
+    *.*) fraction="${INSTALL_LOCK_TIMEOUT#*.}" ;;
   esac
+  case "${whole}:${fraction}" in
+    :* | *[!0-9:]* | ??????????*:* | *:????*) whole='' ;;
+  esac
+  case "$INSTALL_LOCK_TIMEOUT" in
+    *.) whole='' ;;
+  esac
+  if [ -z "$whole" ]; then
+    printf 'Warning: MANGOSTUDIO_INSTALL_LOCK_TIMEOUT=%s is not a number of seconds (digits with an optional .fraction of up to 3 digits, such as 30 or 0.5); using %s\n' \
+      "$INSTALL_LOCK_TIMEOUT" "$INSTALL_LOCK_TIMEOUT_DEFAULT" >&2
+    INSTALL_LOCK_TIMEOUT="$INSTALL_LOCK_TIMEOUT_DEFAULT"
+    whole="$INSTALL_LOCK_TIMEOUT_DEFAULT"
+    fraction=''
+  fi
+  # Pad the fraction to 3 digits; 10# keeps "08" from reading as octal.
+  fraction="${fraction}000"
+  fraction="${fraction%"${fraction#???}"}"
+  INSTALL_LOCK_TIMEOUT_MS=$((10#$whole * 1000 + 10#$fraction))
+}
+
+# Milliseconds as seconds for a message: "5" or "0.600".
+lock_seconds_text() {
+  if [ $(($1 % 1000)) -eq 0 ]; then
+    printf '%s' "$(($1 / 1000))"
+  else
+    printf '%s.%03d' "$(($1 / 1000))" "$(($1 % 1000))"
+  fi
+}
+
+# Wait one poll interval between two attempts at the lock, and record it in
+# INSTALL_LOCK_POLL_MS so the caller counts what it slept. A lock freed
+# mid-wait is taken within a fraction of a second, not up to a second later.
+# POSIX sleep takes whole seconds only; GNU, BSD (macOS) and busybox builds with
+# fractional support take 0.2. The first call tries it: if this sleep refuses,
+# the installer polls once a second, as it always did.
+sleep_between_lock_attempts() {
+  if [ -z "$INSTALL_LOCK_POLL_MS" ]; then
+    if sleep 0.2 2>/dev/null; then
+      INSTALL_LOCK_POLL_MS=200
+      return 0
+    fi
+    INSTALL_LOCK_POLL_MS=1000
+  fi
+  if [ "$INSTALL_LOCK_POLL_MS" -eq 200 ]; then
+    sleep 0.2
+  else
+    sleep 1
+  fi
 }
 
 have_command() {
@@ -695,10 +746,11 @@ try_lock_fd() {
 # cannot lock is warned about and let through: that is how installs ran before
 # this lock existed, and failing there would turn a hardening into an outage.
 acquire_version_lock() {
-  local root="$1" version="$2" lock shown status waited=0 next_notice=0
+  local root="$1" version="$2" lock shown status waited_ms=0 next_notice_ms=0
   lock="${root}/.launcher-${version}.lock"
   shown="$(display_path "$lock")"
 
+  if [ -z "$INSTALL_LOCK_TIMEOUT_MS" ]; then validate_install_lock_timeout; fi
   mkdir -p "$root"
   if ! { exec 200>>"$lock"; } 2>/dev/null; then
     printf 'Warning: cannot open %s; continuing without the install lock\n' "$shown" >&2
@@ -718,18 +770,18 @@ acquire_version_lock() {
         ;;
     esac
 
-    if [ "$waited" -ge "$INSTALL_LOCK_TIMEOUT" ]; then
+    if [ "$waited_ms" -ge "$INSTALL_LOCK_TIMEOUT_MS" ]; then
       exec 200>&-
       printf 'Error: another installer is still using %s after %ss (lock %s); not waiting longer. Run the command again once it finishes.\n' \
-        "$version" "$waited" "$shown" >&2
+        "$version" "$(lock_seconds_text "$waited_ms")" "$shown" >&2
       return 1
     fi
-    if [ "$waited" -ge "$next_notice" ]; then
-      log "Waiting for another installer to finish with ${version} (${waited}s so far)..."
-      next_notice=$((waited + INSTALL_LOCK_NOTICE_EVERY))
+    if [ "$waited_ms" -ge "$next_notice_ms" ]; then
+      log "Waiting for another installer to finish with ${version} ($((waited_ms / 1000))s so far)..."
+      next_notice_ms=$((waited_ms + INSTALL_LOCK_NOTICE_EVERY_MS))
     fi
-    sleep 1
-    waited=$((waited + 1))
+    sleep_between_lock_attempts
+    waited_ms=$((waited_ms + INSTALL_LOCK_POLL_MS))
   done
 }
 
