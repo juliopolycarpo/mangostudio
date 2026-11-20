@@ -33,8 +33,8 @@ For per-task file maps, use `docs/reference/agent-playbooks.md`.
   A bare `bun test apps/api/...` from the root also skips the preload; the harness reports
   the missing bootstrap.
 - The `test:*` scripts start Bun with a throwaway `HOME` (`scripts/with-test-home.ts`), so tests
-  may create and read `~/.mango` freely inside it. A bare `bun test` bypasses that and uses your
-  real home: use the scripts. A fixture that spawns `git` with its own `env` forwards
+  may create and read `~/.mango` freely inside it. A bare `bun test` bypasses that, and the preload
+  aborts it before any test touches your real home: use the scripts. A fixture that spawns `git` with its own `env` forwards
   `gitFixtureEnv()` from `tests/support/git-fixture-env.ts`. See `docs/reference/testing.md`.
 - Fake a module with `moduleMockerFor(import.meta.dir)` from `tests/support/mocks/module-mocks.ts`,
   not a raw `mock.module(`: it restores the real module after each test, and

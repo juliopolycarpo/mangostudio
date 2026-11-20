@@ -242,7 +242,16 @@ termina. `test:unit` e `test:integration` chegam ao launcher pelo runner de work
 (`scripts/run-test-workers.ts`), que dá a cada processo seu próprio home. Isso cobre
 `bun run test`, os shards de CI atrás do watchdog, o
 orquestrador de cobertura e um `bun run test:unit` direto em `apps/api`; o workflow noturno de
-ordem aleatória encapsula o seu `bun test` da mesma forma.
+ordem aleatória encapsula o seu `bun test` da mesma forma. Os outros pontos de entrada de CI que
+iniciam testes da API fazem o mesmo: a qualificação com o binário real
+(`scripts/ci/rust-lanes.ts qualify`) e o smoke de container
+(`scripts/release/smoke-container-pairing.sh`, que prepara a imagem com o ambiente real e inicia
+só a suíte sob o launcher com `--keep-build-version`, para que o runtime de release montado
+continue igual ao `VERSION` do hub; a suíte recebe de volta os `XDG_DATA_HOME`, `XDG_CONFIG_HOME`,
+`XDG_RUNTIME_DIR` e `DOCKER_CONFIG` reais, para que um engine rootless ache seu armazenamento e
+sessão).
+`scripts/tests/api-lanes-hermetic.unit.test.ts` falha se um novo workflow ou script de CI iniciar
+esses testes sem o launcher.
 
 O que o launcher define, além do home:
 
@@ -257,10 +266,16 @@ O que o launcher define, além do home:
   `~/.gitconfig` real.
 - `MANGOSTUDIO_REAL_HOME` carrega o home original do launcher. O preload da API aborta a lane
   com os valores recebido e esperado quando `homedir()` ainda é igual a ele, que é como um
-  launcher cujo `HOME` não teve efeito é pego antes do primeiro teste.
+  launcher cujo `HOME` não teve efeito é pego antes do primeiro teste. Uma execução sem a
+  variável é um `bun test` direto e também é abortada, a menos que o home tenha o formato de
+  home de teste.
 
-Um `bun test` direto em `apps/api` ignora o launcher e roda no seu home real — use os scripts
-do pacote a partir da raiz: `bun run --filter @mangostudio/api test:unit` ou
+Um `bun test` direto em `apps/api` ignora o launcher, e o preload o recusa: `os.homedir()` ignora
+um `process.env.HOME` alterado em tempo de execução, então o preload não consegue redirecionar o
+home e aborta com o home recebido e o launcher a usar, em vez de escrever no seu `~/.mango` real.
+Ele aceita uma execução com `MANGOSTUDIO_REAL_HOME` definido (o launcher) ou cujo `homedir()` já
+seja um diretório `mangostudio-test-home-*`; um `MANGO_HOME` exportado dentro do `~/.mango` real
+também é recusado. Não há opção para desativar a recusa. Use os scripts do pacote a partir da raiz: `bun run --filter @mangostudio/api test:unit` ou
 `bun run --filter @mangostudio/api test:integration`. Eles também entram no workspace da API,
 onde `bunfig.toml` fornece o preload. Para selecionar um arquivo, preserve os dois limites:
 

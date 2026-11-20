@@ -190,6 +190,11 @@ describe('smoke workflow assertion inventory', () => {
     expect(pairing).toContain(
       'bun test tests/integration/services/connect-container-runtime.integration.test.ts'
     );
+    // The API test preload refuses the real home, so the script re-runs itself
+    // under the launcher, keeping VERSION for the mounted release runtime.
+    expect(pairing, 'the pairing script must start under the temporary-home launcher').toContain(
+      'with-test-home.ts" --keep-build-version'
+    );
   });
 
   test('every folded assertion runs after failure and retains its failure result', () => {

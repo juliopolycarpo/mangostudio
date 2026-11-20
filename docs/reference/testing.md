@@ -1458,7 +1458,15 @@ ends. `test:unit` and `test:integration` reach it through the
 [worker runner](#api-unit-workers), which starts every worker through the
 launcher, so each worker has a home of its own. That covers `bun run test`, the CI shards behind the watchdog, the coverage
 orchestrator and a direct `bun run test:unit` from `apps/api`; the nightly randomized-order
-workflow wraps its `bun test` the same way.
+workflow wraps its `bun test` the same way. So do the other CI entry points that start API
+tests: the real-binary qualification (`scripts/ci/rust-lanes.ts qualify`) and the container
+smoke (`scripts/release/smoke-container-pairing.sh`, which prepares the image with the real
+environment and starts only the suite under the launcher with `--keep-build-version`, so the
+mounted release runtime still matches the hub's `VERSION`; the suite gets the real `XDG_DATA_HOME`,
+`XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR` and `DOCKER_CONFIG` back so a rootless engine finds its image
+store and session).
+`scripts/tests/api-lanes-hermetic.unit.test.ts` fails a new workflow or CI script that starts
+them bare.
 
 `fixtureHomeEnv()` also pins `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and
 `XDG_CACHE_HOME` below the temporary home, and uses that private home itself for
@@ -1490,7 +1498,8 @@ What the launcher sets, besides the home:
   (`tests/support/git-fixture-env.ts`), or Git falls back to the real `~/.gitconfig`.
 - `MANGOSTUDIO_REAL_HOME` carries the launcher's original home. The API preload aborts the lane
   with the received and expected values when `homedir()` still equals it, which is how a
-  launcher whose `HOME` did not take effect is caught before the first test.
+  launcher whose `HOME` did not take effect is caught before the first test. A run without the
+  variable is a bare `bun test` and is aborted too, unless its home has the test-home shape.
 - `VERSION` is removed. A release build stamps it and `getVersion()` reads it from the environment,
   so a value left exported after building a release hub would turn every lane into a release-build
   run: the hub refuses the source-built Local runtime as another release, and doctor reports drift
@@ -1498,8 +1507,12 @@ What the launcher sets, besides the home:
   itself and restores it. A bare `bun test` keeps the inherited value, which the release smoke jobs
   rely on.
 
-A bare `bun test` from `apps/api` bypasses the launcher and runs on your real home — use the
-package scripts. To select one file, run the launcher from the API workspace so the preload
+A bare `bun test` from `apps/api` bypasses the launcher, and the preload refuses it: `os.homedir()`
+ignores a runtime `process.env.HOME`, so the preload cannot redirect the home and aborts with the
+received home and the launcher to use instead of writing to your real `~/.mango`. It accepts a run
+whose `MANGOSTUDIO_REAL_HOME` is set (the launcher), or whose `homedir()` already is a
+`mangostudio-test-home-*` directory; an exported `MANGO_HOME` inside the real `~/.mango` is refused
+too. There is no opt-out. Use the package scripts. To select one file, run the launcher from the API workspace so the preload
 and disposable home both apply:
 
 ```bash

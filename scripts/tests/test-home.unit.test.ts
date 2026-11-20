@@ -6,8 +6,10 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { assertTemporaryHome, type TemporaryHomeHost } from '../lib/temp-home';
 import {
   describeTempLeak,
+  KEEP_BUILD_VERSION_FLAG,
   launcherHost,
   listTempLeftovers,
+  parseLauncherArgs,
   REAL_HOME_ENV,
   runWithTestHome,
   shellExitCode,
@@ -177,6 +179,46 @@ describe('testChildEnv', () => {
 
     expect('VERSION' in env).toBe(false);
   });
+
+  test('keeps the exported VERSION when the release job asks for it', () => {
+    const env = testChildEnv(
+      '/tmp/mangostudio-test-home-a1b2c3',
+      { VERSION: '0.1.1-canary.50b10e9', PATH: '/usr/bin' },
+      host,
+      { keepBuildVersion: true }
+    );
+
+    expect(env.VERSION).toBe('0.1.1-canary.50b10e9');
+    expect(env.HOME).toBe('/tmp/mangostudio-test-home-a1b2c3');
+  });
+
+  test('keepBuildVersion adds no VERSION key when none was exported', () => {
+    const env = testChildEnv('/tmp/mangostudio-test-home-a1b2c3', { PATH: '/usr/bin' }, host, {
+      keepBuildVersion: true,
+    });
+
+    expect('VERSION' in env).toBe(false);
+  });
+});
+
+describe('parseLauncherArgs', () => {
+  test('takes the keep flag only before the command', () => {
+    expect(parseLauncherArgs([KEEP_BUILD_VERSION_FLAG, 'bash', 'run.sh'])).toEqual({
+      options: { keepBuildVersion: true },
+      command: ['bash', 'run.sh'],
+    });
+  });
+
+  test('leaves the flag alone when it is the command’s own argument', () => {
+    expect(parseLauncherArgs(['bash', 'run.sh', KEEP_BUILD_VERSION_FLAG])).toEqual({
+      options: { keepBuildVersion: false },
+      command: ['bash', 'run.sh', KEEP_BUILD_VERSION_FLAG],
+    });
+  });
+
+  test('returns an empty command when only the flag was given', () => {
+    expect(parseLauncherArgs([KEEP_BUILD_VERSION_FLAG]).command).toEqual([]);
+  });
 });
 
 describe('shellExitCode', () => {
@@ -322,6 +364,22 @@ describe('runWithTestHome', () => {
       child.env.VERSION,
       `expected the launched lane to have no VERSION | received: ${String(child.env.VERSION)}`
     ).toBeUndefined();
+  });
+
+  test('starts the child with the exported VERSION under keepBuildVersion', async () => {
+    const child = new FakeEnvRecordingChild();
+
+    await runWithTestHome(
+      ['bun', 'fixture.ts'],
+      { ...process.env, VERSION: '0.1.1-canary.50b10e9' },
+      child,
+      { keepBuildVersion: true }
+    );
+
+    expect(
+      child.env.VERSION,
+      `expected the launched release lane to keep VERSION 0.1.1-canary.50b10e9 | received: ${String(child.env.VERSION)}`
+    ).toBe('0.1.1-canary.50b10e9');
   });
 
   test('passes the runtime binary and the pinned toolchain homes through', async () => {
