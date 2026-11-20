@@ -298,9 +298,10 @@ async function collectSilentShellEvidence(probe: SilentShellProbe): Promise<stri
 async function writeAfterTerminalText(
   viewer: Connected,
   readyMarker: string,
-  command: string
+  command: string,
+  promptTimeoutMs?: number
 ): Promise<number> {
-  await waitForTerminalText(viewer, readyMarker, 0, 'prompt');
+  await waitForTerminalText(viewer, readyMarker, 0, 'prompt', promptTimeoutMs);
   const firstMessage = viewer.messages.length;
   viewer.socket.send(
     encodeTerminalClientMessage({ type: 'data', data: new TextEncoder().encode(command) })
@@ -1456,6 +1457,13 @@ describe('terminal socket relay', () => {
 
 const binary = resolveRustRuntimeBinary();
 
+/**
+ * How long a real PowerShell may take to draw its first prompt. With the 5 s
+ * output wait and the 6 s + 2 s silent-shell evidence windows, a failing run
+ * still ends inside the case's 30 s budget.
+ */
+const POWERSHELL_COLD_PROMPT_TIMEOUT_MS = 12_000;
+
 describe('terminal socket over a real Rust runtime', () => {
   it.skipIf(skipWithoutRustBinary(binary, 'terminal-socket'))(
     'exposes the runtime stderr tail that failure messages quote',
@@ -1508,7 +1516,22 @@ describe('terminal socket over a real Rust runtime', () => {
         if (shell === 'powershell') {
           // Observe the default PowerShell prompt for the returned cwd before sending input.
           // Profiles stay as configured; custom prompt text is outside this fixture's scope.
-          firstMessage = await writeAfterTerminalText(viewer, `PS ${session.cwd}> `, command);
+          // A cold PowerShell start on a fresh runner was measured at up to 3.9 s
+          // before its first statement, and one run (issue #1311) drew its title
+          // but no prompt within 5 s. The prompt gets its own bound; the
+          // command's output keeps the viewer's 5 s.
+          const promptStartedAt = performance.now();
+          firstMessage = await writeAfterTerminalText(
+            viewer,
+            `PS ${session.cwd}> `,
+            command,
+            POWERSHELL_COLD_PROMPT_TIMEOUT_MS
+          );
+          const promptMs = Math.round(performance.now() - promptStartedAt);
+          if (promptMs > 5_000) {
+            // Evidence for issue #1311: how slow a passing cold start was.
+            console.warn(`[terminal-socket] PowerShell prompt took ${promptMs} ms`);
+          }
         } else {
           viewer.socket.send(
             encodeTerminalClientMessage({ type: 'data', data: new TextEncoder().encode(command) })
