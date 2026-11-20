@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import {
   copyFileSync,
   cpSync,
@@ -34,9 +34,10 @@ const CACHE_CHECK_TIMEOUT_MS = 3 * COMMAND_BUDGET_MS + 5_000;
 const ROOT_CHECK_TIMEOUT_MS = CACHE_CHECK_TIMEOUT_MS;
 
 /** Real lint/cycle scripts and Turbo config, with only tsc replaced by the existing fake. */
-function createFixture(): TypecheckFixture {
+function createFixture(options: { track?: boolean } = {}): TypecheckFixture {
   const fixture = createTypecheckFixture();
-  fixtures.push(fixture);
+  // A fixture shared across tests is disposed by its own `afterAll`, not after each test.
+  if (options.track !== false) fixtures.push(fixture);
   const { root } = fixture;
   for (const file of ['bunfig.toml', '.editorconfig', '.gitignore', 'tsconfig.json']) {
     copyFileSync(join(ROOT_DIR, file), join(root, file));
@@ -171,29 +172,55 @@ describe('lint cache and required cycle scans', () => {
       rule: 'import/no-cycle',
     },
   ];
+  // One fixture and one warm pass per workspace, shared by its cycle cases. The
+  // warm pass is not what a case tests: it only has to leave a cached lint hit
+  // behind. Each case adds its ignored files, and removes them again, so the next
+  // case starts from the same warm tree (the removed files were never lint
+  // inputs, so the cached lint still hits). On Windows each command costs seconds,
+  // and a fixture and warm pass per case made this the slowest file of the lane.
   for (const workspace of WORKSPACES) {
-    for (const cycle of cycles) {
-      test(
-        `${workspace} rejects a new ignored ${cycle.name} while replaying cached lint`,
-        async () => {
-          const fixture = createFixture();
-          const packageName = JSON.parse(
-            readFileSync(join(fixture.root, workspace, 'package.json'), 'utf8')
-          ).name;
-          expectOutcome(await requiredCheck(fixture, workspace), 'pass');
-          for (const [file, source] of Object.entries(cycle.files)) {
-            await Bun.write(join(fixture.root, workspace, 'build', file), source);
-          }
-          for (let attempt = 0; attempt < 2; attempt++) {
-            const rejected = expectOutcome(await requiredCheck(fixture, workspace), 'fail');
-            expect(rejected).toContain(`${packageName}:check:quick: cache hit`);
-            expect(rejected).toContain(cycle.rule);
-            expect(rejected.replaceAll('\\', '/')).toContain('build/a.ts');
-          }
-        },
-        CACHE_CHECK_TIMEOUT_MS
-      );
-    }
+    describe(`${workspace} cached lint replay`, () => {
+      let shared: TypecheckFixture | undefined;
+      let packageName = '';
+      beforeAll(async () => {
+        shared = createFixture({ track: false });
+        packageName = JSON.parse(
+          readFileSync(join(shared.root, workspace, 'package.json'), 'utf8')
+        ).name;
+        expectOutcome(await requiredCheck(shared, workspace), 'pass');
+      }, CACHE_CHECK_TIMEOUT_MS);
+      afterAll(async () => {
+        await commands.settle();
+        shared?.dispose();
+      }, COMMAND_BUDGET_MS + 5_000);
+
+      for (const cycle of cycles) {
+        test(
+          `${workspace} rejects a new ignored ${cycle.name} while replaying cached lint`,
+          async () => {
+            if (!shared)
+              throw new Error(
+                `(check cache): expected a warm ${workspace} fixture | received: none`
+              );
+            const buildDir = join(shared.root, workspace, 'build');
+            try {
+              for (const [file, source] of Object.entries(cycle.files)) {
+                await Bun.write(join(buildDir, file), source);
+              }
+              for (let attempt = 0; attempt < 2; attempt++) {
+                const rejected = expectOutcome(await requiredCheck(shared, workspace), 'fail');
+                expect(rejected).toContain(`${packageName}:check:quick: cache hit`);
+                expect(rejected).toContain(cycle.rule);
+                expect(rejected.replaceAll('\\', '/')).toContain('build/a.ts');
+              }
+            } finally {
+              rmSync(buildDir, { recursive: true, force: true });
+            }
+          },
+          2 * CACHE_CHECK_TIMEOUT_MS
+        );
+      }
+    });
   }
 
   test(
