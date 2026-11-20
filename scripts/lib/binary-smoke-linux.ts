@@ -8,6 +8,29 @@ export interface SmokeProcFiles {
 }
 
 /**
+ * List every live process whose process group is `pgid`, with start identities.
+ * Called the moment a group leader exits: the kernel never reuses a group id while a member
+ * lives, so members seen then are the leader's own unobserved descendants, and their recorded
+ * identities keep authorizing cleanup after a later pid reuse could make the bare group ambiguous.
+ * @example const orphans = await readLinuxGroupMembers(hub.pid);
+ */
+export async function readLinuxGroupMembers(
+  pgid: number,
+  files: SmokeProcFiles = { read: readFile, list: readdir }
+): Promise<NativeProcess[]> {
+  const rows: NativeProcess[] = [];
+  for (const entry of await files.list('/proc')) {
+    if (!/^\d+$/.test(entry)) continue;
+    const row = await readLinuxProcessIdentity(
+      { pid: Number(entry), parentPid: 0, group: null, identity: '', command: '' },
+      files.read
+    );
+    if (row?.group === pgid) rows.push(row);
+  }
+  return rows;
+}
+
+/**
  * Read only the owned hub/observed PIDs and their children, without depending on GNU ps in musl images.
  * Recorded start identities prevent a reused PID from granting ownership of its new descendants.
  * @example const rows = await readLinuxSmokeProcesses([{ pid: child.pid }]);

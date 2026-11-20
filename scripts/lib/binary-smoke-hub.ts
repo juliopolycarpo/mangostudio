@@ -1,4 +1,4 @@
-import { readLinuxSmokeProcesses } from './binary-smoke-linux';
+import { readLinuxGroupMembers, readLinuxSmokeProcesses } from './binary-smoke-linux';
 import { awaitSmokeCompletion, stopSmokeProcess } from './binary-smoke-process';
 import { pumpStream } from './child-streams';
 import {
@@ -27,6 +27,8 @@ export interface SmokeHubOptions {
   readonly signalProcess?: (pid: number, signal: NodeJS.Signals) => void;
   readonly signalGroup?: (pid: number, signal: NodeJS.Signals) => void;
   readonly supervisorHost?: SupervisorHost;
+  /** Live members of the hub's process group, read when the hub exits. Linux reads /proc. */
+  readonly groupMembers?: (pgid: number) => Promise<NativeProcess[]>;
 }
 
 /**
@@ -44,6 +46,7 @@ export class SmokeHub {
   private runtimeAnchor: NativeProcess | undefined;
   private runtimeOwned: NativeProcess[] = [];
   private release: (() => void) | undefined;
+  private exitScan: Promise<void> | undefined;
   private readonly supervisor: ChildSupervisor;
   private readonly platform: NodeJS.Platform;
   private readonly snapshot: () => Promise<NativeProcess[]>;
@@ -80,11 +83,14 @@ export class SmokeHub {
     this.runtimeAnchor = undefined;
     this.runtimeOwned = [];
     this.childExited = false;
+    this.exitScan = undefined;
     const child = this.options.spawn();
     this.child = child;
     // A signalled Windows child resolves exited with 143 while exitCode stays null.
     void child.exited.then(() => {
-      if (this.child === child) this.childExited = true;
+      if (this.child !== child) return;
+      this.childExited = true;
+      this.exitScan = this.recordGroupAtExit(child);
     });
     this.stderr = pumpStream(child.stderr);
     this.release = this.supervisor.adopt({
@@ -97,8 +103,28 @@ export class SmokeHub {
     await this.census();
     await this.options.ready();
   }
+  /**
+   * Record the group's surviving members as owned the moment the leader exits. Children the
+   * periodic census never saw would otherwise leave a nonempty group that cannot be told from
+   * a reused one; a member alive now was forked by the hub, since the kernel keeps the group id
+   * reserved while any member lives.
+   */
+  private async recordGroupAtExit(child: SmokeHubChild): Promise<void> {
+    const readMembers =
+      this.options.groupMembers ?? (this.platform === 'linux' ? readLinuxGroupMembers : undefined);
+    if (!readMembers) return;
+    try {
+      const members = await readMembers(child.pid);
+      if (this.child !== child) return;
+      const known = new Set(this.owned.map((row) => row.identity));
+      this.owned = [...this.owned, ...members.filter((row) => !known.has(row.identity))];
+    } catch {
+      // An unreadable /proc leaves the stricter refusal in alive() in force.
+    }
+  }
   private async census(): Promise<NativeProcess[]> {
     if (!this.child) return [];
+    await this.exitScan;
     const scoped = scopeNativeProcesses(await this.snapshot(), {
       rootPid: this.child.pid,
       rootAlive: !this.childExited,

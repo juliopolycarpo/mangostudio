@@ -84,31 +84,43 @@ describe('owned artifact hub', () => {
     await hub.stop();
     expect(fake.signalled).toEqual([]);
   });
-  test.each(['unobserved child', 'reused group'] as const)(
-    'a nonempty group without a live owned identity cannot prove cleanup (%s)',
-    async (scenario) => {
-      const fake = new FakeSmokeHub('leaked');
-      const hub = new SmokeHub(fake.options());
-      await hub.start();
-      fake.runtimeAlive = scenario === 'unobserved child';
-      fake.root?.kill('SIGTERM');
-      await Bun.sleep(0);
-      fake.reusedGroup = scenario === 'reused group';
-      fake.groupStillAlive = true;
-      await expect(hub.stop()).rejects.toThrow(
-        'expected verified empty or owned process group 900001 | received nonempty group without a live owned identity'
-      );
-      expect(fake.signalled).toEqual([]);
-      expect(fake.supervisorHost.handlersInstalled).toBe(0);
-      await expect(hub.start()).rejects.toThrow('expected previous child settled');
-      fake.runtimeAlive = false;
-      fake.reusedGroup = false;
-      fake.groupStillAlive = false;
-      await hub.stop();
-      await hub.start();
-      await hub.stop();
-    }
-  );
+  test('a nonempty group without a live owned identity cannot prove cleanup (reused group)', async () => {
+    const fake = new FakeSmokeHub('leaked');
+    const hub = new SmokeHub(fake.options());
+    await hub.start();
+    fake.root?.kill('SIGTERM');
+    await Bun.sleep(0);
+    fake.reusedGroup = true;
+    fake.groupStillAlive = true;
+    await expect(hub.stop()).rejects.toThrow(
+      'expected verified empty or owned process group 900001 | received nonempty group without a live owned identity'
+    );
+    expect(fake.signalled).toEqual([]);
+    expect(fake.supervisorHost.handlersInstalled).toBe(0);
+    await expect(hub.start()).rejects.toThrow('expected previous child settled');
+    fake.reusedGroup = false;
+    fake.groupStillAlive = false;
+    await hub.stop();
+    await hub.start();
+    await hub.stop();
+  });
+  test('reclaims a child no census saw before the hub exited (unobserved child)', async () => {
+    const fake = new FakeSmokeHub('leaked');
+    const hub = new SmokeHub(fake.options());
+    await hub.start();
+    // The child appears after the start census and before the hub exits.
+    fake.runtimeAlive = true;
+    fake.root?.kill('SIGTERM');
+    await Bun.sleep(0);
+    await expect(hub.stop()).rejects.toThrow('received SIGKILL, settled=true');
+    expect(
+      fake.runtimeAlive,
+      'expected the unobserved child 900002 reaped by stop() | received: still running'
+    ).toBe(false);
+    expect(fake.signalled).toContain(-900001);
+    expect(fake.signalled).not.toContain(900003);
+    await hub.stop();
+  });
   test('Windows stops its exact hub handle after the runtime was disconnected', async () => {
     const fake = new FakeSmokeHub();
     const hub = new SmokeHub({ ...fake.options(), platform: 'win32' });
@@ -298,5 +310,59 @@ describe('owned artifact hub', () => {
     } finally {
       await hub.stop();
     }
+  });
+});
+
+/** A hub that forks a grandchild after the start census, then exits without stopping it. */
+function spawnOrphaningHub(): Bun.Subprocess<'pipe', 'pipe', 'pipe'> {
+  return Bun.spawn(
+    [
+      'sh',
+      '-c',
+      // `read` gates the fork until the test has finished the start census.
+      'read go; sleep 300 </dev/null >/dev/null 2>&1 & echo $!; exit 0',
+    ],
+    { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', detached: true }
+  );
+}
+
+/** Live means present and not a zombie awaiting a reaper. */
+async function processIsLive(pid: number): Promise<boolean> {
+  try {
+    const stat = await Bun.file(`/proc/${pid}/stat`).text();
+    return stat.charAt(stat.lastIndexOf(')') + 2) !== 'Z';
+  } catch {
+    return false;
+  }
+}
+
+describe.skipIf(process.platform !== 'linux')('real hub that exits leaving a grandchild', () => {
+  test('stop() reaps the grandchild no census observed', async () => {
+    let spawned: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
+    const hub = new SmokeHub({
+      spawn: () => (spawned = spawnOrphaningHub()),
+      ready: () => Promise.resolve(),
+      budgetMs: 5_000,
+    });
+    await hub.start();
+    if (!spawned) throw new Error('expected the hub spawned by start()');
+    await spawned.stdin.write('go\n');
+    await spawned.stdin.end();
+    const grandchild = Number((await new Response(spawned.stdout).text()).trim());
+    expect(grandchild, 'expected the hub to print the grandchild pid').toBeGreaterThan(1);
+    await spawned.exited;
+    expect(await processIsLive(grandchild), 'expected grandchild alive after hub exit').toBe(true);
+    try {
+      await hub.stop();
+    } catch {
+      // A forced cleanup is reported as a failure; this test asserts only that the orphan died.
+    }
+    const survived = await processIsLive(grandchild);
+    // Never leave the orphan behind when the assertion below fails.
+    if (survived) process.kill(grandchild, 'SIGKILL');
+    expect(
+      survived,
+      `expected grandchild ${grandchild} reaped by stop() | received: still running`
+    ).toBe(false);
   });
 });

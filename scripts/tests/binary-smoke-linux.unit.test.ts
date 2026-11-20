@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
-import { readLinuxSmokeProcesses, type SmokeProcFiles } from '../lib/binary-smoke-linux';
+import {
+  readLinuxGroupMembers,
+  readLinuxSmokeProcesses,
+  type SmokeProcFiles,
+} from '../lib/binary-smoke-linux';
 
 /** A procfs fixture includes children created from a non-leader hub thread. */
 class FakeSmokeProc implements SmokeProcFiles {
@@ -40,6 +44,16 @@ describe('targeted Linux smoke process reads', () => {
     expect(rows.map((row) => row.identity)).toEqual(['42:100', '44:101']);
     expect(files.paths.filter((path) => path === '/proc/44/stat')).toHaveLength(1);
     expect(files.paths).not.toContain('/proc/1/stat');
+  });
+  test('lists group members by pgrp, including orphans no census reached', async () => {
+    const files = new FakeSmokeProc();
+    // An orphan reparented to init: not a child of any recorded process, still in group 42.
+    files.process(77, 1, '300', ['77']);
+    // An unrelated process in another group.
+    files.content.set('/proc/88/stat', `88 (other) S 1 88 ${Array(16).fill('0').join(' ')} 400 0`);
+    files.tasks.set('/proc', ['42', '44', '77', '88', 'self', 'cpuinfo']);
+    const rows = await readLinuxGroupMembers(42, files);
+    expect(rows.map((row) => row.identity)).toEqual(['42:100', '44:101', '77:300']);
   });
   test('does not follow a reused PID or treat a gone process as alive', async () => {
     const files = new FakeSmokeProc();
