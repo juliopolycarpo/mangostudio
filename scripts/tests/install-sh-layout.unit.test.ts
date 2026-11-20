@@ -927,26 +927,41 @@ describe.skipIf(!PERL)('install.sh version lock', () => {
   }
 
   // A lock freed mid-wait must be taken within a poll interval, not up to a second later.
-  test('an install takes a lock freed after 0.3 s well before a second has passed', async () => {
-    const { root, env, archive, marker } = installedWithMarker();
+  // Released right after the wait notice, the old one-second poll returns ~1000 ms later; the
+  // bound is loose enough for a slow Windows shell and far below that.
+  test('acquire_version_lock takes a lock freed mid-wait within a fraction of a second', async () => {
+    const root = tempDir('mango-lock-poll-');
     const lock = await holdLauncherLock(root, '0.1.0');
-    const started = performance.now();
-    const installer = runInBackground(['--local', archive], env);
-    await Bun.sleep(300);
-    await lock.release();
+    const waiter = Bun.spawn({
+      cmd: [
+        BASH,
+        '-c',
+        `${IS_WINDOWS ? FIXTURE_LINUX_UNAME : ''}\nsource "$1"; acquire_version_lock "$2" 0.1.0 && echo acquired`,
+        'lock-poll-fixture',
+        shellPath(INSTALL_SH),
+        shellPath(root),
+      ],
+      env: shellEnvironment({}),
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    try {
+      await waitForOutput(waiter, 'Waiting for another installer', 10000);
+      const releasedAt = performance.now();
+      await lock.release();
+      const exitCode = await waiter.exited;
+      const elapsed = performance.now() - releasedAt;
 
-    const exitCode = await installer.exited;
-    const elapsed = performance.now() - started;
-
-    expect(exitCode, await new Response(installer.stderr).text()).toBe(0);
-    expect(existsSync(marker), `expected ${marker} replaced once the lock was released`).toBe(
-      false
-    );
-    expect(
-      elapsed,
-      `expected the install to finish within 900 ms of starting, the lock freed at 300 ms | received: ${Math.round(elapsed)} ms`
-    ).toBeLessThan(900);
+      expect(exitCode, await new Response(waiter.stderr).text()).toBe(0);
+      expect(
+        elapsed,
+        `expected acquire_version_lock to return within 700 ms of the lock being released | received: ${Math.round(elapsed)} ms`
+      ).toBeLessThan(700);
+    } finally {
+      waiter.kill('SIGKILL');
+    }
   }, 30000);
+
   test('the lock is per version: another version installs while one is held', async () => {
     const { workDir, root, env } = layout();
     const archive = buildReleaseArchive(workDir, `mangostudio-0.2.0-${PLATFORM}.tar.gz`, '0.2.0');
