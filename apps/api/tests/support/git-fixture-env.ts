@@ -17,6 +17,7 @@ export function gitFixtureEnv(): Record<string, string | undefined> {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
     GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL,
+    GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM,
     GIT_TERMINAL_PROMPT: '0',
     LC_ALL: 'C',
   };

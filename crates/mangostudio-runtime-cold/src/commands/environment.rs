@@ -20,13 +20,7 @@ const COMMON: &[&str] = &[
     "XDG_CONFIG_HOME",
     "SSH_AUTH_SOCK",
 ];
-const GIT: &[&str] = &[
-    "GIT_CONFIG_GLOBAL",
-    "GIT_CONFIG_NOSYSTEM",
-    "PROGRAMDATA",
-    "GNUPGHOME",
-    "GPG_TTY",
-];
+const GIT: &[&str] = &["GIT_CONFIG_GLOBAL", "PROGRAMDATA", "GNUPGHOME", "GPG_TTY"];
 const GH: &[&str] = &[
     "APPDATA",
     "GH_CONFIG_DIR",
@@ -274,18 +268,6 @@ mod tests {
             assert_eq!(env["SSH_AUTH_SOCK"], "/agent");
             assert!(!env.values().any(|value| value == "private"));
         }
-    }
-
-    #[test]
-    fn git_keeps_the_hosts_choice_to_skip_system_configuration() {
-        let source = BTreeMap::from([
-            ("GIT_CONFIG_GLOBAL".into(), "/home/.gitconfig".into()),
-            ("GIT_CONFIG_NOSYSTEM".into(), "1".into()),
-        ]);
-        let git_env = git(&source);
-        assert_eq!(git_env["GIT_CONFIG_GLOBAL"], "/home/.gitconfig");
-        assert_eq!(git_env["GIT_CONFIG_NOSYSTEM"], "1");
-        assert!(!gh(&source).contains_key("GIT_CONFIG_NOSYSTEM"));
     }
 
     #[test]
