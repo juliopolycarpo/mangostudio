@@ -1319,6 +1319,8 @@ describe('useGlobalSettings while library defaults are pending', () => {
 describe('useGlobalSettings when a refetch lands mid-burst', () => {
   const PROMPT_A = 'typed before the refetch';
   const TOOL_ITERATIONS_B = 12;
+  /** Mirrors `SETTINGS_SAVE_DEBOUNCE_MS` in the hook, which is not exported. */
+  const SETTINGS_DEBOUNCE_MS = 300;
 
   function renderWithCache() {
     return renderHook(() => ({ settings: useGlobalSettings(), queryClient: useQueryClient() }));
@@ -1425,37 +1427,126 @@ describe('useGlobalSettings when a refetch lands mid-burst', () => {
     const { result } = renderWithCache();
     await waitFor(() => expect(result.current.settings.isLoading).toBe(false));
 
-    await typePromptA(() => result.current);
-    mockGet.mockResolvedValue(
-      mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r2"', globalImageQuality: '4K' })
-    );
-    await refetchAppSettings(result.current.queryClient);
-    // The hook re-anchors the burst on r2 in an effect after the refetch
-    // renders. An edit before that still sends r1, which a slow runner hit.
-    await waitFor(() => expect(result.current.settings.globalImageQuality).toBe('4K'));
-    act(() => result.current.settings.setMaxToolIterations(TOOL_ITERATIONS_B));
+    // The 300ms debounce is driven by hand. Under real timers the flush raced
+    // the test's own awaits: a slow runner let it fire before the second edit,
+    // sending r1 (or r2 with a default answer) and then a second PUT.
+    useFakeTimers();
+    try {
+      act(() => result.current.settings.setTextSystemPrompt(PROMPT_A));
+      mockGet.mockResolvedValue(
+        mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r2"', globalImageQuality: '4K' })
+      );
+      await refetchAppSettings(result.current.queryClient);
+      await advanceTimersByTimeAsync(0);
+      expect(result.current.settings.globalImageQuality).toBe('4K');
+      act(() => result.current.settings.setMaxToolIterations(TOOL_ITERATIONS_B));
 
-    // Yet another write lands before this flush, so r2 is rejected.
-    mockGet.mockResolvedValue(
-      mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r3"', globalImageQuality: '2K' })
-    );
-    mockPut.mockResolvedValueOnce(
-      mockMutationResult(null, { value: { error: 'Settings changed', code: 'CONFLICT' } })
-    );
-    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
-    expect(ifMatchOf(0)).toBe('"r2"');
+      // Yet another write lands before this flush, so r2 is rejected.
+      mockGet.mockResolvedValue(
+        mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r3"', globalImageQuality: '2K' })
+      );
+      mockPut.mockResolvedValueOnce(
+        mockMutationResult(null, { value: { error: 'Settings changed', code: 'CONFLICT' } })
+      );
+      await advanceTimersByTimeAsync(SETTINGS_DEBOUNCE_MS);
+      expect(mockPut).toHaveBeenCalledTimes(1);
+      expect(ifMatchOf(0)).toBe('"r2"');
 
-    // The refresh wins: the rejected snapshot is never replayed over it.
-    await waitFor(() => expect(result.current.settings.globalImageQuality).toBe('2K'));
-    expect(result.current.settings.promptSettings.textSystemPrompt).toBe(
-      DEFAULT_APP_SETTINGS.promptSettings.textSystemPrompt
-    );
-    expect(mockPut).toHaveBeenCalledTimes(1);
+      // The refresh wins: the rejected snapshot is never replayed over it,
+      // however long the debounce window runs on afterwards.
+      await advanceTimersByTimeAsync(0);
+      expect(result.current.settings.globalImageQuality).toBe('2K');
+      expect(result.current.settings.promptSettings.textSystemPrompt).toBe(
+        DEFAULT_APP_SETTINGS.promptSettings.textSystemPrompt
+      );
+      await advanceTimersByTimeAsync(SETTINGS_DEBOUNCE_MS * 3);
+      expect(
+        mockPut.mock.calls.length,
+        'expected PUT count after the 409 refresh: 1 | received: the rejected burst was replayed'
+      ).toBe(1);
 
-    // And the next edit builds on the refreshed revision.
-    act(() => result.current.settings.setMaxToolIterations(TOOL_ITERATIONS_B + 1));
-    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(2));
-    expect(ifMatchOf(1)).toBe('"r3"');
+      // And the next edit builds on the refreshed revision.
+      act(() => result.current.settings.setMaxToolIterations(TOOL_ITERATIONS_B + 1));
+      await advanceTimersByTimeAsync(SETTINGS_DEBOUNCE_MS);
+      expect(mockPut).toHaveBeenCalledTimes(2);
+      expect(ifMatchOf(1)).toBe('"r3"');
+    } finally {
+      await restoreRealTimers();
+    }
+  });
+
+  // The other ordering the case above used to hit by accident: the debounce of
+  // the first edit expires while the refetch is still on its way, so the burst
+  // goes out on the revision it was typed on.
+  it('sends the burst on its own revision when the debounce expires before the refetch lands', async () => {
+    const { result } = renderWithCache();
+    await waitFor(() => expect(result.current.settings.isLoading).toBe(false));
+
+    useFakeTimers();
+    try {
+      act(() => result.current.settings.setTextSystemPrompt(PROMPT_A));
+      await advanceTimersByTimeAsync(SETTINGS_DEBOUNCE_MS);
+      expect(mockPut).toHaveBeenCalledTimes(1);
+      expect(
+        ifMatchOf(0),
+        'expected If-Match "r1" (the revision the burst was typed on) | received: another revision'
+      ).toBe('"r1"');
+
+      // A refetch landing afterwards must not queue a second PUT of its own.
+      mockGet.mockResolvedValue(
+        mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r2"', globalImageQuality: '4K' })
+      );
+      await refetchAppSettings(result.current.queryClient);
+      await advanceTimersByTimeAsync(SETTINGS_DEBOUNCE_MS * 3);
+      expect(
+        mockPut.mock.calls.length,
+        'expected PUT count after a late refetch: 1 | received: the settled burst was sent again'
+      ).toBe(1);
+    } finally {
+      await restoreRealTimers();
+    }
+  });
+
+  // The ordering behind the second Windows flake: the first edit's debounce
+  // expires after the refetch re-anchored the burst on r2 but before the next
+  // edit. That flush is a legitimate PUT on r2; a 409 on the next one must
+  // still refresh without replaying.
+  it('does not replay a rejected burst when an earlier flush already went out on the rebased revision', async () => {
+    const { result } = renderWithCache();
+    await waitFor(() => expect(result.current.settings.isLoading).toBe(false));
+
+    useFakeTimers();
+    try {
+      act(() => result.current.settings.setTextSystemPrompt(PROMPT_A));
+      mockGet.mockResolvedValue(
+        mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r2"', globalImageQuality: '4K' })
+      );
+      await refetchAppSettings(result.current.queryClient);
+      await advanceTimersByTimeAsync(SETTINGS_DEBOUNCE_MS);
+      expect(mockPut).toHaveBeenCalledTimes(1);
+      expect(ifMatchOf(0)).toBe('"r2"');
+      await advanceTimersByTimeAsync(0);
+
+      mockGet.mockResolvedValue(
+        mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r3"', globalImageQuality: '2K' })
+      );
+      mockPut.mockResolvedValueOnce(
+        mockMutationResult(null, { value: { error: 'Settings changed', code: 'CONFLICT' } })
+      );
+      act(() => result.current.settings.setMaxToolIterations(TOOL_ITERATIONS_B));
+      await advanceTimersByTimeAsync(SETTINGS_DEBOUNCE_MS);
+      await advanceTimersByTimeAsync(0);
+      expect(mockPut).toHaveBeenCalledTimes(2);
+
+      await advanceTimersByTimeAsync(SETTINGS_DEBOUNCE_MS * 3);
+      expect(
+        mockPut.mock.calls.length,
+        'expected PUT count after the 409 refresh: 2 | received: the rejected burst was replayed'
+      ).toBe(2);
+      expect(result.current.settings.globalImageQuality).toBe('2K');
+    } finally {
+      await restoreRealTimers();
+    }
   });
 
   it('keeps a key that is still in flight when a same-revision refetch lands', async () => {
