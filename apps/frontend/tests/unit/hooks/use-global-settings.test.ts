@@ -1366,61 +1366,77 @@ describe('useGlobalSettings when a refetch lands mid-burst', () => {
     const { result } = renderWithCache();
     await waitFor(() => expect(result.current.settings.isLoading).toBe(false));
 
-    await typePromptA(() => result.current);
-    const readsBeforeRefetch = mockGet.mock.calls.length;
-    await refetchAppSettings(result.current.queryClient);
-    expect(mockGet.mock.calls.length).toBe(readsBeforeRefetch + 1);
+    // The debounce is driven by hand: under real timers a slow runner let the
+    // first edit flush on its own before the second one (see the case below).
+    useFakeTimers();
+    try {
+      act(() => result.current.settings.setTextSystemPrompt(PROMPT_A));
+      const readsBeforeRefetch = mockGet.mock.calls.length;
+      await refetchAppSettings(result.current.queryClient);
+      await advanceTimersByTimeAsync(0);
+      expect(mockGet.mock.calls.length).toBe(readsBeforeRefetch + 1);
 
-    // Not reverted while it waits for the debounce: the cache the screen and
-    // the next edit read from still holds it.
-    expect(cachedPrompt(result.current.queryClient)).toBe(PROMPT_A);
-    await waitFor(() =>
-      expect(result.current.settings.promptSettings.textSystemPrompt).toBe(PROMPT_A)
-    );
+      // Not reverted while it waits for the debounce: the cache the screen and
+      // the next edit read from still holds it.
+      expect(cachedPrompt(result.current.queryClient)).toBe(PROMPT_A);
+      expect(result.current.settings.promptSettings.textSystemPrompt).toBe(PROMPT_A);
 
-    act(() => result.current.settings.setMaxToolIterations(TOOL_ITERATIONS_B));
-    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+      act(() => result.current.settings.setMaxToolIterations(TOOL_ITERATIONS_B));
+      await advanceTimersByTimeAsync(SETTINGS_DEBOUNCE_MS);
+      expect(mockPut).toHaveBeenCalledTimes(1);
 
-    const sent = mockPut.mock.calls[0]?.[0] as AppSettingsPutBody;
-    expect(
-      sent.promptSettings?.textSystemPrompt,
-      'expected the PUT to carry key A (typed before the refetch) | received: the refetched value'
-    ).toBe(PROMPT_A);
-    expect(sent.maxToolIterations).toBe(TOOL_ITERATIONS_B);
-    expect(ifMatchOf(0)).toBe('"r1"');
+      const sent = mockPut.mock.calls[0]?.[0] as AppSettingsPutBody;
+      expect(
+        sent.promptSettings?.textSystemPrompt,
+        'expected the PUT to carry key A (typed before the refetch) | received: the refetched value'
+      ).toBe(PROMPT_A);
+      expect(sent.maxToolIterations).toBe(TOOL_ITERATIONS_B);
+      expect(ifMatchOf(0)).toBe('"r1"');
+    } finally {
+      await restoreRealTimers();
+    }
   });
 
   it('rebases the unsent key over another tab write and sends both on the newer revision', async () => {
     const { result } = renderWithCache();
     await waitFor(() => expect(result.current.settings.isLoading).toBe(false));
 
-    await typePromptA(() => result.current);
-    // Another tab saved a different field, so the server is now at r2.
-    mockGet.mockResolvedValue(
-      mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r2"', globalImageQuality: '4K' })
-    );
-    await refetchAppSettings(result.current.queryClient);
+    // Driven by hand for the same reason as the case above.
+    useFakeTimers();
+    try {
+      act(() => result.current.settings.setTextSystemPrompt(PROMPT_A));
+      // Another tab saved a different field, so the server is now at r2.
+      mockGet.mockResolvedValue(
+        mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r2"', globalImageQuality: '4K' })
+      );
+      await refetchAppSettings(result.current.queryClient);
+      await advanceTimersByTimeAsync(0);
 
-    expect(cachedPrompt(result.current.queryClient)).toBe(PROMPT_A);
-    await waitFor(() => expect(result.current.settings.globalImageQuality).toBe('4K'));
-    expect(result.current.settings.promptSettings.textSystemPrompt).toBe(PROMPT_A);
+      expect(cachedPrompt(result.current.queryClient)).toBe(PROMPT_A);
+      expect(result.current.settings.globalImageQuality).toBe('4K');
+      expect(result.current.settings.promptSettings.textSystemPrompt).toBe(PROMPT_A);
 
-    act(() => result.current.settings.setMaxToolIterations(TOOL_ITERATIONS_B));
-    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+      act(() => result.current.settings.setMaxToolIterations(TOOL_ITERATIONS_B));
+      await advanceTimersByTimeAsync(SETTINGS_DEBOUNCE_MS);
+      expect(mockPut).toHaveBeenCalledTimes(1);
 
-    const sent = mockPut.mock.calls[0]?.[0] as AppSettingsPutBody;
-    expect(sent.promptSettings?.textSystemPrompt).toBe(PROMPT_A);
-    expect(sent.maxToolIterations).toBe(TOOL_ITERATIONS_B);
-    // The other tab's field rides along unchanged rather than being reset.
-    expect(sent.globalImageQuality).toBe('4K');
-    expect(
-      ifMatchOf(0),
-      'expected If-Match to name the refetched revision "r2" | received: the revision the burst started on'
-    ).toBe('"r2"');
+      const sent = mockPut.mock.calls[0]?.[0] as AppSettingsPutBody;
+      expect(sent.promptSettings?.textSystemPrompt).toBe(PROMPT_A);
+      expect(sent.maxToolIterations).toBe(TOOL_ITERATIONS_B);
+      // The other tab's field rides along unchanged rather than being reset.
+      expect(sent.globalImageQuality).toBe('4K');
+      expect(
+        ifMatchOf(0),
+        'expected If-Match to name the refetched revision "r2" | received: the revision the burst started on'
+      ).toBe('"r2"');
 
-    await waitFor(() => expect(result.current.settings.maxToolIterations).toBe(TOOL_ITERATIONS_B));
-    expect(result.current.settings.promptSettings.textSystemPrompt).toBe(PROMPT_A);
-    expect(result.current.settings.globalImageQuality).toBe('4K');
+      await advanceTimersByTimeAsync(0);
+      expect(result.current.settings.maxToolIterations).toBe(TOOL_ITERATIONS_B);
+      expect(result.current.settings.promptSettings.textSystemPrompt).toBe(PROMPT_A);
+      expect(result.current.settings.globalImageQuality).toBe('4K');
+    } finally {
+      await restoreRealTimers();
+    }
   });
 
   it('still converges through the conflict path when the rebased revision is stale too', async () => {
