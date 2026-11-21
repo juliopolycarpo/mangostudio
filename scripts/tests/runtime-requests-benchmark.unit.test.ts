@@ -60,5 +60,8 @@ describe('runtime-requests benchmark fixtures', () => {
     } finally {
       await rm(scratch, { recursive: true, force: true });
     }
-  });
+    // About 1,400 small files across the scenarios; the list tree's shape
+    // makes 1,000 its floor. On a loaded Windows runner the writes alone ran
+    // past the 15 s default.
+  }, 60_000);
 });
