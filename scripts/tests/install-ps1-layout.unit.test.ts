@@ -929,8 +929,10 @@ describe('install.ps1 canary release lookup (fake api.github.com)', () => {
   // headers the way WebException (Windows PowerShell 5.1) and
   // HttpResponseException (PowerShell 7) do. Only single quotes appear in the
   // command, so it survives the powershell.exe argument quoting unchanged.
+  // A PowerShell class, not Add-Type: Add-Type compiled C# in every case's
+  // fresh process, and on a loaded Windows runner the first case ran past 15 s.
   const DEFINE_FAKE_EXCEPTION =
-    "Add-Type -TypeDefinition 'public class FakeGithubApiException : System.Exception { public object Response; public FakeGithubApiException(string message, object response) : base(message) { Response = response; } }'";
+    'class FakeGithubApiException : System.Exception { [object]$Response; FakeGithubApiException([string]$message, [object]$apiResponse) : base($message) { $this.Response = $apiResponse } }';
   const RESET_EPOCH = '1790000000';
   const RESET_UTC = '2026-09-21T14:13:20Z';
   const TOKEN = 'ghp_FIXTURE_TOKEN_MUST_NOT_PRINT';
@@ -943,7 +945,7 @@ describe('install.ps1 canary release lookup (fake api.github.com)', () => {
         ([name, value]) => `$h.Add(${psQuote(name)}, ${psQuote(value)})`
       ),
       `$r = [pscustomobject]@{ StatusCode = ${status}; Headers = $h }`,
-      `throw (New-Object FakeGithubApiException -ArgumentList @('The remote server returned an error: (${status}).', $r))`,
+      `throw [FakeGithubApiException]::new('The remote server returned an error: (${status}).', $r)`,
     ].join('; ');
 
   /**
