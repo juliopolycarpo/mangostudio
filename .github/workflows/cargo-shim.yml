@@ -160,7 +160,7 @@ jobs:
       # with no compilation. The version is pinned here and the action
       # verifies its release checksum.
       - id: setup-shear
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-shear@1.14.0
         if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
@@ -200,7 +200,7 @@ jobs:
       # its own process and does not run doctests, which stay on `cargo test
       # --doc` below.
       - id: setup-nextest
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-nextest@0.9.151
         if: ${{ !cancelled() && matrix.os != 'ubuntu-latest' }}
@@ -325,7 +325,7 @@ jobs:
       # Pinned like the workspace job's install: the exact version through the
       # SHA-pinned action, which verifies the release checksum.
       - id: setup-nextest
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-nextest@0.9.151
         if: ${{ !cancelled() }}
