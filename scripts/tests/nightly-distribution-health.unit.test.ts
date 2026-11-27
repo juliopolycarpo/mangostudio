@@ -276,6 +276,21 @@ describe('nightly distribution health workflow', () => {
       );
     });
 
+    test('authenticates the installer API request on both shells', () => {
+      const workflow = readText(WORKFLOW_PATH);
+
+      // install.sh and install.ps1 read GITHUB_TOKEN for api.github.com. Without
+      // it the lanes hit the anonymous per-IP limit of a shared runner: ten of
+      // eleven nightly failures up to 2026-11-27 were that HTTP 403.
+      for (const name of [LINUX_STEP, WINDOWS_STEP]) {
+        const tokens = installScriptStep(workflow, name).match(/^ {10}GITHUB_TOKEN: .*$/gm) ?? [];
+        expect(
+          tokens.map((line) => line.trim()),
+          `(${name}): expected one GITHUB_TOKEN env entry set to the workflow token | received: ${JSON.stringify(tokens)}`
+        ).toEqual(['GITHUB_TOKEN: ${' + '{ github.token }}']);
+      }
+    });
+
     test('verifies the script against the resolved identity on both shells', () => {
       const workflow = readText(WORKFLOW_PATH);
       const unix = installScriptStep(workflow, LINUX_STEP);
