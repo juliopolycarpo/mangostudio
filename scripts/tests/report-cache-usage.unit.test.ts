@@ -15,6 +15,12 @@ import {
 } from '../ci/report-cache-usage';
 import { RUST_CACHE_FAMILIES } from '../ci/rust-cache/families';
 import { ROOT_DIR } from '../lib/config';
+import { ADVISORY_RETRY_POLICY, GitHubRetry } from '../lib/github-retry';
+import {
+  RecordedRetryEnvironment,
+  ScriptedGitHubHttp,
+  type ScriptedReply,
+} from './support/scripted-github-http';
 
 const scopedKey = (family: string) => `Linux-X64-v1-${family}-main-check-bun-revision`;
 const rustKey = (family: string) =>
@@ -322,22 +328,40 @@ describe('allowance and independent usage samples', () => {
   });
 });
 
+/** Answers each request from the queue of its endpoint path under /actions. */
+class PathRoutedGitHubHttp extends ScriptedGitHubHttp {
+  constructor(private readonly routes: Record<string, ScriptedReply[]>) {
+    super();
+  }
+
+  override request(url: string, init: RequestInit): Promise<Response> {
+    const path = new URL(url).pathname.replace(/^.*\/actions/, '');
+    const next = this.routes[path]?.shift();
+    if (next) this.replies.push(next);
+    return super.request(url, init);
+  }
+}
+
 describe('bounded read-only adapter', () => {
   test('starts without installed packages and exits successfully after a configuration failure', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'cache-report-no-install-'));
     try {
+      // Same layout as the repository, so the shared retry module resolves as it
+      // does in CI. Copying only these files proves the import graph needs no
+      // installed package.
       for (const path of [
-        'report-cache-usage.ts',
-        'cache-families.ts',
-        'cache-usage/github.ts',
-        'rust-cache/families.ts',
+        'ci/report-cache-usage.ts',
+        'ci/cache-families.ts',
+        'ci/cache-usage/github.ts',
+        'ci/rust-cache/families.ts',
+        'lib/github-retry.ts',
       ]) {
-        const destination = join(directory, path);
+        const destination = join(directory, 'scripts', path);
         mkdirSync(dirname(destination), { recursive: true });
-        copyFileSync(join(ROOT_DIR, 'scripts/ci', path), destination);
+        copyFileSync(join(ROOT_DIR, 'scripts', path), destination);
       }
       const process = Bun.spawn([Bun.which('bun') ?? 'bun', './report-cache-usage.ts'], {
-        cwd: directory,
+        cwd: join(directory, 'scripts/ci'),
         env: {
           GITHUB_REPOSITORY: '../../invalid',
           GITHUB_TOKEN: 'unused-test-token',
@@ -381,17 +405,75 @@ describe('bounded read-only adapter', () => {
     }
   });
 
-  test('rate-limited requests return advisory problems without retries', async () => {
-    let calls = 0;
-    const api = new GithubCacheUsageApi('owner/repo', 'token', () => {
-      calls++;
-      return Promise.resolve(new Response(null, { status: 429 }));
-    });
-    const report = await collectCacheReport(api);
-    expect(calls).toBe(3);
+  function scriptedUsageApi(http: ScriptedGitHubHttp, environment: RecordedRetryEnvironment) {
+    return new GithubCacheUsageApi(
+      'owner/repo',
+      'token',
+      (url, init) => http.request(url, init),
+      new GitHubRetry(ADVISORY_RETRY_POLICY, environment)
+    );
+  }
+
+  test('rate-limited requests retry within the 1 s wait budget, then report advisory problems', async () => {
+    const http = new ScriptedGitHubHttp();
+    http.replies = Array.from({ length: 5 }, () => ({ status: 429 }));
+    const environment = new RecordedRetryEnvironment();
+    const report = await collectCacheReport(scriptedUsageApi(http, environment));
+    // Two requests spend the 1 s budget on one 0.5 s retry each; the third gets none.
+    expect(http.calls).toHaveLength(5);
+    expect(environment.waits).toEqual([500, 500]);
     expect(report.allowanceProblem).toContain('HTTP 429');
     expect(report.usageProblem).toContain('HTTP 429');
     expect(report.inventory.complete).toBe(false);
+  });
+
+  test('a Retry-After beyond the advisory cap is reported at once, without waiting', async () => {
+    const http = new ScriptedGitHubHttp();
+    http.replies = Array.from({ length: 3 }, () => ({
+      status: 429,
+      headers: { 'retry-after': '120' },
+    }));
+    const environment = new RecordedRetryEnvironment();
+    const report = await collectCacheReport(scriptedUsageApi(http, environment));
+    expect(http.calls).toHaveLength(3);
+    expect(environment.waits).toEqual([]);
+    expect(report.allowanceProblem).toContain('server asked for 120 s, over the 1 s cap');
+  });
+
+  test('a 502 on one read is retried once and the report completes', async () => {
+    // The collector reads allowance, usage and listing concurrently, so answers go by path.
+    const http = new PathRoutedGitHubHttp({
+      '/cache/storage-limit': [
+        { status: 502, text: 'Bad Gateway' },
+        { status: 200, body: { max_cache_size_gb: 35 } },
+      ],
+      '/cache/usage': [
+        { status: 200, body: { active_caches_size_in_bytes: 0, active_caches_count: 0 } },
+      ],
+      '/caches': [{ status: 200, body: page([]) }],
+    });
+    const environment = new RecordedRetryEnvironment();
+    const report = await collectCacheReport(scriptedUsageApi(http, environment));
+    expect(environment.waits).toEqual([500]);
+    expect(report.allowanceGb).toBe(35);
+    expect(report.inventory.complete).toBe(true);
+  });
+
+  test('a non-JSON 200 names the request, the page and the received body', async () => {
+    const http = new ScriptedGitHubHttp();
+    http.replies = [
+      { status: 200, text: '<html>Unicorn</html>' },
+      { status: 200, text: '<html>Unicorn</html>' },
+      { status: 200, text: '<html>Unicorn</html>' },
+    ];
+    const report = await collectCacheReport(scriptedUsageApi(http, new RecordedRetryEnvironment()));
+    expect(report.inventory.problems.join('\n')).not.toContain('JSON Parse error');
+    expect(report.inventory.problems.join('\n')).toContain(
+      'Invalid GET /caches?per_page=100&page=1&sort=created_at&direction=asc page 1; expected a cache listing object as JSON (HTTP 200) | received <html>Unicorn</html>'
+    );
+    expect(report.allowanceProblem).toContain(
+      'Invalid GET /cache/storage-limit; expected a storage limit object'
+    );
   });
 
   test('per-request deadline aborts even when the transport ignores abort', async () => {
