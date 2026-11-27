@@ -393,7 +393,7 @@ describe('GitHubRetry.anyFailure', () => {
       'ok'
     );
     expect(environment.waits).toEqual([2_000]);
-    expect(log).toEqual(['::warning::Artifact 7 attempt 1 failed: digest mismatch']);
+    expect(log).toEqual(['::warning::Artifact 7 attempt 1/2 failed: digest mismatch']);
   });
 
   test('rethrows the last failure when every attempt failed', async () => {

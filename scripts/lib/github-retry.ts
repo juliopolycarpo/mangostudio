@@ -340,7 +340,9 @@ export class GitHubRetry {
         return { value: await attempt(number) };
       } catch (failure) {
         const message = failure instanceof Error ? failure.message : String(failure);
-        log(`::warning::${label} attempt ${number} failed: ${message}`);
+        log(
+          `::warning::${label} attempt ${number}/${this.policy.backoffMs.length + 1} failed: ${message}`
+        );
         return { failure, decision: { retry: true, reason: 'attempt failed' } };
       }
     });

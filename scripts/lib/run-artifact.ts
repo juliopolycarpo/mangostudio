@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { distributionBundleMember } from './distribution-artifact';
+import { ARTIFACT_DOWNLOAD_RETRY_POLICY, GitHubRetry, malformedResponse } from './github-retry';
 import { openZipArchive, type ZipArchiveDependencies } from './zip-archive';
 
 // actions/download-artifact has stayed alive for its whole step deadline after
@@ -23,8 +24,12 @@ import { openZipArchive, type ZipArchiveDependencies } from './zip-archive';
 export const METADATA_TIMEOUT_MS = 15_000;
 /** Longest an artifact ZIP transfer may run before the attempt is abandoned. */
 export const ARCHIVE_TIMEOUT_MS = 70_000;
-/** One try plus one retry; the pair stays inside the callers' 3-minute step deadline. */
-export const DOWNLOAD_ATTEMPTS = 2;
+/**
+ * One try plus one retry, 2 s apart (the policy's whole wait). The two attempts
+ * and the pause take at most 2 * (15 + 70) + 2 = 172 s, inside the 3-minute step
+ * deadline most callers declare.
+ */
+export const DOWNLOAD_ATTEMPTS = ARTIFACT_DOWNLOAD_RETRY_POLICY.backoffMs.length + 1;
 
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/;
 
@@ -221,35 +226,22 @@ export async function findRunArtifact(options: {
   if (result.exitCode !== 0) {
     throw new Error(`Run ${options.runId} artifact list: gh exited with ${result.exitCode}`);
   }
-  return selectRunArtifact(
-    JSON.parse(result.stdout) as RunArtifactListing,
-    options.name,
-    options.runId
-  );
-}
-
-/**
- * Run `attempt` up to `attempts` times, naming each failure, and rethrow the last.
- * The attempt owns its own bounds, so a stall in one cannot consume the next.
- * // Usage: await withAttempts(2, 'artifact', () => download())
- */
-export async function withAttempts<T>(
-  attempts: number,
-  label: string,
-  attempt: (number: number) => Promise<T>,
-  log: (message: string) => void = console.error
-): Promise<T> {
-  let failure: unknown;
-  for (let number = 1; number <= attempts; number += 1) {
-    try {
-      return await attempt(number);
-    } catch (error) {
-      failure = error;
-      const message = error instanceof Error ? error.message : String(error);
-      log(`::warning::${label} attempt ${number}/${attempts} failed: ${message}`);
-    }
+  const site = { request: `GET runs/${options.runId}/artifacts` };
+  let listing: unknown;
+  try {
+    listing = JSON.parse(result.stdout);
+  } catch {
+    throw malformedResponse(site, 'an artifact listing object as JSON', result.stdout);
   }
-  throw failure instanceof Error ? failure : new Error(String(failure));
+  // A body without the array is not "zero artifacts": name what arrived.
+  if (
+    typeof listing !== 'object' ||
+    listing === null ||
+    !Array.isArray((listing as { artifacts?: unknown }).artifacts)
+  ) {
+    throw malformedResponse(site, 'an object with an "artifacts" array', listing);
+  }
+  return selectRunArtifact(listing as RunArtifactListing, options.name, options.runId);
 }
 
 export interface DownloadRunArtifactOptions {
@@ -261,7 +253,8 @@ export interface DownloadRunArtifactOptions {
   /** `bundle` keeps the one flat distribution tar; `tree` extracts every entry. */
   readonly mode: 'bundle' | 'tree';
   readonly scratchRoot?: string;
-  readonly attempts?: number;
+  /** Retry runtime for the download attempts; tests pass one that does not sleep. */
+  readonly retry?: GitHubRetry;
   readonly run?: BoundedRunner;
   readonly digestOf?: (path: string) => Promise<string>;
   readonly zip?: ZipArchiveDependencies;
@@ -270,7 +263,7 @@ export interface DownloadRunArtifactOptions {
 
 /**
  * Download one artifact of the current run through the GitHub CLI and extract it.
- * Every network call is bounded and the whole fetch is tried twice; the ZIP digest
+ * Every network call is bounded and the whole fetch is tried twice, 2 s apart; the ZIP digest
  * is checked against the one recorded at upload before anything is extracted.
  * // Usage: await downloadRunArtifact({ repository, runId, name, destination, mode: 'tree' })
  */
@@ -278,8 +271,8 @@ export async function downloadRunArtifact(options: DownloadRunArtifactOptions): 
   const scratch = mkdtempSync(join(options.scratchRoot ?? tmpdir(), 'run-artifact-'));
   try {
     const archive = join(scratch, 'artifact.zip');
-    await withAttempts(
-      options.attempts ?? DOWNLOAD_ATTEMPTS,
+    const retry = options.retry ?? new GitHubRetry(ARTIFACT_DOWNLOAD_RETRY_POLICY);
+    await retry.anyFailure(
       `Artifact ${options.name}`,
       async () => {
         const { id, digest } = await findRunArtifact(options);
