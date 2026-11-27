@@ -60,6 +60,7 @@ importing the specific module in new code:
 | `exec.ts`                 | `runCommand`, `captureCommand`, `mapWithConcurrency`, `archiveConcurrency`, `runParallel`, `runTask`     |
 | `process-tree.ts`         | Child limit and cancellation behind `runCommand`: process groups on POSIX, a job object on Windows       |
 | `summary.ts`              | Pass/fail reporting + exit handling                                                                      |
+| `github-retry.ts`         | One retry policy for GitHub reads over `fetch` and `gh`; built-ins only, so safe without install         |
 | `fs.ts`                   | Cross-platform `removePaths` (no spawned `rm`)                                                           |
 | `fs-assert.ts`            | `assertFile`/`assertDirectory` (throw) + `fileError` (collect)                                           |
 | `config.ts`               | Workspace definitions + root lint/format path lists                                                      |
