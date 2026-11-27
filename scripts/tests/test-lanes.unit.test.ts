@@ -84,11 +84,10 @@ describe('test lane declarations', () => {
   // The unisolated API integration files share a module
   // graph and a shard's companions decide what it inherits. A timings-balanced
   // partition rotates every run (the file is refreshed and cached), which
-  // turns any leak into an intermittent failure in a file nobody touched;
-  // round-robin is derived from the file set alone, so the same commit always
-  // splits the same way. Pinned so re-adding timings for the balance is a
-  // deliberate act — it costs 9.6s on the lane's critical shard (measured),
-  // and reproducibility is the more expensive thing to lose.
+  // turns any leak into an intermittent failure in a file nobody touched.
+  // The shards split by the tracked weights, which are committed, so the same
+  // commit always splits the same way. Pinned so re-adding timings is a
+  // deliberate act: reproducibility is the more expensive thing to lose.
   it('the unisolated api-integration lane opts out of timings', () => {
     const lane = laneById('api-integration');
     expect(lane.sharded).toBe(true);

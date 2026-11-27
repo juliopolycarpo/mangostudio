@@ -1,5 +1,6 @@
 // Tracked weights for the worker lanes that split by them (`laneSpec` in
-// ./test-workers.ts reads `LANE_WEIGHTS`). A weight is a file's measured wall
+// ./test-workers.ts reads `LANE_WEIGHTS`), and for the api-integration CI shards
+// (./weighted-shard.ts). A weight is a file's measured wall
 // time in seconds, rounded to whole seconds below 10 s and to multiples of 5
 // from 10 s up, so a re-measure that finds a file 10% slower leaves its line
 // alone. Only files of 3 s and more

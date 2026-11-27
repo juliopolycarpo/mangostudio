@@ -120,8 +120,9 @@ export const workerReportPath = (lane: Pick<TestLane, 'id'>): string =>
  * shard still exits 0. The duplicate-claim check in `mergeLaneSlices`
  * (`scripts/ci/merge-timings-shards.ts`) is what turns that into a failure.
  *
- * The unisolated `api-integration` lane uses a stable file-order split
- * because its test files share process state.
+ * The unisolated `api-integration` lane has none: its test files share process
+ * state, so its shards split by the tracked weights in `test-lane-weights.ts`,
+ * which are committed.
  *
  * The unsharded frontend lane keeps one too: `--timings` also balances
  * `--parallel` workers by measured wall time instead of file order.
@@ -214,33 +215,35 @@ export const TEST_LANES: readonly TestLane[] = [
     // memoized `getAuth()`. A timings-balanced partition is a function of a
     // file that is refreshed every run and cached across runs, so it rotates:
     // a file's companions change from run to run and a leak surfaces as an
-    // intermittent failure in a file nobody touched. Round-robin over the
-    // alphabetical list is derived by each shard from the file set alone, so
-    // the same commit always produces the same partition and a leak is
-    // reproducible from the SHA.
+    // intermittent failure in a file nobody touched. So the split must be a
+    // function of the commit, and no timings snapshot goes into it.
     //
-    // Measured on the 101-file lane (Bun 1.4.0, 85.3s total): the critical
-    // shard goes 20.3s -> 29.9s at N=8. Cheap, because one file
-    // (`spawn-runtime-child`, 20.3s) is 24% of the lane and is the floor under
-    // any split — the balancing had little left to win. Determinism verified:
-    // two no-timings runs produced byte-identical partitions, union 101 files,
-    // no duplicates.
+    // The CI shards split by the tracked weights in `test-lane-weights.ts`
+    // (`partitionByWeight`, through scripts/run-weighted-shard.ts), which is
+    // committed data like the file list: the same commit gives the same files in
+    // the same shard, and a retried shard gets its first attempt's partition. Bun's
+    // round-robin `--shard=i/N` was the split before, chosen for the same
+    // reason. It cost balance: on the 168 files of this lane the tracked weights
+    // (352 s in all, an unlisted file counting as 1 s) put 125 s and 227 s on
+    // two shards of 84 files each, and 176 s and 176 s on two weighted shards
+    // of 83 and 85 files. Computed from the tracked weights, not measured in CI;
+    // `weighted-shard.unit.test.ts` pins that no shard count from 2 to 8 ends up
+    // more than 5% above the mean.
     //
     // Note what this does *not* buy: the partition is stable for a given file
-    // set, not across them. Adding or deleting an integration file shifts the
-    // whole stride. Detection of the leak class itself is the randomized-order
-    // nightly's job (`.github/workflows/randomized-order-nightly.yml`).
+    // set and weight table, not across them. Adding a file or changing a weight
+    // moves files between shards. Detection of the leak class itself is the
+    // randomized-order nightly's job
+    // (`.github/workflows/randomized-order-nightly.yml`).
     //
     // The plain `test:integration` run is the one place the lane goes wider: as
     // several processes, each an unisolated `bun test` over the explicit files
-    // `partitionByWeight` gives it from the tracked weights in
-    // `test-lane-weights.ts`, in path order. That split is a function of the
-    // commit like the round-robin one, so a leak is reproducible from the SHA,
-    // but a worker's companions are no longer the ones a CI shard of that width
-    // has (CI keeps `--shard=i/N`). `settle` makes each worker prove it left no
+    // `partitionByWeight` gives it, in path order. A worker of width N has the
+    // companions of CI shard i/N (`MANGO_TEST_WORKERS=2` reproduces a two-shard
+    // CI split). `settle` makes each worker prove it left no
     // process behind (these tests spawn the runtime, servers and shells).
-    // `test:coverage:integration` stays one process, for the reason the api-unit
-    // entry gives.
+    // `test:coverage:integration` stays one process per shard, for the reason
+    // the api-unit entry gives.
     lcovPath: '.mango/artifacts/coverage/api-integration/lcov.info',
     workers: { testDir: 'tests/integration', defaultWidth: 4, settle: true },
     manifest: 'apps/api/package.json',

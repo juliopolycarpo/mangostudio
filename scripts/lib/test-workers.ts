@@ -497,6 +497,18 @@ export function discoverTestFiles(cwd: string, testDir: string): string[] {
   );
 }
 
+/**
+ * Every file a lane owns: the ones under its test directory plus `alsoRuns`,
+ * in path order. The worker runner's census and the CI shard split both start
+ * from this list, so a file one of them runs is a file the other owns.
+ *
+ * @example
+ * laneCensus(laneSpec(laneById('api-integration'), command)).length; // => 168
+ */
+export function laneCensus(spec: Pick<WorkerLaneSpec, 'cwd' | 'testDir' | 'alsoRuns'>): string[] {
+  return [...discoverTestFiles(spec.cwd, spec.testDir), ...(spec.alsoRuns ?? [])].sort();
+}
+
 /** A case reduced to what two reports must agree on. */
 export interface ReportedCase {
   readonly identity: string;
@@ -875,7 +887,7 @@ export async function runWorkerLane(
   mkdirSync(dirname(options.mergedPath), { recursive: true });
 
   // Counted before any worker runs: this is the file set the lane owned when it started.
-  const census = [...discoverTestFiles(spec.cwd, spec.testDir), ...(spec.alsoRuns ?? [])].sort();
+  const census = laneCensus(spec);
   const reportDir = mkdtempSync(join(options.scratchRoot ?? tmpdir(), 'mangostudio-test-workers-'));
   try {
     const plans = planWorkers(spec, options.count, reportDir, census);

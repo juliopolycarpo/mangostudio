@@ -20,7 +20,20 @@ const scripts = (
 // Only the current coverage/reporting options may precede the one directory
 // selector. Unknown flags or extra selectors require a coverage review.
 function isUnfilteredCoverageCommand(command: string, directory: string): boolean {
-  const tokens = command.trim().split(/\s+/);
+  const allTokens = command.trim().split(/\s+/);
+  // A weighted lane runs its shards through the weighted-shard wrapper, which
+  // swaps the trailing `--shard=i/N <directory>` for the shard's own files. The
+  // union of those files over every shard is the directory (the partition tests
+  // in weighted-shard.unit.test.ts pin that), so the wrapper still leaves the
+  // command unfiltered. Anything else between the variable and the launcher fails.
+  const wrapper = allTokens.slice(1, 5);
+  const wrapped =
+    wrapper.length === 4 &&
+    wrapper[0] === 'bun' &&
+    wrapper[1] === '../../scripts/run-weighted-shard.ts' &&
+    /^--lane=[a-z-]+$/.test(wrapper[2] ?? '') &&
+    wrapper[3] === '--';
+  const tokens = wrapped ? [allTokens[0] ?? '', ...allTokens.slice(5)] : allTokens;
   const prefix = 'MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun ../../scripts/with-test-home.ts bun test';
   if (tokens.slice(0, 5).join(' ') !== prefix) return false;
   const args = tokens.slice(5);
