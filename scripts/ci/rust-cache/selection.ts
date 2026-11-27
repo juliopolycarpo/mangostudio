@@ -8,7 +8,8 @@ export interface RustCacheDeletion {
   readonly replacement: RustCacheEntry;
 }
 
-function familyIdentity(entry: RustCacheEntry): string | undefined {
+/** A committed main-ref entry whose key is a known Rust family, or nothing. */
+function readEntry(entry: RustCacheEntry): ReturnType<typeof parseRustCacheKey> {
   if (
     !Number.isSafeInteger(entry.id) ||
     entry.id < 1 ||
@@ -17,12 +18,56 @@ function familyIdentity(entry: RustCacheEntry): string | undefined {
   )
     return;
   if (entry.ref !== MAIN_CACHE_REF || !/^[a-f0-9]{64}$/.test(entry.version)) return;
-  const parsed = parseRustCacheKey(entry.key);
+  return parseRustCacheKey(entry.key);
+}
+
+function familyIdentity(entry: RustCacheEntry): string | undefined {
+  const parsed = readEntry(entry);
   if (!parsed) return;
-  const { family, os, arch, environment } = parsed;
+  const { generation, family, os, arch, environment } = parsed;
   // Preserve the cache archive version as well as the compiler/environment,
   // platform, target and profile. Only manifest/dependency generations rotate.
-  return [family, os, arch, environment, entry.version].join(':');
+  // The key generation is part of the identity so a late save by an older
+  // workflow revision can never count as the replacement of a current entry.
+  return [generation, family, os, arch, environment, entry.version].join(':');
+}
+
+// The environment hash is left out: pruning the runner image's toolchain moved it for every family
+// at once, so a manifest-generation entry never shares an environment with its profile-generation
+// successor. What must match is what the entry was for.
+function platformIdentity(entry: RustCacheEntry): string | undefined {
+  const parsed = readEntry(entry);
+  if (!parsed) return;
+  return [parsed.family, parsed.os, parsed.arch, entry.version].join(':');
+}
+
+/**
+ * Entries of the retired `v0-rust-<hashFiles('Cargo.toml')>` generation. No workflow restores that
+ * prefix any more, so each one is dead weight once a profile-generation entry exists for the same
+ * family, runner and archive version. Until one does, the entry stays: it is the only warm copy
+ * an in-flight run on an older workflow revision could still read.
+ */
+function retiredManifestGenerations(entries: readonly RustCacheEntry[]): RustCacheDeletion[] {
+  const successors = new Map<string, RustCacheEntry>();
+  const retired: RustCacheEntry[] = [];
+  for (const entry of entries) {
+    const identity = platformIdentity(entry);
+    if (!identity) continue;
+    if (readEntry(entry)?.generation === 'manifest') {
+      retired.push(entry);
+      continue;
+    }
+    const known = successors.get(identity);
+    // A malformed timestamp parses to NaN, which loses every comparison: such an entry is only
+    // chosen when it is the sole successor.
+    if (!known || Date.parse(entry.created_at) > Date.parse(known.created_at)) {
+      successors.set(identity, entry);
+    }
+  }
+  return retired.flatMap((entry) => {
+    const replacement = successors.get(platformIdentity(entry) ?? '');
+    return replacement ? [{ entry, replacement }] : [];
+  });
 }
 
 function olderGenerations(entries: readonly RustCacheEntry[]): RustCacheDeletion[] {
@@ -51,5 +96,9 @@ export function selectRustCacheDeletions(entries: readonly RustCacheEntry[]): Ru
     family.push(entry);
     families.set(identity, family);
   }
-  return [...families.values()].flatMap(olderGenerations);
+  const superseded = [...families.values()].flatMap(olderGenerations);
+  // An entry both rules select is deleted once.
+  const planned = new Set(superseded.map(({ entry }) => entry.id));
+  const retired = retiredManifestGenerations(entries).filter(({ entry }) => !planned.has(entry.id));
+  return [...superseded, ...retired];
 }

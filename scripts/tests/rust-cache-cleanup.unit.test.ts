@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { readCleanupContext, readFixtureListing } from '../ci/rust-cache-cleanup';
 import { cleanupRustCaches } from '../ci/rust-cache/cleanup';
+import { parseRustCacheKey } from '../ci/rust-cache/families';
 import {
   type CacheWriterRun,
   GithubRustCacheApi,
@@ -71,6 +72,106 @@ describe('Rust cache generation selection', () => {
   test('retires a dead root-manifest prefix only inside the same explicit family', () => {
     const deadPrefix = changedEntry(OLD, { key: OLD.key.replace(/[a-f0-9]{64}/, 'f'.repeat(64)) });
     expect(ids([NEW, deadPrefix])).toEqual([OLD.id]);
+  });
+
+  // The profile generation changes the prefix and, by pruning the image's toolchain, every
+  // environment hash with it. Those entries never share an environment with the manifest
+  // generation, so only the platform-level rule below can retire the old ones.
+  describe('retired manifest generation', () => {
+    const PROFILE_DIGEST = 'c'.repeat(64);
+    const MANIFEST_DIGEST = /^v0-rust-[a-f0-9]{64}-/;
+    /** The profile-generation successor of a captured entry, under a new environment hash. */
+    function profileEntry(base: RustCacheEntry, changes: Partial<RustCacheEntry> = {}) {
+      return changedEntry(base, {
+        key: base.key
+          .replace(MANIFEST_DIGEST, `v0-rust-profile-${PROFILE_DIGEST}-`)
+          .replace(/-[a-f0-9]{8}-[a-f0-9]{8}$/, '-0e0e0e0e-d21022ad'),
+        created_at: '2026-11-28T00:00:00Z',
+        ...changes,
+      });
+    }
+
+    test('reads both prefix shapes as the same family and tells them apart', () => {
+      const manifest = parseRustCacheKey(NEW.key);
+      const profile = parseRustCacheKey(profileEntry(NEW, { id: 9 }).key);
+      expect(manifest?.generation, `received: ${JSON.stringify(manifest)}`).toBe('manifest');
+      expect(profile?.generation, `received: ${JSON.stringify(profile)}`).toBe('profile');
+      expect(profile?.family).toBe(manifest?.family);
+      // A profile prefix whose digest is not 64-hex is not a key the cleanup may touch.
+      expect(parseRustCacheKey(profileEntry(NEW).key.replace(PROFILE_DIGEST, 'c'.repeat(63)))).toBe(
+        undefined
+      );
+    });
+
+    test('deletes every manifest-generation entry of a family that has a profile entry', () => {
+      const successor = profileEntry(NEW, { id: 9 });
+      const plan = selectRustCacheDeletions([successor, NEW, OLD]);
+      expect(
+        plan.map(({ entry, replacement }) => [entry.id, replacement.id]),
+        'expected both manifest entries retired once, OLD under its own newer generation'
+      ).toEqual([
+        [OLD.id, NEW.id],
+        [NEW.id, 9],
+      ]);
+      expect(plan.map(({ entry }) => entry.id)).not.toContain(9);
+    });
+
+    test('retires the light and the shipping environments of one family together', () => {
+      const lightOld = changedEntry(OLD, { id: 2, key: OLD.key.replace('b9e20461', '1234abcd') });
+      const successor = profileEntry(NEW, { id: 9 });
+      expect(ids([successor, NEW, lightOld]).sort()).toEqual([2, NEW.id].sort());
+    });
+
+    test('keeps a manifest entry until a profile entry exists for its family', () => {
+      const otherFamily = profileEntry(
+        changedEntry(NEW, { key: NEW.key.replace('runtime-build-linux-arm64', 'workspace') }),
+        { id: 9 }
+      );
+      expect(ids([otherFamily, NEW])).toEqual([]);
+    });
+
+    test.each([
+      { label: 'runner OS', from: '-Linux-', to: '-Darwin-' },
+      { label: 'runner architecture', from: '-Linux-x64-', to: '-Linux-arm64-' },
+    ])('keeps a manifest entry when the profile entry has another $label', ({ from, to }) => {
+      const successor = profileEntry(NEW, { id: 9 });
+      const elsewhere = changedEntry(successor, { key: successor.key.replace(from, to) });
+      expect(ids([elsewhere, NEW])).toEqual([]);
+    });
+
+    test.each([
+      { label: 'archive version', change: { version: 'a'.repeat(64) } },
+      { label: 'pull request ref', change: { ref: 'refs/pull/9/merge' } },
+      { label: 'zero size', change: { size_in_bytes: 0 } },
+    ])('ignores a profile entry with another $label as the replacement', ({ change }) => {
+      expect(ids([profileEntry(NEW, { id: 9, ...change }), NEW])).toEqual([]);
+    });
+
+    test('a newer manifest entry never retires the profile entry that has its environment', () => {
+      const profile = profileEntry(NEW, { id: 9 });
+      // An older workflow revision finishing late writes a manifest entry in the same environment.
+      const late = changedEntry(OLD, {
+        id: 10,
+        key: OLD.key.replace('f6a2f3f2', 'd21022ad').replace('b9e20461', '0e0e0e0e'),
+        created_at: '2026-11-29T00:00:00Z',
+      });
+      expect(ids([profile, late])).toEqual([10]);
+    });
+
+    test('chooses the newest profile entry as the replacement', () => {
+      const older = profileEntry(NEW, { id: 9, created_at: '2026-11-27T00:00:00Z' });
+      const newer = profileEntry(NEW, {
+        id: 11,
+        key: profileEntry(NEW).key.replace('d21022ad', '0b0b0b0b'),
+        created_at: '2026-11-29T00:00:00Z',
+      });
+      const plan = selectRustCacheDeletions([older, newer, NEW]);
+      // The older profile entry shares the newer one's environment, so the ordinary rule retires it.
+      expect(plan.map(({ entry, replacement }) => [entry.id, replacement.id])).toEqual([
+        [9, 11],
+        [NEW.id, 11],
+      ]);
+    });
   });
 
   test('requires a positive committed archive size and distinct immutable IDs', () => {
