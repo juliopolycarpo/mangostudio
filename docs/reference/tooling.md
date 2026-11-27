@@ -15,7 +15,7 @@ The composite and the two bootstraps share one `oven-sh/setup-bun` pin, which
 `bun-toolchain.unit.test.ts` enforces; Dependabot's `setup-bun` group updates
 all of them in one pull request.
 
-The `packageManager` field stays at `bun@1.4.4`: Turborepo requires a
+The `packageManager` field stays at `bun@1.4.5`: Turborepo requires a
 version-shaped value and cannot parse `bun@canary`. The `@types/bun` ranges
 follow this stable floor; canary runtime APIs may be newer than those types.
 
