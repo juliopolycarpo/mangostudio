@@ -6,7 +6,11 @@ import { deflateRawSync } from 'node:zlib';
 
 import { zipCreationCommand } from '../../lib/archive-creation';
 import { FIXTURE_STOP_TIMEOUT_MS, FixtureCommands } from './fixture-command';
+import { zipCreationUnavailable } from './host-tools';
 import { readZipMembers } from './zip-reader';
+
+// Skipped on a developer machine without `zip`; CI throws instead (see host-tools.ts).
+const ZIP_UNAVAILABLE = zipCreationUnavailable();
 
 interface HandBuiltMember {
   readonly name: string;
@@ -145,7 +149,7 @@ describe('readZipMembers on a ZIP from zipCreationCommand', () => {
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
 
-  test(
+  test.skipIf(ZIP_UNAVAILABLE)(
     'matches the staged files, including a deflated one',
     async () => {
       const root = mkdtempSync(join(tmpdir(), 'mango-zip-reader-'));

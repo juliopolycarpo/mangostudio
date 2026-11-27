@@ -11,7 +11,11 @@ import {
   FIXTURE_STOP_TIMEOUT_MS,
   FixtureCommands,
 } from './support/fixture-command';
+import { zipCreationUnavailable } from './support/host-tools';
 import { readZipMembers } from './support/zip-reader';
+
+// Skipped on a developer machine without `zip`; CI throws instead (see host-tools.ts).
+const ZIP_UNAVAILABLE = zipCreationUnavailable();
 
 const roots: string[] = [];
 // Native PowerShell archive creation can exceed the default fixture deadline on Windows CI.
@@ -127,7 +131,7 @@ describe('archive creation commands', () => {
     2 * COMMAND_BUDGET_MS + 5_000
   );
 
-  test(
+  test.skipIf(ZIP_UNAVAILABLE)(
     'creates a ZIP with literal paths, flat members and matching bytes',
     async () => {
       const { root, binaries } = stageSources();

@@ -17,6 +17,10 @@ import { tarCreationCommand, zipCreationCommand } from '../lib/archive-creation'
 import { captureCommand } from '../lib/exec';
 import { zipArchiveCommands } from '../lib/zip-archive';
 import { assertMaterializedMembers, extractTargetArchive } from '../release/extract-target';
+import { zipCreationUnavailable } from './support/host-tools';
+
+// Skipped on a developer machine without `zip`; CI throws instead (see host-tools.ts).
+const ZIP_UNAVAILABLE = zipCreationUnavailable();
 
 let tempDirs: string[] = [];
 
@@ -158,39 +162,42 @@ describe('assertMaterializedMembers', () => {
 });
 
 describe('distribution extraction', () => {
-  test('materializes tar.gz and zip archives into the same target layout', async () => {
-    const rootDir = makeTempDir();
-    const expectedMembers = ['README.md', 'mangostudio'];
-    const sourceDir = join(rootDir, 'source');
-    stageTarget(sourceDir, 'mangostudio');
+  test.skipIf(ZIP_UNAVAILABLE)(
+    'materializes tar.gz and zip archives into the same target layout',
+    async () => {
+      const rootDir = makeTempDir();
+      const expectedMembers = ['README.md', 'mangostudio'];
+      const sourceDir = join(rootDir, 'source');
+      stageTarget(sourceDir, 'mangostudio');
 
-    const tarArchive = join(rootDir, 'target.tar.gz');
-    const zipArchive = join(rootDir, 'target.zip');
-    const tar = tarCreationCommand(tarArchive, [{ directory: sourceDir, members: ['.'] }]);
-    const zip = zipCreationCommand(zipArchive, sourceDir);
-    await runOrThrow(tar.command, tar.cwd);
-    await runOrThrow(zip.command, zip.cwd);
+      const tarArchive = join(rootDir, 'target.tar.gz');
+      const zipArchive = join(rootDir, 'target.zip');
+      const tar = tarCreationCommand(tarArchive, [{ directory: sourceDir, members: ['.'] }]);
+      const zip = zipCreationCommand(zipArchive, sourceDir);
+      await runOrThrow(tar.command, tar.cwd);
+      await runOrThrow(zip.command, zip.cwd);
 
-    const tarDestination = join(rootDir, '.mango', 'out', 'linux-x64');
-    const zipDestination = join(rootDir, '.mango', 'out', 'windows-x64');
-    await extractTargetArchive({
-      archivePath: tarArchive,
-      archiveFormat: 'tar.gz',
-      destination: tarDestination,
-      expectedMembers,
-      rootDir,
-    });
-    await extractTargetArchive({
-      archivePath: zipArchive,
-      archiveFormat: 'zip',
-      destination: zipDestination,
-      expectedMembers,
-      rootDir,
-    });
+      const tarDestination = join(rootDir, '.mango', 'out', 'linux-x64');
+      const zipDestination = join(rootDir, '.mango', 'out', 'windows-x64');
+      await extractTargetArchive({
+        archivePath: tarArchive,
+        archiveFormat: 'tar.gz',
+        destination: tarDestination,
+        expectedMembers,
+        rootDir,
+      });
+      await extractTargetArchive({
+        archivePath: zipArchive,
+        archiveFormat: 'zip',
+        destination: zipDestination,
+        expectedMembers,
+        rootDir,
+      });
 
-    expect(fileSnapshot(tarDestination)).toEqual(fileSnapshot(sourceDir));
-    expect(fileSnapshot(zipDestination)).toEqual(fileSnapshot(sourceDir));
-  });
+      expect(fileSnapshot(tarDestination)).toEqual(fileSnapshot(sourceDir));
+      expect(fileSnapshot(zipDestination)).toEqual(fileSnapshot(sourceDir));
+    }
+  );
 
   // The whole release lane rests on this: a hub binary that arrives without its
   // executable bit is a broken install, and native extraction is what restores

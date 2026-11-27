@@ -12,6 +12,10 @@ import {
   validateArtifactEvidence,
 } from '../lib/distribution-artifact';
 import { fakeCliEnvironment, installFakeCli, removeFakeCliDirectory } from './support/fake-cli';
+import { zipCreationUnavailable } from './support/host-tools';
+
+// Skipped on a developer machine without `zip`; CI throws instead (see host-tools.ts).
+const ZIP_UNAVAILABLE = zipCreationUnavailable();
 
 const approval: ApprovedArtifact = {
   repository: 'owner/repo',
@@ -319,66 +323,74 @@ function writeArtifactZip(archive: string, staging: string, bundle: string): voi
 }
 
 describe('cross-run artifact download CLI', () => {
-  test('extracts the verified ZIP and refuses corrupted bytes before extraction', async () => {
-    const directory = mkdtempSync(join(tmpdir(), 'fix-canary-artifact-download-'));
-    try {
-      const current = evidence();
-      writeFileSync(join(directory, 'run.json'), JSON.stringify(current.run));
-      writeFileSync(join(directory, 'jobs.json'), JSON.stringify([{ jobs: current.jobs }]));
-      const staging = join(directory, 'bundle');
-      const archive = join(directory, 'artifact.zip');
-      mkdirSync(staging);
-      writeArtifactZip(archive, staging, 'approved bundle bytes');
-      const digest = `sha256:${createHash('sha256').update(readFileSync(archive)).digest('hex')}`;
-      writeFileSync(
-        join(directory, 'artifact.json'),
-        JSON.stringify({ ...current.artifact, digest })
-      );
-      installFakeCli(
-        directory,
-        'gh',
-        readFileSync('scripts/tests/fixtures/approved-artifact/gh.fixture', 'utf8')
-      );
-      if (process.platform === 'win32') installFakeCli(directory, 'unzip', fakeNativeUnzip);
-      const env = {
-        ...fakeCliEnvironment(directory),
-        APPROVED_ARTIFACT_FIXTURE: directory,
-        GITHUB_REPOSITORY: approval.repository,
-        SOURCE_SHA: approval.sourceSha,
-        APPROVED_RUN_ID: '42',
-        APPROVED_RUN_ATTEMPT: '2',
-        PRODUCER_ATTEMPT: '1',
-        ARTIFACT_ID: '99',
-        ARTIFACT_NAME: approval.artifactName,
-        ARTIFACT_DIGEST: digest,
-        RUNTIME_PROFILE: 'shipping',
-        VERIFY_ATTESTATION: 'true',
-        DOWNLOAD_DIR: join(directory, 'valid'),
-        GITHUB_STEP_SUMMARY: join(directory, 'summary'),
-      };
-      const valid = Bun.spawn(['bun', resolve('scripts/ci/download-approved-distribution.ts')], {
-        env,
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      expect(await valid.exited).toBe(0);
-      expect(readFileSync(join(directory, 'valid/npm.tar.gz'), 'utf8')).toBe(
-        'approved bundle bytes'
-      );
-      expect(readFileSync(join(directory, 'summary'), 'utf8')).toContain('producer attempt 1');
-      writeArtifactZip(archive, staging, 'different unapproved bundle bytes');
-      const corrupt = Bun.spawn(['bun', resolve('scripts/ci/download-approved-distribution.ts')], {
-        env: { ...env, DOWNLOAD_DIR: join(directory, 'invalid') },
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      expect(await corrupt.exited).toBe(1);
-      expect(await new Response(corrupt.stderr).text()).toContain(`ZIP digest: expected ${digest}`);
-      expect(await Bun.file(join(directory, 'invalid/npm.tar.gz')).exists()).toBe(false);
-    } finally {
-      removeFakeCliDirectory(directory);
+  test.skipIf(ZIP_UNAVAILABLE)(
+    'extracts the verified ZIP and refuses corrupted bytes before extraction',
+    async () => {
+      const directory = mkdtempSync(join(tmpdir(), 'fix-canary-artifact-download-'));
+      try {
+        const current = evidence();
+        writeFileSync(join(directory, 'run.json'), JSON.stringify(current.run));
+        writeFileSync(join(directory, 'jobs.json'), JSON.stringify([{ jobs: current.jobs }]));
+        const staging = join(directory, 'bundle');
+        const archive = join(directory, 'artifact.zip');
+        mkdirSync(staging);
+        writeArtifactZip(archive, staging, 'approved bundle bytes');
+        const digest = `sha256:${createHash('sha256').update(readFileSync(archive)).digest('hex')}`;
+        writeFileSync(
+          join(directory, 'artifact.json'),
+          JSON.stringify({ ...current.artifact, digest })
+        );
+        installFakeCli(
+          directory,
+          'gh',
+          readFileSync('scripts/tests/fixtures/approved-artifact/gh.fixture', 'utf8')
+        );
+        if (process.platform === 'win32') installFakeCli(directory, 'unzip', fakeNativeUnzip);
+        const env = {
+          ...fakeCliEnvironment(directory),
+          APPROVED_ARTIFACT_FIXTURE: directory,
+          GITHUB_REPOSITORY: approval.repository,
+          SOURCE_SHA: approval.sourceSha,
+          APPROVED_RUN_ID: '42',
+          APPROVED_RUN_ATTEMPT: '2',
+          PRODUCER_ATTEMPT: '1',
+          ARTIFACT_ID: '99',
+          ARTIFACT_NAME: approval.artifactName,
+          ARTIFACT_DIGEST: digest,
+          RUNTIME_PROFILE: 'shipping',
+          VERIFY_ATTESTATION: 'true',
+          DOWNLOAD_DIR: join(directory, 'valid'),
+          GITHUB_STEP_SUMMARY: join(directory, 'summary'),
+        };
+        const valid = Bun.spawn(['bun', resolve('scripts/ci/download-approved-distribution.ts')], {
+          env,
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
+        expect(await valid.exited).toBe(0);
+        expect(readFileSync(join(directory, 'valid/npm.tar.gz'), 'utf8')).toBe(
+          'approved bundle bytes'
+        );
+        expect(readFileSync(join(directory, 'summary'), 'utf8')).toContain('producer attempt 1');
+        writeArtifactZip(archive, staging, 'different unapproved bundle bytes');
+        const corrupt = Bun.spawn(
+          ['bun', resolve('scripts/ci/download-approved-distribution.ts')],
+          {
+            env: { ...env, DOWNLOAD_DIR: join(directory, 'invalid') },
+            stdout: 'pipe',
+            stderr: 'pipe',
+          }
+        );
+        expect(await corrupt.exited).toBe(1);
+        expect(await new Response(corrupt.stderr).text()).toContain(
+          `ZIP digest: expected ${digest}`
+        );
+        expect(await Bun.file(join(directory, 'invalid/npm.tar.gz')).exists()).toBe(false);
+      } finally {
+        removeFakeCliDirectory(directory);
+      }
     }
-  });
+  );
 });
 
 test.each(['npm.tar.gz\n \n', ' \nnpm.tar.gz\n', 'npm.tar.gz \n', 'npm.tar.gz\n\n'])(
