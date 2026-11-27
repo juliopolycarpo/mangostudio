@@ -1,4 +1,4 @@
-import { retryIncompleteListing } from '../actions-api/client';
+import { GitHubRetry } from '../../lib/github-retry';
 import { isMainCacheWriter, type RustCacheApi } from './github';
 import { type RustCacheDeletion, type RustCacheEntry, selectRustCacheDeletions } from './selection';
 
@@ -29,12 +29,21 @@ function stillSelected(plan: RustCacheDeletion, entries: readonly RustCacheEntry
 /**
  * Prune committed generations after a trusted main writer completes. Recheck
  * the active writers and both exact IDs before each individual deletion.
+ * A listing that comes back incomplete is read again from the start, at most
+ * three passes in all and 60 s of waiting for the whole run (the 15-minute
+ * step has room); a listing that stays incomplete fails and deletes nothing.
  * @example await cleanupRustCaches(api, { repository: 'owner/repo', runId: 42, apply: true });
  */
 export async function cleanupRustCaches(
   api: RustCacheApi,
-  context: { readonly repository: string; readonly runId: number; readonly apply: boolean }
+  context: {
+    readonly repository: string;
+    readonly runId: number;
+    readonly apply: boolean;
+    readonly retry?: GitHubRetry;
+  }
 ): Promise<RustCacheCleanupResult> {
+  const retry = context.retry ?? new GitHubRetry();
   const trigger = await api.getRun(context.runId);
   if (!isMainCacheWriter(trigger, context.repository) || trigger.status !== 'completed') {
     throw new Error(
@@ -42,14 +51,16 @@ export async function cleanupRustCaches(
     );
   }
   const planned = selectRustCacheDeletions(
-    await retryIncompleteListing('actions_caches', () => api.listCaches())
+    await retry.listing('main Rust cache listing', () => api.listCaches())
   );
   const deletedIds: number[] = [];
   if (!context.apply) return { planned, deletedIds, deferred: null };
 
   for (const plan of planned) {
-    // Restart the writer audit if the cache listing needs a fresh read.
-    const deferred = await retryIncompleteListing('actions_caches', async () => {
+    // One retry level for the audit and the listing it guards: a fresh read of
+    // the listing restarts the writer audit too, since a writer may have
+    // started while the retry waited.
+    const deferred = await retry.listing('writer audit and cache revalidation', async () => {
       const active = await api.activeWriters();
       if (active.length > 0)
         return `Active main cache writers: ${active.map((run) => run.id).join(', ')}`;
@@ -60,7 +71,7 @@ export async function cleanupRustCaches(
     if (deferred !== null) return { planned, deletedIds, deferred };
 
     if (await api.deleteCache(plan.entry.id)) deletedIds.push(plan.entry.id);
-    const after = await retryIncompleteListing('actions_caches', () => api.listCaches());
+    const after = await retry.listing('Rust cache listing after deletion', () => api.listCaches());
     if (
       !unchangedEntry(
         plan.replacement,

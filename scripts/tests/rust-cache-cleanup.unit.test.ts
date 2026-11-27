@@ -13,7 +13,9 @@ import {
 } from '../ci/rust-cache/github';
 import { type RustCacheEntry, selectRustCacheDeletions } from '../ci/rust-cache/selection';
 import { ROOT_DIR } from '../lib/config';
+import { GitHubRetry, STANDARD_RETRY_POLICY } from '../lib/github-retry';
 import { readText } from './support/read-text';
+import { RecordedRetryEnvironment, ScriptedGitHubHttp } from './support/scripted-github-http';
 
 const listing = JSON.parse(readText('scripts/tests/fixtures/rust-cache-listing.json')) as {
   actions_caches: RustCacheEntry[];
@@ -276,23 +278,28 @@ describe('post-save cleanup', () => {
   });
 });
 
-class FakeGithubHttp {
-  replies: Array<{ status: number; body?: unknown }> = [];
-  calls: Array<{ url: URL; init: RequestInit }> = [];
+class FakeGithubHttp extends ScriptedGitHubHttp {
+  readonly environment = new RecordedRetryEnvironment();
+  // The adapter and the cleanup each hold their own retry runtime, as in production.
+  readonly requestRetry = new GitHubRetry(STANDARD_RETRY_POLICY, this.environment);
+  readonly listingRetry = new GitHubRetry(STANDARD_RETRY_POLICY, this.environment);
 
-  request(url: string, init: RequestInit): Promise<Response> {
-    this.calls.push({ url: new URL(url), init });
-    const reply = this.replies.shift();
-    if (!reply) throw new Error(`Unexpected fake GitHub request ${url}`);
-    return Promise.resolve(
-      new Response(reply.status === 204 ? null : JSON.stringify(reply.body), {
-        status: reply.status,
-      })
+  api(): GithubRustCacheApi {
+    return new GithubRustCacheApi(
+      REPOSITORY,
+      'fake-token',
+      this.request.bind(this),
+      this.requestRetry
     );
   }
 
-  api(): GithubRustCacheApi {
-    return new GithubRustCacheApi(REPOSITORY, 'fake-token', this.request.bind(this));
+  cleanup(context: { runId?: number; apply: boolean }) {
+    return cleanupRustCaches(this.api(), {
+      repository: REPOSITORY,
+      runId: MAIN_RUN.id,
+      retry: this.listingRetry,
+      ...context,
+    });
   }
 }
 
@@ -406,54 +413,61 @@ describe('GitHub cache adapter', () => {
     expect(http.writer.status).toBe('in_progress');
   });
 
-  test('restarts the whole writer audit after an incomplete workflow listing', async () => {
+  test('reads the writer audit once and throws on an incomplete workflow listing', async () => {
     const http = new FakeGithubHttp();
-    const firstWriter = { ...MAIN_RUN, id: 43, status: 'requested' };
-    const queuedWriter = { ...MAIN_RUN, id: 44, status: 'queued' };
-    const runningWriter = { ...MAIN_RUN, id: 45, status: 'in_progress' };
-    const empty = { status: 200, body: { total_count: 0, workflow_runs: [] } };
     http.replies = [
-      { status: 200, body: { total_count: 1, workflow_runs: [firstWriter] } },
-      empty,
-      empty,
-      { status: 200, body: { total_count: 2, workflow_runs: [queuedWriter] } },
-      empty,
-      empty,
-      empty,
-      empty,
-      { status: 200, body: { total_count: 1, workflow_runs: [runningWriter] } },
+      {
+        status: 200,
+        body: { total_count: 2, workflow_runs: [{ ...MAIN_RUN, status: 'requested' }] },
+      },
     ];
-    expect(await http.api().activeWriters()).toEqual([runningWriter]);
-    expect(http.calls.map(({ url }) => url.searchParams.get('status'))).toEqual([
-      'requested',
-      'pending',
-      'waiting',
-      'queued',
-      'requested',
-      'pending',
-      'waiting',
-      'queued',
-      'in_progress',
-    ]);
+    await expect(http.api().activeWriters()).rejects.toThrow(
+      'Incomplete workflow_runs listing 1/2'
+    );
+    expect(http.calls).toHaveLength(1);
+    expect(http.environment.waits).toEqual([]);
   });
 
-  test('does not delete when the fresh writer audit is also incomplete', async () => {
+  test('restarts the whole writer audit from the first status after an incomplete workflow listing', async () => {
     const http = new FakeGithubHttp();
-    const run = { ...MAIN_RUN, status: 'requested' };
+    const empty = { status: 200, body: { total_count: 0, workflow_runs: [] } };
     http.replies = [
       { status: 200, body: MAIN_RUN },
       { status: 200, body: { total_count: 2, actions_caches: [NEW, OLD] } },
-      { status: 200, body: { total_count: 2, workflow_runs: [run] } },
-      { status: 200, body: { total_count: 3, workflow_runs: [run] } },
+      // First audit: the 'requested' listing is incomplete, so the audit stops.
+      { status: 200, body: { total_count: 2, workflow_runs: [{ ...MAIN_RUN, id: 43 }] } },
+      // Second audit starts again at 'requested' and runs all five statuses.
+      ...Array<typeof empty>(5).fill(empty),
+      { status: 200, body: { total_count: 2, actions_caches: [NEW, OLD] } },
+      { status: 204 },
+      { status: 200, body: { total_count: 1, actions_caches: [NEW] } },
     ];
-    await expect(
-      cleanupRustCaches(http.api(), { repository: REPOSITORY, runId: MAIN_RUN.id, apply: true })
-    ).rejects.toThrow('Incomplete workflow_runs listing 1/3');
-    expect(http.calls.slice(2).map(({ url }) => url.searchParams.get('status'))).toEqual([
+    const result = await http.cleanup({ apply: true });
+    expect(result.deletedIds).toEqual([OLD.id]);
+    expect(http.calls.slice(2, 4).map(({ url }) => url.searchParams.get('status'))).toEqual([
       'requested',
       'requested',
     ]);
-    expect(http.calls.map(({ init }) => init.method)).toEqual(['GET', 'GET', 'GET', 'GET']);
+    expect(http.environment.waits).toEqual([5_000]);
+  });
+
+  test('does not delete when the writer audit stays incomplete across every pass', async () => {
+    const http = new FakeGithubHttp();
+    const run = { ...MAIN_RUN, status: 'requested' };
+    const incompleteAudit = { status: 200, body: { total_count: 2, workflow_runs: [run] } };
+    http.replies = [
+      { status: 200, body: MAIN_RUN },
+      { status: 200, body: { total_count: 2, actions_caches: [NEW, OLD] } },
+      incompleteAudit,
+      incompleteAudit,
+      incompleteAudit,
+    ];
+    await expect(http.cleanup({ apply: true })).rejects.toThrow(
+      'Incomplete workflow_runs listing 1/2'
+    );
+    await expect(Promise.resolve(http.replies)).resolves.toEqual([]);
+    expect(http.calls.map(({ init }) => init.method)).toEqual(['GET', 'GET', 'GET', 'GET', 'GET']);
+    expect(http.environment.waits).toEqual([5_000, 10_000]);
   });
 
   test('restarts an incomplete cache inventory from page one before planning', async () => {
@@ -467,11 +481,7 @@ describe('GitHub cache adapter', () => {
       { status: 200, body: { total_count: 101, actions_caches: [] } },
       { status: 200, body: { total_count: 2, actions_caches: [NEW, OLD] } },
     ];
-    const result = await cleanupRustCaches(http.api(), {
-      repository: REPOSITORY,
-      runId: MAIN_RUN.id,
-      apply: false,
-    });
+    const result = await http.cleanup({ apply: false });
     expect(result.planned.map(({ entry, replacement }) => [entry.id, replacement.id])).toEqual([
       [OLD.id, NEW.id],
     ]);
@@ -480,6 +490,30 @@ describe('GitHub cache adapter', () => {
       '2',
       '1',
     ]);
+    expect(http.environment.waits).toEqual([5_000]);
+  });
+
+  test('two incomplete cache inventories then a complete one are planned from the complete one', async () => {
+    const http = new FakeGithubHttp();
+    http.replies = [
+      { status: 200, body: MAIN_RUN },
+      { status: 200, body: { total_count: 7, actions_caches: [NEW] } },
+      { status: 200, body: { total_count: 1, actions_caches: [] } },
+      { status: 200, body: { total_count: 2, actions_caches: [NEW, OLD] } },
+    ];
+    const result = await http.cleanup({ apply: false });
+    expect(result.planned).toHaveLength(1);
+    expect(http.environment.waits).toEqual([5_000, 10_000]);
+  });
+
+  test('a cache inventory that stays incomplete fails closed with the named listing', async () => {
+    const http = new FakeGithubHttp();
+    const partial = { status: 200, body: { total_count: 2, actions_caches: [NEW] } };
+    http.replies = [{ status: 200, body: MAIN_RUN }, partial, partial, partial];
+    await expect(http.cleanup({ apply: true })).rejects.toThrow(
+      'Incomplete actions_caches listing 1/2; expected every entry; main Rust cache listing gave up after 3 attempts'
+    );
+    expect(http.calls.map(({ init }) => init.method)).not.toContain('DELETE');
   });
 
   test('audits writers again before retrying per-deletion cache revalidation', async () => {
@@ -501,11 +535,7 @@ describe('GitHub cache adapter', () => {
       empty,
       empty,
     ];
-    const result = await cleanupRustCaches(http.api(), {
-      repository: REPOSITORY,
-      runId: MAIN_RUN.id,
-      apply: true,
-    });
+    const result = await http.cleanup({ apply: true });
     expect(result.deferred).toBe('Active main cache writers: 43');
     expect(http.calls.map(({ init }) => init.method)).not.toContain('DELETE');
     expect(http.calls.slice(8).map(({ url }) => url.searchParams.get('status'))).toEqual([
@@ -517,22 +547,26 @@ describe('GitHub cache adapter', () => {
     ]);
   });
 
-  test('refuses deletion when the second cache revalidation is incomplete', async () => {
+  test('refuses deletion when per-deletion revalidation stays incomplete', async () => {
     const http = new FakeGithubHttp();
     const empty = { status: 200, body: { total_count: 0, workflow_runs: [] } };
-    http.replies = [
-      { status: 200, body: MAIN_RUN },
-      { status: 200, body: { total_count: 2, actions_caches: [NEW, OLD] } },
-      ...Array<typeof empty>(5).fill(empty),
-      { status: 200, body: { total_count: 2, actions_caches: [OLD] } },
+    const incompleteRevalidation = [
       ...Array<typeof empty>(5).fill(empty),
       { status: 200, body: { total_count: 3, actions_caches: [OLD] } },
     ];
-    await expect(
-      cleanupRustCaches(http.api(), { repository: REPOSITORY, runId: MAIN_RUN.id, apply: true })
-    ).rejects.toThrow('Incomplete actions_caches listing 1/3');
+    http.replies = [
+      { status: 200, body: MAIN_RUN },
+      { status: 200, body: { total_count: 2, actions_caches: [NEW, OLD] } },
+      ...incompleteRevalidation,
+      ...incompleteRevalidation,
+      ...incompleteRevalidation,
+    ];
+    await expect(http.cleanup({ apply: true })).rejects.toThrow(
+      'Incomplete actions_caches listing 1/3'
+    );
     expect(http.replies).toEqual([]);
     expect(http.calls.map(({ init }) => init.method)).not.toContain('DELETE');
+    expect(http.environment.waits).toEqual([5_000, 10_000]);
   });
 
   test('retries revalidation and the retained-replacement check around one DELETE', async () => {
@@ -551,11 +585,7 @@ describe('GitHub cache adapter', () => {
       { status: 200, body: { total_count: 2, actions_caches: [NEW] } },
       { status: 200, body: { total_count: 1, actions_caches: [NEW] } },
     ];
-    const result = await cleanupRustCaches(http.api(), {
-      repository: REPOSITORY,
-      runId: MAIN_RUN.id,
-      apply: true,
-    });
+    const result = await http.cleanup({ apply: true });
     expect(result.deletedIds).toEqual([OLD.id]);
     expect(
       http.calls.filter(({ init }) => init.method === 'DELETE').map(({ url }) => url.pathname)
@@ -616,6 +646,24 @@ describe('GitHub cache adapter', () => {
     }));
     await expect(http.api().listCaches()).rejects.toThrow('Exceeded 100 actions_caches pages');
     expect(http.calls).toHaveLength(100);
+  });
+
+  test('retries a 502 on the trigger run read', async () => {
+    const http = new FakeGithubHttp();
+    http.replies = [
+      { status: 502, text: 'Bad Gateway' },
+      { status: 200, body: MAIN_RUN },
+    ];
+    expect(await http.api().getRun(42)).toEqual(MAIN_RUN);
+    expect(http.environment.waits).toEqual([5_000]);
+  });
+
+  test('names the request and the received body when the trigger run is not JSON', async () => {
+    const http = new FakeGithubHttp();
+    http.replies = [{ status: 200, text: '<html>Unicorn</html>' }];
+    await expect(http.api().getRun(42)).rejects.toThrow(
+      'Invalid GET /runs/42; expected a workflow run object as JSON (HTTP 200) | received <html>Unicorn</html>'
+    );
   });
 
   test('independently reads the trigger run and rejects invalid run payloads', async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { type ActionsCacheEntry, UnstableListing } from '../ci/actions-api/client';
+import type { ActionsCacheEntry } from '../ci/actions-api/client';
 import { parsePullRequestCacheArguments } from '../ci/pr-cache-cleanup';
 import {
   cleanupPullRequestCaches,
@@ -17,7 +17,14 @@ import {
   selectClosedPullRequestCaches,
   selectPullRequestCaches,
 } from '../ci/pr-cache/selection';
+import {
+  GitHubRetry,
+  IncompleteListing,
+  STANDARD_RETRY_POLICY,
+  UnstableListing,
+} from '../lib/github-retry';
 import { readText } from './support/read-text';
+import { RecordedRetryEnvironment, ScriptedGitHubHttp } from './support/scripted-github-http';
 import {
   extractJobBlock,
   extractJobBlocks,
@@ -57,6 +64,8 @@ class FakePullRequestCacheApi implements PullRequestCacheApi {
   states = new Map<number, PullRequestState>([[7, 'closed']]);
   // Repository-wide listings that fail as unstable before one succeeds.
   unstableListings = 0;
+  // Failures thrown by the next repository-wide listings, in order, before `unstableListings` applies.
+  queuedListingFailures: Error[] = [];
   allListings = 0;
   deletedIds: number[] = [];
   goneIds = new Set<number>();
@@ -74,6 +83,8 @@ class FakePullRequestCacheApi implements PullRequestCacheApi {
 
   listAllCaches(): Promise<ActionsCacheEntry[]> {
     this.allListings++;
+    const queued = this.queuedListingFailures.shift();
+    if (queued) return Promise.reject(queued);
     if (this.allListings <= this.unstableListings)
       return Promise.reject(new UnstableListing('Changing actions_caches total 8 -> 9'));
     return Promise.resolve(this.entries);
@@ -273,19 +284,49 @@ describe('closed pull request sweep', () => {
   test('reads the repository listing again when it moved between pages', async () => {
     const api = sweepApi();
     api.unstableListings = 2;
-    await sweepClosedPullRequestCaches(api, { apply: true });
+    const { retry, environment } = instantRetry();
+    await sweepClosedPullRequestCaches(api, { apply: true, retry });
     expect(api.allListings).toBe(3);
+    expect(environment.waits).toEqual([5_000, 10_000]);
     expect(api.deletedIds).toEqual([1, 2, 3]);
   });
 
   test('gives up after three unstable listings and deletes nothing', async () => {
     const api = sweepApi();
     api.unstableListings = 3;
-    await expect(sweepClosedPullRequestCaches(api, { apply: true })).rejects.toThrow(
-      'Changing actions_caches total 8 -> 9'
-    );
+    await expect(
+      sweepClosedPullRequestCaches(api, { apply: true, retry: instantRetry().retry })
+    ).rejects.toThrow('Changing actions_caches total 8 -> 9');
     expect(api.allListings).toBe(3);
     expect(api.deletedIds).toEqual([]);
+  });
+
+  test('incomplete and unstable listings share one three-pass budget instead of nesting into six', async () => {
+    const api = sweepApi();
+    api.queuedListingFailures = [
+      new IncompleteListing('Incomplete actions_caches listing 4/7; expected every entry'),
+      new UnstableListing('Changing actions_caches total 8 -> 9'),
+      new IncompleteListing('Incomplete actions_caches listing 0/1; expected every entry'),
+      new UnstableListing('Changing actions_caches total 9 -> 10'),
+    ];
+    await expect(
+      sweepClosedPullRequestCaches(api, { apply: true, retry: instantRetry().retry })
+    ).rejects.toThrow('Incomplete actions_caches listing 0/1; expected every entry');
+    expect(api.allListings).toBe(3);
+    expect(api.deletedIds).toEqual([]);
+  });
+
+  test('two incomplete sweep listings then a complete one delete from the complete listing', async () => {
+    const api = sweepApi();
+    api.queuedListingFailures = [
+      new IncompleteListing('Incomplete actions_caches listing 4/7; expected every entry'),
+      new IncompleteListing('Incomplete actions_caches listing 0/1; expected every entry'),
+    ];
+    const { retry, environment } = instantRetry();
+    await sweepClosedPullRequestCaches(api, { apply: true, retry });
+    expect(api.allListings).toBe(3);
+    expect(api.deletedIds).toEqual([1, 2, 3]);
+    expect(environment.waits).toEqual([5_000, 10_000]);
   });
 
   test('deletes nothing in a dry run and plans the same set', async () => {
@@ -339,24 +380,26 @@ describe('command line', () => {
   });
 });
 
-class FakeGithubHttp {
-  replies: Array<{ status: number; body?: unknown }> = [];
-  calls: Array<{ url: URL; init: RequestInit }> = [];
-
-  request(url: string, init: RequestInit): Promise<Response> {
-    this.calls.push({ url: new URL(url), init });
-    const reply = this.replies.shift();
-    if (!reply) throw new Error(`Unexpected fake GitHub request ${url}`);
-    return Promise.resolve(
-      new Response(reply.status === 204 ? null : JSON.stringify(reply.body), {
-        status: reply.status,
-      })
-    );
-  }
+class FakeGithubHttp extends ScriptedGitHubHttp {
+  readonly environment = new RecordedRetryEnvironment();
+  // The adapter and the cleanup each hold their own retry runtime, as in production.
+  readonly requestRetry = new GitHubRetry(STANDARD_RETRY_POLICY, this.environment);
+  readonly listingRetry = new GitHubRetry(STANDARD_RETRY_POLICY, this.environment);
 
   api(): GithubPullRequestCacheApi {
-    return new GithubPullRequestCacheApi(REPOSITORY, 'fake-token', this.request.bind(this));
+    return new GithubPullRequestCacheApi(
+      REPOSITORY,
+      'fake-token',
+      this.request.bind(this),
+      this.requestRetry
+    );
   }
+}
+
+/** Retry runtime that records its waits instead of sleeping, for fakes that bypass HTTP. */
+function instantRetry(): { retry: GitHubRetry; environment: RecordedRetryEnvironment } {
+  const environment = new RecordedRetryEnvironment();
+  return { retry: new GitHubRetry(STANDARD_RETRY_POLICY, environment), environment };
 }
 
 describe('GitHub adapter', () => {
@@ -403,11 +446,65 @@ describe('GitHub adapter', () => {
       status: 200,
       body: { total_count: 2, actions_caches: [cache(1, 'refs/pull/7/merge')] },
     };
-    http.replies = [{ status: 200, body: { state: 'closed' } }, partial, partial];
-    await expect(cleanupPullRequestCaches(http.api(), 7, { apply: true })).rejects.toThrow(
-      'Incomplete actions_caches listing 1/2'
+    http.replies = [{ status: 200, body: { state: 'closed' } }, partial, partial, partial];
+    await expect(
+      cleanupPullRequestCaches(http.api(), 7, { apply: true, retry: http.listingRetry })
+    ).rejects.toThrow('Incomplete actions_caches listing 1/2');
+    expect(http.calls.map(({ init }) => init.method)).toEqual(['GET', 'GET', 'GET', 'GET']);
+    expect(http.environment.waits).toEqual([5_000, 10_000]);
+  });
+
+  test('two incomplete listings then a complete one are deleted from the complete one', async () => {
+    const http = new FakeGithubHttp();
+    const partial = {
+      status: 200,
+      body: { total_count: 2, actions_caches: [cache(1, 'refs/pull/7/merge')] },
+    };
+    http.replies = [
+      { status: 200, body: { state: 'closed' } },
+      partial,
+      { status: 200, body: { total_count: 1, actions_caches: [] } },
+      {
+        status: 200,
+        body: {
+          total_count: 2,
+          actions_caches: [cache(1, 'refs/pull/7/merge'), cache(2, 'refs/pull/7/merge')],
+        },
+      },
+      { status: 204 },
+      { status: 204 },
+    ];
+    const result = await cleanupPullRequestCaches(http.api(), 7, {
+      apply: true,
+      retry: http.listingRetry,
+    });
+    expect(result.deletedIds).toEqual([1, 2]);
+    expect(http.environment.waits).toEqual([5_000, 10_000]);
+  });
+
+  test('a 502 on one listing page is retried without restarting the listing', async () => {
+    const http = new FakeGithubHttp();
+    http.replies = [
+      { status: 502, text: 'Bad Gateway' },
+      { status: 200, body: { total_count: 1, actions_caches: [cache(1, 'refs/pull/7/merge')] } },
+    ];
+    expect(await http.api().listAllCaches()).toHaveLength(1);
+    expect(http.calls).toHaveLength(2);
+    expect(http.environment.waits).toEqual([5_000]);
+  });
+
+  test('a non-JSON 200 names the request, page and expected shape, not a bare parse error', async () => {
+    const http = new FakeGithubHttp();
+    http.replies = [{ status: 200, text: '<html>Service Unavailable</html>' }];
+    const failure = await http
+      .api()
+      .listAllCaches()
+      .catch((error: Error) => error);
+    expect((failure as Error).message).not.toContain('JSON Parse error');
+    expect((failure as Error).message).toContain('Invalid GET /caches?');
+    expect((failure as Error).message).toContain(
+      ' page 1; expected an object with a nonnegative integer total_count and a "actions_caches" array as JSON (HTTP 200) | received <html>Service Unavailable</html>'
     );
-    expect(http.calls.map(({ init }) => init.method)).not.toContain('DELETE');
   });
 
   test('deletes by numeric ID, accepting 404 as already gone', async () => {
@@ -429,6 +526,8 @@ describe('GitHub adapter', () => {
       { status: 404, body: { message: 'Not Found' } },
       { status: 200, body: { state: 'draft' } },
       { status: 500, body: {} },
+      { status: 500, body: {} },
+      { status: 500, body: {} },
     ];
     const api = http.api();
     expect(await api.pullRequestState(7)).toBe('closed');
@@ -438,6 +537,7 @@ describe('GitHub adapter', () => {
       'Invalid pull request 10 state "draft"; expected "open" or "closed"'
     );
     await expect(api.pullRequestState(11)).rejects.toThrow('returned 500');
+    expect(http.environment.waits).toEqual([5_000, 10_000]);
     expect(http.calls[0].url.pathname).toBe(`/repos/${REPOSITORY}/pulls/7`);
     await expect(api.pullRequestState(0)).rejects.toThrow('expected a positive integer');
   });

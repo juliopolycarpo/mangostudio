@@ -1,6 +1,20 @@
 // Bounded GitHub REST adapter shared by the cache cleanup scripts. It owns
 // authentication, the per-request timeout, pagination with a completeness
 // check and the cache entry shape. Callers own which endpoints they touch.
+// Requests retry under the shared policy; a listing that stays incomplete or
+// unstable throws, and the caller retries the whole read once, outermost
+// (`GitHubRetry.listing`), so nothing is deleted from a partial listing.
+
+import {
+  type GithubFetch,
+  type GitHubReply,
+  GitHubRetry,
+  IncompleteListing,
+  malformedResponse,
+  parseJsonReply,
+  sendGitHubRequest,
+  UnstableListing,
+} from '../../lib/github-retry';
 
 export interface ActionsCacheEntry {
   readonly id: number;
@@ -11,58 +25,10 @@ export interface ActionsCacheEntry {
   readonly size_in_bytes: number;
 }
 
-export type GithubFetch = (url: string, init: RequestInit) => Promise<Response>;
 export type ListingField = 'actions_caches' | 'workflow_runs';
 
 const PAGE_SIZE = 100;
 const MAX_PAGES = 100;
-
-class IncompleteListing extends Error {
-  constructor(
-    readonly field: ListingField,
-    entries: number,
-    total: number
-  ) {
-    super(`Incomplete ${field} listing ${entries}/${total}; expected every entry`);
-  }
-}
-
-/** A listing whose total or membership moved between pages: a cache was saved or deleted mid-read. */
-export class UnstableListing extends Error {}
-
-const UNSTABLE_LISTING_ATTEMPTS = 3;
-
-/**
- * Read a listing again, up to three attempts, when it moved between pages. For
- * a repository-wide listing that other jobs keep changing; any other error and
- * the last unstable attempt are thrown.
- * @example await retryUnstableListing(() => api.listAllCaches());
- */
-export async function retryUnstableListing<T>(read: () => Promise<T>): Promise<T> {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await read();
-    } catch (error) {
-      if (!(error instanceof UnstableListing) || attempt === UNSTABLE_LISTING_ATTEMPTS) throw error;
-    }
-  }
-}
-
-/**
- * Retry once from the start when a listing's row count disagrees with its total.
- * @example await retryIncompleteListing('actions_caches', () => api.listCaches());
- */
-export async function retryIncompleteListing<T>(
-  field: ListingField,
-  read: () => Promise<T>
-): Promise<T> {
-  try {
-    return await read();
-  } catch (error) {
-    if (!(error instanceof IncompleteListing) || error.field !== field) throw error;
-    return read();
-  }
-}
 
 export function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -144,7 +110,8 @@ export class GithubActionsClient {
   constructor(
     repository: string,
     private readonly token: string,
-    private readonly request: GithubFetch = fetch
+    private readonly request: GithubFetch = fetch,
+    private readonly retry: GitHubRetry = new GitHubRetry()
   ) {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*\/[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(repository)) {
       throw new Error(`Invalid repository ${JSON.stringify(repository)}; expected owner/repo`);
@@ -159,14 +126,21 @@ export class GithubActionsClient {
    * gone" stays an explicit decision of the deleting caller.
    * @example await client.response('/runs/42');
    */
-  async response(path: string, method = 'GET'): Promise<Response> {
-    const response = await this.send(`${this.root}${path}`, method);
-    if (!response.ok && !(method === 'DELETE' && response.status === 404)) {
-      throw new Error(
-        `${method} ${path} returned ${response.status}; expected a successful GitHub Actions API response`
-      );
-    }
-    return response;
+  response(path: string, method = 'GET'): Promise<GitHubReply> {
+    return this.send(`${this.root}${path}`, method, {
+      failure: (status) =>
+        `${method} ${path} returned ${status}; expected a successful GitHub Actions API response`,
+      accept: (status) => method === 'DELETE' && status === 404,
+    });
+  }
+
+  /**
+   * GET one `/actions` resource as JSON, naming the request and the expected
+   * shape if the body is not JSON.
+   * @example const run = await client.json('/runs/42', 'a workflow run object');
+   */
+  async json(path: string, expected: string): Promise<unknown> {
+    return parseJsonReply(await this.response(path), { request: `GET ${path}` }, expected);
   }
 
   /**
@@ -174,26 +148,36 @@ export class GithubActionsClient {
    * request). A 404 is returned so the caller can treat it as absent.
    * @example await client.repositoryResponse('/pulls/42');
    */
-  async repositoryResponse(path: string): Promise<Response> {
-    const response = await this.send(`${this.repositoryRoot}${path}`, 'GET');
-    if (!response.ok && response.status !== 404) {
-      throw new Error(
-        `GET ${path} returned ${response.status}; expected a successful GitHub API response`
-      );
-    }
-    return response;
+  repositoryResponse(path: string): Promise<GitHubReply> {
+    return this.send(`${this.repositoryRoot}${path}`, 'GET', {
+      failure: (status) =>
+        `GET ${path} returned ${status}; expected a successful GitHub API response`,
+      accept: (status) => status === 404,
+    });
   }
 
-  private send(url: string, method: string): Promise<Response> {
-    return this.request(url, {
-      method,
-      redirect: 'error',
-      signal: AbortSignal.timeout(30_000),
-      headers: {
-        accept: 'application/vnd.github+json',
-        authorization: `Bearer ${this.token}`,
-        'x-github-api-version': '2022-11-28',
-      },
+  /** Every method this client sends is a read or a delete of one named ID, so all repeat safely. */
+  private send(
+    url: string,
+    method: string,
+    options: { failure: (status: number) => string; accept: (status: number) => boolean }
+  ): Promise<GitHubReply> {
+    return sendGitHubRequest(this.retry, this.request, {
+      label: `${method} ${new URL(url).pathname}`,
+      url,
+      // A fresh timeout per attempt, so a retry is not born half expired.
+      init: () => ({
+        method,
+        redirect: 'error',
+        signal: AbortSignal.timeout(30_000),
+        headers: {
+          accept: 'application/vnd.github+json',
+          authorization: `Bearer ${this.token}`,
+          'x-github-api-version': '2022-11-28',
+        },
+      }),
+      idempotent: true,
+      ...options,
     });
   }
 
@@ -206,15 +190,20 @@ export class GithubActionsClient {
     const entries: T[] = [];
     let total: number | undefined;
     for (let page = 1; page <= MAX_PAGES; page++) {
-      const response = await this.response(`${path}&per_page=${PAGE_SIZE}&page=${page}`);
-      const body: unknown = await response.json();
+      const site = { request: `GET ${path}`, page };
+      const expected = `an object with a nonnegative integer total_count and a "${field}" array`;
+      const body = parseJsonReply(
+        await this.response(`${path}&per_page=${PAGE_SIZE}&page=${page}`),
+        site,
+        expected
+      );
       if (
         !record(body) ||
         !Number.isSafeInteger(body.total_count) ||
         Number(body.total_count) < 0 ||
         !Array.isArray(body[field])
       ) {
-        throw new Error(`Invalid ${field} page ${page}; expected total_count and an entries array`);
+        throw malformedResponse(site, expected, body);
       }
       const count = Number(body.total_count);
       if (total !== undefined && total !== count)
@@ -230,7 +219,9 @@ export class GithubActionsClient {
       entries.push(...batch.map(parse));
       if (entries.length === total) return entries;
       if (entries.length > total || batch.length < PAGE_SIZE)
-        throw new IncompleteListing(field, entries.length, total);
+        throw new IncompleteListing(
+          `Incomplete ${field} listing ${entries.length}/${total}; expected every entry`
+        );
     }
     throw new Error(`Exceeded ${MAX_PAGES} ${field} pages; expected a complete bounded listing`);
   }
