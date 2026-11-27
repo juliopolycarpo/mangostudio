@@ -1,4 +1,11 @@
-import { Marked, type MarkedOptions, Renderer } from 'marked';
+import {
+  Marked,
+  type MarkedExtension,
+  type MarkedOptions,
+  Renderer,
+  Tokenizer,
+  type Tokens,
+} from 'marked';
 
 import type { CodeThemeId } from '@/lib/code-themes';
 import { HIGHLIGHT_FIRST_SLICE_MS, type HighlightSlice } from '@/lib/highlight-slices';
@@ -50,8 +57,25 @@ export function createParser(
   });
 }
 
+/**
+ * Reads a fenced block with its text as the content minus the final line break, whatever
+ * the content ends with. Since 18.2.1, marked keeps that line break when the content ends in
+ * blank lines and drops it otherwise, so `a` then a blank line would draw as `a` and two empty
+ * lines. The renderer and the highlight session cache both key on this text, so it is fixed
+ * here, where every chat lexer reads fences.
+ */
+function lexFenceWithoutFinalLineBreak(this: Tokenizer, src: string): Tokens.Code | undefined {
+  const token = Tokenizer.prototype.fences.call(this, src);
+  if (token?.text.endsWith('\n')) token.text = token.text.slice(0, -1);
+  return token;
+}
+
 /** What the lexer needs to know; the renderer, theme and highlighter play no part in the tokens. */
-const MARKDOWN_SYNTAX_OPTIONS = { gfm: true, breaks: true } as const;
+const MARKDOWN_SYNTAX_OPTIONS: MarkedExtension = {
+  gfm: true,
+  breaks: true,
+  tokenizer: { fences: lexFenceWithoutFinalLineBreak },
+};
 
 /**
  * The options every chat lexer runs with: the same syntax as `createParser`, with no renderer.

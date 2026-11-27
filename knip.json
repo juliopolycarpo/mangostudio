@@ -59,8 +59,7 @@
       "project": ["src/**/*.{ts,mjs}!", "tests/**/*.ts"],
       "bun": {
         "entry": ["tests/support/chatgpt/fake-server.ts"]
-      },
-      "ignoreBinaries": ["mkfifo"]
+      }
     },
     "apps/frontend": {
       "entry": [
