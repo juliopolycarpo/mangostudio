@@ -1,4 +1,6 @@
+import type { GitHubNetworkFailure } from './github-retry';
 import {
+  failureFromGhStderr,
   GitHubHttpFailure,
   GitHubRetry,
   IncompleteListing,
@@ -273,20 +275,40 @@ export class CanaryGitHub {
   private async read(path: string, accept?: string): Promise<GitHubResponse<Uint8Array>> {
     this.requireRepositoryPath(path);
     const args = ['api', '--include', ...(accept ? ['--header', `Accept: ${accept}`] : []), path];
-    const response = await this.retry.outcome(
-      () => this.parseResponse(this.runner.run(args)),
-      (parsed) =>
-        parsed.status >= 400
+    const attempt = (): ReadAttempt => {
+      const result = this.runner.run(args);
+      try {
+        return { parsed: this.parseResponse(result) };
+      } catch (error) {
+        // gh printed no status line at all: a transport failure (reset, timeout)
+        // names itself on stderr and is read again. Anything else still fails
+        // closed with the parse error.
+        const failure =
+          result.exitCode !== 0 && !startsWithHttpStatusLine(result.stdout)
+            ? failureFromGhStderr(result.stderr)
+            : undefined;
+        if (failure === undefined) throw error;
+        return { unanswered: error, failure };
+      }
+    };
+    const last = await this.retry.outcome(
+      attempt,
+      (read) => {
+        if ('failure' in read) return read.failure;
+        const { parsed } = read;
+        return parsed.status >= 400
           ? new GitHubHttpFailure(
               `HTTP ${parsed.status}`,
               parsed.status,
               (name) => parsed.headers.get(name),
               Buffer.from(parsed.body.subarray(0, 1_000)).toString('utf8')
             )
-          : undefined,
+          : undefined;
+      },
       true
     );
-    return { status: response.status, body: response.body };
+    if ('failure' in last) throw last.unanswered;
+    return { status: last.parsed.status, body: last.parsed.body };
   }
 
   private parseResponse(result: GhCommandResult): GitHubResponse<Uint8Array> & {
@@ -351,6 +373,19 @@ export class CanaryGitHub {
       throw new Error(`Invalid GitHub API path: expected path inside ${this.base}`);
     }
   }
+}
+
+type ReadAttempt =
+  | {
+      readonly parsed: GitHubResponse<Uint8Array> & {
+        readonly headers: ReadonlyMap<string, string>;
+      };
+    }
+  | { readonly unanswered: unknown; readonly failure: GitHubHttpFailure | GitHubNetworkFailure };
+
+/** `gh api --include` prints `HTTP/<version> <status>` first whenever the server answered. */
+function startsWithHttpStatusLine(stdout: Uint8Array): boolean {
+  return /^HTTP\/\d/.test(Buffer.from(stdout.subarray(0, 8)).toString('ascii'));
 }
 
 function requireOk(status: number, name: string): void {

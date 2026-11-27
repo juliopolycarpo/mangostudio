@@ -681,6 +681,41 @@ test('a 502 on a single read is repeated and the later 200 returned', async () =
   expect(sleeper.delays).toEqual([5_000]);
 });
 
+test.each([
+  { label: 'getJson', read: (client: CanaryGitHub) => client.getJson(`${BASE}/test`) },
+  { label: 'readBytes', read: (client: CanaryGitHub) => client.readBytes(`${BASE}/test`) },
+  { label: 'readAsset', read: (client: CanaryGitHub) => client.readAsset(9) },
+])('$label rereads after a gh transport failure that printed no status line', async ({ read }) => {
+  const sleeper = new RecordingSleeper();
+  const runner = new SequencedGhRunner([
+    failure('Get "https://api.github.com/x": net/http: TLS handshake timeout'),
+    includeReply(200, '{"id":1}'),
+  ]);
+  const client = new CanaryGitHub('owner/repo', runner, sleeper.sleep);
+  expect((await read(client)).status).toBe(200);
+  expect(runner.calls).toBe(2);
+  expect(sleeper.delays).toEqual([5_000]);
+});
+
+test('a transport failure that persists fails closed with the status-line error after three reads', async () => {
+  const runner = new SequencedGhRunner([failure('dial tcp: connection reset by peer')]);
+  const client = new CanaryGitHub('owner/repo', runner, new RecordingSleeper().sleep);
+  await expect(client.getJson(`${BASE}/test`)).rejects.toThrow(
+    'GitHub response: expected HTTP status headers; received gh exit1'
+  );
+  expect(runner.calls).toBe(3);
+});
+
+test('a missing status line with stderr that names no transport failure is not reread', async () => {
+  const runner = new SequencedGhRunner([
+    failure('gh: authentication required'),
+    includeReply(200, '{}'),
+  ]);
+  const client = new CanaryGitHub('owner/repo', runner, new RecordingSleeper().sleep);
+  await expect(client.getJson(`${BASE}/test`)).rejects.toThrow('expected HTTP status headers');
+  expect(runner.calls).toBe(1);
+});
+
 test('a read honors Retry-After from the gh headers on a rate limit', async () => {
   const sleeper = new RecordingSleeper();
   const runner = new SequencedGhRunner([
