@@ -20,7 +20,6 @@
         "scripts/bench/api-json-compression.ts",
         "scripts/ci/{distribution-identity,evaluate-gate,frontend-bundle-report,frontend-load-graph,native-bun-qualification,verify-cross-runtimes}.ts",
         "scripts/ci/qualify-canary-source.ts",
-        "scripts/ci/select-canary-source.ts",
         "scripts/ci/load-canary-approval.ts",
         "scripts/ci/resolve-canary-distribution.ts",
         "scripts/examples/external-api-smoke.ts",
