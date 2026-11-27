@@ -72,7 +72,7 @@ export function record(value: unknown): value is Record<string, unknown> {
  * Validate one entry of an `actions_caches` page.
  * @example const entry = parseCacheEntry(body.actions_caches[0]);
  */
-function parseCacheEntry(value: unknown): ActionsCacheEntry {
+export function parseCacheEntry(value: unknown): ActionsCacheEntry {
   if (
     !record(value) ||
     !Number.isSafeInteger(value.id) ||

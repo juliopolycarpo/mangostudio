@@ -5,6 +5,7 @@
 
 import { appendFileSync, readFileSync } from 'node:fs';
 
+import { parseCacheEntry, record } from './actions-api/client';
 import { cleanupRustCaches } from './rust-cache/cleanup';
 import { MAIN_CACHE_REF } from './rust-cache/families';
 import { GithubRustCacheApi } from './rust-cache/github';
@@ -36,13 +37,52 @@ export function readCleanupContext(
   return { repository: env.GITHUB_REPOSITORY, runId: Number(runId) };
 }
 
+/**
+ * Read a captured `GET /actions/caches` listing, applying the entry check the
+ * live listing uses. A wrong shape fails naming the file instead of reaching
+ * the selection as a crash (`entries.map is not a function`) or as a plan
+ * over entries it cannot judge.
+ * @example readFixtureListing('scripts/tests/fixtures/rust-cache-listing.json');
+ */
+export function readFixtureListing(path: string): RustCacheEntry[] {
+  const expected = '{"actions_caches": [<cache entry>, ...]}';
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (error) {
+    throw new Error(
+      `Cannot read fixture ${path}: ${error instanceof Error ? error.message : String(error)}; expected ${expected}`
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(
+      `Invalid fixture ${path}: expected ${expected} | received invalid JSON ${JSON.stringify(text.slice(0, 80))}`
+    );
+  }
+  const entries = record(parsed) ? parsed.actions_caches : undefined;
+  if (!Array.isArray(entries)) {
+    throw new Error(
+      `Invalid fixture ${path}: expected ${expected} | received ${JSON.stringify(parsed)?.slice(0, 80)}`
+    );
+  }
+  return entries.map((entry, index) => {
+    try {
+      return parseCacheEntry(entry);
+    } catch (error) {
+      throw new Error(
+        `Invalid fixture ${path} at actions_caches[${index}]: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  });
+}
+
 async function main(): Promise<void> {
   const args = Bun.argv.slice(2);
   if (args.length === 2 && args[0] === '--fixture') {
-    const listing = JSON.parse(readFileSync(args[1], 'utf8')) as {
-      actions_caches: RustCacheEntry[];
-    };
-    console.log(JSON.stringify(selectRustCacheDeletions(listing.actions_caches), null, 2));
+    console.log(JSON.stringify(selectRustCacheDeletions(readFixtureListing(args[1])), null, 2));
     return;
   }
   if (args.length !== 1 || !['--delete', '--dry-run'].includes(args[0])) {
