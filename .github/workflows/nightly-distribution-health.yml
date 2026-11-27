@@ -442,6 +442,10 @@ jobs:
         env:
           MANGOSTUDIO_INSTALL_DIR: ${{ runner.temp }}/mango-dist
           MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}/mango-bin
+          # The installer asks api.github.com for the release. Without a token the request
+          # shares the runner IP's anonymous limit, which other tenants exhaust (HTTP 403).
+          # Release downloads never receive it.
+          GITHUB_TOKEN: ${{ github.token }}
           MANGOSTUDIO_VERSION: ${{ needs.resolve.outputs.asset_version }}
         run: |
           set -euo pipefail
@@ -470,6 +474,9 @@ jobs:
         env:
           MANGOSTUDIO_INSTALL_DIR: ${{ runner.temp }}\mango-dist
           MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}\mango-bin
+          # Same reason as the Linux/macOS step: an anonymous API request is rate limited
+          # per runner IP.
+          GITHUB_TOKEN: ${{ github.token }}
           MANGOSTUDIO_VERSION: ${{ needs.resolve.outputs.asset_version }}
         run: |
           # Actions writes this as UTF-8 without a BOM; keep the block ASCII
