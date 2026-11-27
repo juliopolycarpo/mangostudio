@@ -223,10 +223,10 @@ export const TEST_LANES: readonly TestLane[] = [
     // committed data like the file list: the same commit gives the same files in
     // the same shard, and a retried shard gets its first attempt's partition. Bun's
     // round-robin `--shard=i/N` was the split before, chosen for the same
-    // reason. It cost balance: on the 168 files of this lane the tracked weights
-    // (352 s in all, an unlisted file counting as 1 s) put 125 s and 227 s on
-    // two shards of 84 files each, and 176 s and 176 s on two weighted shards
-    // of 83 and 85 files. Computed from the tracked weights, not measured in CI;
+    // reason. It cost balance: on the 168 files of this lane the per-file JUnit
+    // times of four main CI runs (236 s in all) put 65 s and 171 s on the two
+    // round-robin shards, and 118 s and 118 s on the two weighted ones. Those are
+    // sums of measured file times, not a measured weighted run;
     // `weighted-shard.unit.test.ts` pins that no shard count from 2 to 8 ends up
     // more than 5% above the mean.
     //

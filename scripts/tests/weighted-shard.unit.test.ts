@@ -132,7 +132,7 @@ describe('weightedShard on the api-integration lane', () => {
         Math.max(...loads) - Math.min(...loads),
         `(${count} shards): expected spread <= ${heaviest} | received ${detail}`
       ).toBeLessThanOrEqual(heaviest);
-      // The current file set: 352 weight split two ways is 176 and 176. A miss
+      // The current file set and weights split two ways within 1 of each other. A miss
       // means the weights went stale against the file set; refresh them (see
       // scripts/lib/test-lane-weights.ts) or revisit this bound.
       expect(

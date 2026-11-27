@@ -119,26 +119,30 @@ const ROOT_LANE_WINDOWS_WEIGHTS: FileWeights = {
   'scripts/tests/windows-user-path.unit.test.ts': 5,
 };
 
-/** Api integration lane (`tests/integration`, run from `apps/api`): paths are workspace-relative. */
+/**
+ * Api integration lane (`tests/integration`, run from `apps/api`): paths are workspace-relative.
+ * From the JUnit `time` of each file in the two CI shards of four main runs
+ * (2026-11-27, 168 files, 236 s), where the lane runs as one process per shard.
+ */
 const API_INTEGRATION_LANE_WEIGHTS: FileWeights = {
-  'tests/integration/cli/runtime-binary-probe.integration.test.ts': 6,
+  'tests/integration/cli/runtime-binary-probe.integration.test.ts': 5,
   'tests/integration/cli/ssh-client-probe.integration.test.ts': 5,
   'tests/integration/modules/environments/wsl-runtime-scripts.integration.test.ts': 9,
-  'tests/integration/modules/generation/mcp-turn.integration.test.ts': 4,
-  'tests/integration/routes/environment-entities.integration.test.ts': 5,
-  'tests/integration/routes/git-navigation.integration.test.ts': 4,
-  'tests/integration/routes/git-worktrees.integration.test.ts': 4,
-  'tests/integration/routes/git-write.integration.test.ts': 9,
+  'tests/integration/modules/file-checkpoints/large-file-checkpoints.integration.test.ts': 10,
+  'tests/integration/routes/environment-entities.integration.test.ts': 4,
+  'tests/integration/routes/git-worktrees.integration.test.ts': 3,
+  'tests/integration/routes/git-write.integration.test.ts': 5,
   'tests/integration/routes/realtime-routes.integration.test.ts': 4,
-  'tests/integration/routes/respond-stream-mcp-interactive.integration.test.ts': 5,
   'tests/integration/routes/terminal-socket.integration.test.ts': 25,
-  'tests/integration/server/slow-route-idle-timeout.integration.test.ts': 30,
+  'tests/integration/server/slow-route-idle-timeout.integration.test.ts': 25,
   'tests/integration/server/sse-stream-idle-timeout.integration.test.ts': 15,
   'tests/integration/server/start-server.integration.test.ts': 15,
+  'tests/integration/services/machine-onboarding.integration.test.ts': 10,
   'tests/integration/services/rust-command-compat.integration.test.ts': 5,
-  'tests/integration/services/rust-runtime-library-propagation.integration.test.ts': 10,
-  'tests/integration/services/rust-runtime-library-removal.integration.test.ts': 8,
-  'tests/integration/services/rust-runtime-qualification.integration.test.ts': 25,
+  'tests/integration/services/rust-runtime-library-propagation.integration.test.ts': 5,
+  'tests/integration/services/rust-runtime-library-removal.integration.test.ts': 4,
+  'tests/integration/services/rust-runtime-qualification.integration.test.ts': 20,
+  'tests/integration/services/rust-snapshot-compat.integration.test.ts': 5,
   'tests/integration/services/spawn-runtime-child.integration.test.ts': 15,
 };
 

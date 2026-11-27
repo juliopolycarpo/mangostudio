@@ -939,12 +939,13 @@ The same commit gives the same files in the same shard and the same order inside
 it, and no timings snapshot goes into the split, so a retried shard gets its
 first attempt's partition.
 
-The round-robin cost showed up at two shards. The lane has 168 files; the
-tracked weights (352 s, an unlisted file counting as 1 s) put 125 s and 227 s on
-the two round-robin shards of 84 files each (the 227 s one holds
-13 of the 19 listed files, among them `slow-route-idle-timeout`,
-`terminal-socket` and `rust-runtime-qualification`), and 176 s and 176 s on the two weighted shards of
-83 and 85 files. That is computed from the weights, not measured in CI.
+The round-robin cost showed up at two shards. The lane has 168 files, and the
+JUnit `time` of each file, averaged over four main CI runs (2026-11-27, 236 s
+in all), puts 65 s and 171 s on the two round-robin shards: one of them holds
+`slow-route-idle-timeout`, `terminal-socket` and `rust-runtime-qualification`.
+The same per-file times give 118 s and 118 s on the two weighted shards, and
+57 s to 61 s on four. Those are sums of measured file times under the new
+partition, not a measured weighted run.
 `scripts/tests/weighted-shard.unit.test.ts` pins the partition for the current
 file set: every file in one shard, the same partition on a second call and on a
 reversed file list, and, for 2 to 8 shards, a spread of no more than the heaviest
