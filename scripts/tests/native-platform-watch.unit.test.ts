@@ -8,8 +8,14 @@ import {
   shouldSkipScheduledRun,
   trackingMarker,
 } from '../ci/native-watch/decide';
+import { GitHubRetry, STANDARD_RETRY_POLICY } from '../lib/github-retry';
 import { FakeNativeWatchApi } from './support/fake-native-watch-api';
 import { readText } from './support/read-text';
+import {
+  RecordedRetryEnvironment,
+  ScriptedGitHubHttp,
+  type ScriptedReply,
+} from './support/scripted-github-http';
 import { workflowFiles } from './support/workflow-files';
 
 const SHA_A = 'a'.repeat(40);
@@ -108,6 +114,23 @@ describe('reportNativeResult', () => {
     await report(api, { runId: 8, runUrl: 'https://github.com/owner/repo/actions/runs/8' });
     await report(api, { runId: 8, runUrl: 'https://github.com/owner/repo/actions/runs/8' });
     expect(api.calls.filter((call) => call.startsWith('comment'))).toHaveLength(1);
+  });
+
+  test('re-running the run that opened the issue does not comment: its URL is in the issue body', async () => {
+    const api = failingApi();
+    await report(api);
+    const lines = await report(api);
+    expect(api.calls).toHaveLength(1);
+    expect(lines).toEqual([`issue #100 already names ${RUN_URL}`]);
+  });
+
+  test('a run whose URL only prefixes a reported one is still reported', async () => {
+    const api = failingApi();
+    await report(api, { runId: 5, runUrl: 'https://github.com/owner/repo/actions/runs/5' });
+    await report(api, { runId: 70, runUrl: 'https://github.com/owner/repo/actions/runs/70' });
+    await report(api);
+    expect(api.calls.filter((call) => call.startsWith('comment'))).toHaveLength(2);
+    expect(api.comments.get(100)?.[1]).toContain(`Run: ${RUN_URL}`);
   });
 
   test('a green run comments on and closes the open issue', async () => {
@@ -249,46 +272,132 @@ describe('command line', () => {
 });
 
 describe('GithubNativeWatchApi', () => {
-  function respond(body: unknown, status = 200): Response {
-    return new Response(status === 204 ? null : JSON.stringify(body), { status });
+  function fixture(replies: ScriptedReply[]) {
+    const http = new ScriptedGitHubHttp();
+    http.replies = replies;
+    const environment = new RecordedRetryEnvironment();
+    const api = new GithubNativeWatchApi(
+      'owner/repo',
+      'token',
+      (url, init) => http.request(url, init),
+      new GitHubRetry(STANDARD_RETRY_POLICY, environment)
+    );
+    return { api, http, environment };
   }
 
   test('reads the newest successful scheduled run for a branch', async () => {
-    const urls: string[] = [];
-    const api = new GithubNativeWatchApi('owner/repo', 'token', (url) => {
-      urls.push(url);
-      return Promise.resolve(respond({ workflow_runs: [{ head_sha: SHA_A }] }));
-    });
+    const { api, http } = fixture([
+      { status: 200, body: { workflow_runs: [{ head_sha: SHA_A }] } },
+    ]);
     expect(await api.lastSuccessfulScheduledSha('native.yml', 'main')).toBe(SHA_A);
-    expect(urls[0]).toContain(
+    expect(http.calls[0].url.href).toContain(
       '/actions/workflows/native.yml/runs?event=schedule&status=success&branch=main'
     );
   });
 
   test('lists open issues without pull requests', async () => {
-    const api = new GithubNativeWatchApi('owner/repo', 'token', () =>
-      Promise.resolve(
-        respond([
+    const { api } = fixture([
+      {
+        status: 200,
+        body: [
           { number: 1, body: 'x', user: { login: 'github-actions[bot]' } },
           { number: 2, body: 'pr', user: { login: 'a' }, pull_request: {} },
-        ])
-      )
-    );
+        ],
+      },
+    ]);
     expect(await api.listOpenIssues('type: ci')).toEqual([
       { number: 1, body: 'x', author: 'github-actions[bot]' },
     ]);
   });
 
   test('names the status and path of a failed request', async () => {
-    const api = new GithubNativeWatchApi('owner/repo', 'token', () =>
-      Promise.resolve(respond({}, 403))
-    );
+    const { api } = fixture([{ status: 403, body: {} }]);
     await expect(api.closeIssue(5)).rejects.toThrow('PATCH /issues/5 returned 403');
   });
 
   test('rejects a malformed repository or an empty token before any request', () => {
     expect(() => new GithubNativeWatchApi('nope', 'token')).toThrow('Invalid repository "nope"');
     expect(() => new GithubNativeWatchApi('owner/repo', '')).toThrow('Invalid GITHUB_TOKEN');
+  });
+
+  describe('transient failures', () => {
+    test('a 502 on the skip-gate read is retried and the later answer is used', async () => {
+      const { api, http, environment } = fixture([
+        { status: 502, text: 'Bad Gateway' },
+        { status: 200, body: { workflow_runs: [{ head_sha: SHA_A }] } },
+      ]);
+      expect(await api.lastSuccessfulScheduledSha('native.yml', 'main')).toBe(SHA_A);
+      expect(http.calls).toHaveLength(2);
+      expect(environment.waits).toEqual([5_000]);
+    });
+
+    test('a persistent 502 still fails, naming the request and the status', async () => {
+      const bad = { status: 502, text: 'Bad Gateway' } as const;
+      const { api, http } = fixture([bad, bad, bad]);
+      await expect(api.lastSuccessfulScheduledSha('native.yml', 'main')).rejects.toThrow(
+        'returned 502; expected a successful response'
+      );
+      expect(http.calls).toHaveLength(3);
+    });
+
+    test('creating an issue is not repeated after a 502, which may have created it', async () => {
+      const { api, http } = fixture([{ status: 502 }, { status: 201, body: { number: 9 } }]);
+      await expect(
+        api.createIssue({ title: 't', body: 'b', labels: ['type: ci'] })
+      ).rejects.toThrow('POST /issues returned 502');
+      expect(http.calls).toHaveLength(1);
+    });
+
+    test('commenting is retried after a rate limit, which GitHub rejects before processing', async () => {
+      const { api, http, environment } = fixture([
+        { status: 429, headers: { 'retry-after': '8' }, body: { message: 'slow down' } },
+        { status: 201, body: {} },
+      ]);
+      await api.commentOnIssue(5, 'again');
+      expect(http.calls).toHaveLength(2);
+      expect(environment.waits).toEqual([8_000]);
+    });
+  });
+
+  describe('malformed answers fail closed', () => {
+    test.each([
+      { name: 'an object instead of an array', body: { message: 'Server Error' } },
+      { name: 'null', body: null },
+    ])('an issue listing that is $name is an error, not an empty listing', async ({ body }) => {
+      const { api } = fixture([{ status: 200, body }]);
+      await expect(api.listOpenIssues('type: ci')).rejects.toThrow(
+        'Invalid GET /issues?state=open&labels=type%3A+ci page 1; expected a JSON array | received '
+      );
+    });
+
+    test('a comment listing that is not an array names the issue, the page and the body', async () => {
+      const { api } = fixture([{ status: 200, body: { message: 'Not Found' } }]);
+      await expect(api.listIssueCommentBodies(7)).rejects.toThrow(
+        'Invalid GET /issues/7/comments page 1; expected a JSON array | received {"message":"Not Found"}'
+      );
+    });
+
+    test('a job listing without a jobs array is an error on the page that was read', async () => {
+      const { api } = fixture([
+        {
+          status: 200,
+          body: { total_count: 100, jobs: Array.from({ length: 100 }, () => ({ name: 'a' })) },
+        },
+        { status: 200, body: { total_count: 0 } },
+      ]);
+      await expect(api.listJobs(7)).rejects.toThrow(
+        'page 2; expected an object with a "jobs" array | received {"total_count":0}'
+      );
+    });
+
+    test('a non-JSON 200 names the request and the body instead of a bare parse error', async () => {
+      const { api } = fixture([{ status: 200, text: '<!DOCTYPE html><html>Unicorn</html>' }]);
+      const failure = await api.listOpenIssues('type: ci').catch((error: Error) => error);
+      expect((failure as Error).message).not.toContain('JSON Parse error');
+      expect((failure as Error).message).toContain(
+        'expected a JSON array as JSON (HTTP 200) | received <!DOCTYPE html><html>Unicorn</html>'
+      );
+    });
   });
 });
 

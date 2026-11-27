@@ -89,6 +89,11 @@ export interface ReportOptions {
   log?: (line: string) => void;
 }
 
+/** Whether a report body has a `Run: <url>` line for exactly this run; `/runs/7` must not match `/runs/70`. */
+function namesRun(text: string, runUrl: string): boolean {
+  return text.split(/\r?\n/).some((line) => line.trim() === `Run: ${runUrl}`);
+}
+
 async function failingJobLines(options: ReportOptions): Promise<string[]> {
   if (options.rehearsal === 'failure') return ['- rehearsal: no native job ran'];
   const jobs = await options.api.listJobs(options.runId);
@@ -173,9 +178,10 @@ export async function reportNativeResult(options: ReportOptions): Promise<void> 
     );
     return;
   }
-  // A re-run of the same workflow run must not repeat its own comment.
+  // A re-run of the same workflow run must not repeat its own report. The run
+  // that opened the issue names its URL in the issue body, not in a comment.
   const comments = await options.api.listIssueCommentBodies(existing.number);
-  if (comments.some((comment) => comment.includes(options.runUrl))) {
+  if ([existing.body, ...comments].some((text) => namesRun(text, options.runUrl))) {
     return log(`issue #${existing.number} already names ${options.runUrl}`);
   }
   await act(`comment on open issue #${existing.number}`, () =>
