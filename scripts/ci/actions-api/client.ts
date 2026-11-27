@@ -82,7 +82,9 @@ export async function listActionsCaches(
 }
 
 /**
- * Delete exactly one cache ID. 404 means it is already gone and returns false.
+ * Delete exactly one cache ID. A 404 on the first attempt means it was already
+ * gone and returns false. A 404 after an attempt that timed out or got a 5xx
+ * means that earlier attempt reached GitHub and deleted it, so it returns true.
  * @example await deleteActionsCache(client, entry.id);
  */
 export async function deleteActionsCache(
@@ -92,7 +94,7 @@ export async function deleteActionsCache(
   if (!Number.isSafeInteger(id) || id < 1)
     throw new Error(`Invalid cache ID ${id}; expected a positive integer`);
   const response = await client.response(`/caches/${id}`, 'DELETE');
-  if (response.status === 404) return false;
+  if (response.status === 404) return response.afterUncertainAttempt;
   if (response.status !== 204)
     throw new Error(`DELETE cache ${id} returned ${response.status}; expected 204 or 404`);
   return true;

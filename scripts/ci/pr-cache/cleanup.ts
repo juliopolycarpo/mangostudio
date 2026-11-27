@@ -1,4 +1,4 @@
-import { GitHubRetry } from '../../lib/github-retry';
+import type { GitHubRetry } from '../../lib/github-retry';
 import type { ActionsCacheEntry } from '../actions-api/client';
 import type { PullRequestCacheApi } from './github';
 import {
@@ -63,14 +63,15 @@ async function deletePlanned(
  * saved under any other ref. Without `apply` it only plans. A pull request that
  * is open (reopened before this ran) or unknown to GitHub keeps its caches.
  * A listing that is incomplete or moved between pages is read again, three
- * passes in all and 60 s of waiting at most (the closed-PR job has 10 minutes);
- * one that never settles fails and deletes nothing.
- * @example await cleanupPullRequestCaches(api, 2222, { apply: true });
+ * passes in all; one that never settles fails and deletes nothing. `retry` must
+ * be the runtime the `api` was built with, so requests and listing passes spend
+ * one 60 s wait budget (the closed-PR job has 10 minutes).
+ * @example await cleanupPullRequestCaches(api, 2222, { apply: true, retry });
  */
 export async function cleanupPullRequestCaches(
   api: PullRequestCacheApi,
   pullRequest: number,
-  options: { readonly apply: boolean; readonly retry?: GitHubRetry }
+  options: { readonly apply: boolean; readonly retry: GitHubRetry }
 ): Promise<PullRequestCacheCleanupResult> {
   const ref = pullRequestMergeRef(pullRequest);
   const state = await api.pullRequestState(pullRequest);
@@ -81,8 +82,7 @@ export async function cleanupPullRequestCaches(
         : { open: [], unknown: [pullRequest] };
     return deletePlanned(api, [], options.apply, skipped);
   }
-  const retry = options.retry ?? new GitHubRetry();
-  const listed = await retry.listing(`caches on ${ref}`, () => api.listCachesOnRef(ref));
+  const listed = await options.retry.listing(`caches on ${ref}`, () => api.listCachesOnRef(ref));
   return deletePlanned(api, selectPullRequestCaches(listed, pullRequest), options.apply);
 }
 
@@ -91,17 +91,16 @@ export async function cleanupPullRequestCaches(
  * and numbers GitHub does not know keep their caches.
  * The whole-repository listing gets one retry level for both an incomplete and
  * an unstable read: three passes in all, never one level inside the other.
- * @example await sweepClosedPullRequestCaches(api, { apply: false });
+ * @example await sweepClosedPullRequestCaches(api, { apply: false, retry });
  */
 export async function sweepClosedPullRequestCaches(
   api: PullRequestCacheApi,
-  options: { readonly apply: boolean; readonly retry?: GitHubRetry }
+  options: { readonly apply: boolean; readonly retry: GitHubRetry }
 ): Promise<PullRequestCacheCleanupResult> {
   // Other jobs save and delete caches while this pages through the whole
   // repository. A stale plan is harmless: a vanished cache answers 404 and a
   // newer one waits for the next sweep.
-  const retry = options.retry ?? new GitHubRetry();
-  const listed = await retry.listing('repository cache listing', () => api.listAllCaches());
+  const listed = await options.retry.listing('repository cache listing', () => api.listAllCaches());
   const states = new Map<number, PullRequestState>();
   const unknown: number[] = [];
   for (const number of pullRequestNumbers(listed)) {

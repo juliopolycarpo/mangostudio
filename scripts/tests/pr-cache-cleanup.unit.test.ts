@@ -172,7 +172,10 @@ describe('selection', () => {
 describe('single pull request cleanup', () => {
   test('deletes the pull request merge-ref caches and reports bytes', async () => {
     const api = new FakePullRequestCacheApi();
-    const result = await cleanupPullRequestCaches(api, 7, { apply: true });
+    const result = await cleanupPullRequestCaches(api, 7, {
+      apply: true,
+      retry: instantRetry().retry,
+    });
     expect(api.refsListed).toEqual(['refs/pull/7/merge']);
     expect(api.deletedIds).toEqual([1, 2]);
     expect(result.deletedIds).toEqual([1, 2]);
@@ -182,13 +185,16 @@ describe('single pull request cleanup', () => {
   test('never touches another ref even when the listing ignores the ref filter', async () => {
     const api = new FakePullRequestCacheApi();
     api.ignoreRefFilter = true;
-    await cleanupPullRequestCaches(api, 7, { apply: true });
+    await cleanupPullRequestCaches(api, 7, { apply: true, retry: instantRetry().retry });
     expect(api.deletedIds).toEqual([1, 2]);
   });
 
   test('deletes nothing in a dry run and still reports the plan', async () => {
     const api = new FakePullRequestCacheApi();
-    const result = await cleanupPullRequestCaches(api, 7, { apply: false });
+    const result = await cleanupPullRequestCaches(api, 7, {
+      apply: false,
+      retry: instantRetry().retry,
+    });
     expect(api.deletedIds).toEqual([]);
     expect(result.planned.map((entry) => entry.id)).toEqual([1, 2]);
     const report = formatPullRequestCacheReport(result);
@@ -200,7 +206,10 @@ describe('single pull request cleanup', () => {
   test('treats an already deleted cache as gone and continues', async () => {
     const api = new FakePullRequestCacheApi();
     api.goneIds.add(1);
-    const result = await cleanupPullRequestCaches(api, 7, { apply: true });
+    const result = await cleanupPullRequestCaches(api, 7, {
+      apply: true,
+      retry: instantRetry().retry,
+    });
     expect(result.alreadyGoneIds).toEqual([1]);
     expect(result.deletedIds).toEqual([2]);
     expect(formatPullRequestCacheReport(result)).toContain('Deleted: 1 caches, 200 bytes');
@@ -209,7 +218,9 @@ describe('single pull request cleanup', () => {
   test('stops on a delete failure other than 404', async () => {
     const api = new FakePullRequestCacheApi();
     api.failDeleteOf = 1;
-    await expect(cleanupPullRequestCaches(api, 7, { apply: true })).rejects.toThrow('403');
+    await expect(
+      cleanupPullRequestCaches(api, 7, { apply: true, retry: instantRetry().retry })
+    ).rejects.toThrow('403');
     expect(api.deletedIds).toEqual([]);
   });
 
@@ -220,7 +231,9 @@ describe('single pull request cleanup', () => {
       [70, 'closed'],
     ]);
     api.failDeleteOf = 3;
-    await expect(sweepClosedPullRequestCaches(api, { apply: true })).rejects.toThrow(
+    await expect(
+      sweepClosedPullRequestCaches(api, { apply: true, retry: instantRetry().retry })
+    ).rejects.toThrow(
       'DELETE returned 403; deleted 2 of 3 caches (300 bytes) before stopping, re-run to continue'
     );
     expect(api.deletedIds).toEqual([1, 2]);
@@ -228,15 +241,18 @@ describe('single pull request cleanup', () => {
 
   test('refuses an invalid number before listing anything', async () => {
     const api = new FakePullRequestCacheApi();
-    await expect(cleanupPullRequestCaches(api, -2, { apply: true })).rejects.toThrow(
-      'Invalid pull request number "-2"; expected a positive integer'
-    );
+    await expect(
+      cleanupPullRequestCaches(api, -2, { apply: true, retry: instantRetry().retry })
+    ).rejects.toThrow('Invalid pull request number "-2"; expected a positive integer');
     expect(api.refsListed).toEqual([]);
   });
 
   test('plans nothing for a pull request without caches', async () => {
     const api = new FakePullRequestCacheApi();
-    const result = await cleanupPullRequestCaches(api, 12345, { apply: true });
+    const result = await cleanupPullRequestCaches(api, 12345, {
+      apply: true,
+      retry: instantRetry().retry,
+    });
     expect(result.planned).toEqual([]);
     expect(api.deletedIds).toEqual([]);
   });
@@ -246,7 +262,10 @@ describe('reopened or unknown pull request', () => {
   test('keeps the caches of a pull request that is open again', async () => {
     const api = new FakePullRequestCacheApi();
     api.states.set(7, 'open');
-    const result = await cleanupPullRequestCaches(api, 7, { apply: true });
+    const result = await cleanupPullRequestCaches(api, 7, {
+      apply: true,
+      retry: instantRetry().retry,
+    });
     expect(api.deletedIds).toEqual([]);
     expect(api.refsListed).toEqual([]);
     expect(result.skipped).toEqual({ open: [7], unknown: [] });
@@ -254,7 +273,10 @@ describe('reopened or unknown pull request', () => {
 
   test('keeps the caches of a number GitHub does not know', async () => {
     const api = new FakePullRequestCacheApi();
-    const result = await cleanupPullRequestCaches(api, 70, { apply: true });
+    const result = await cleanupPullRequestCaches(api, 70, {
+      apply: true,
+      retry: instantRetry().retry,
+    });
     expect(api.deletedIds).toEqual([]);
     expect(result.skipped).toEqual({ open: [], unknown: [70] });
   });
@@ -273,7 +295,10 @@ describe('closed pull request sweep', () => {
 
   test('deletes closed pull requests only and leaves open, unknown and non-merge refs', async () => {
     const api = sweepApi();
-    const result = await sweepClosedPullRequestCaches(api, { apply: true });
+    const result = await sweepClosedPullRequestCaches(api, {
+      apply: true,
+      retry: instantRetry().retry,
+    });
     expect(api.deletedIds).toEqual([1, 2, 3]);
     expect(result.skipped).toEqual({ open: [8], unknown: [9] });
     expect(formatPullRequestCacheReport(result)).toContain(
@@ -331,7 +356,10 @@ describe('closed pull request sweep', () => {
 
   test('deletes nothing in a dry run and plans the same set', async () => {
     const api = sweepApi();
-    const result = await sweepClosedPullRequestCaches(api, { apply: false });
+    const result = await sweepClosedPullRequestCaches(api, {
+      apply: false,
+      retry: instantRetry().retry,
+    });
     expect(api.deletedIds).toEqual([]);
     expect(result.planned.map((entry) => entry.id)).toEqual([1, 2, 3]);
   });
@@ -339,7 +367,10 @@ describe('closed pull request sweep', () => {
   test('tolerates a cache that disappeared before its delete', async () => {
     const api = sweepApi();
     api.goneIds.add(3);
-    const result = await sweepClosedPullRequestCaches(api, { apply: true });
+    const result = await sweepClosedPullRequestCaches(api, {
+      apply: true,
+      retry: instantRetry().retry,
+    });
     expect(api.deletedIds).toEqual([1, 2]);
     expect(result.alreadyGoneIds).toEqual([3]);
   });
@@ -382,16 +413,15 @@ describe('command line', () => {
 
 class FakeGithubHttp extends ScriptedGitHubHttp {
   readonly environment = new RecordedRetryEnvironment();
-  // The adapter and the cleanup each hold their own retry runtime, as in production.
-  readonly requestRetry = new GitHubRetry(STANDARD_RETRY_POLICY, this.environment);
-  readonly listingRetry = new GitHubRetry(STANDARD_RETRY_POLICY, this.environment);
+  // One runtime for the adapter and the cleanup, as in the entrypoint.
+  readonly retry = new GitHubRetry(STANDARD_RETRY_POLICY, this.environment);
 
   api(): GithubPullRequestCacheApi {
     return new GithubPullRequestCacheApi(
       REPOSITORY,
       'fake-token',
       this.request.bind(this),
-      this.requestRetry
+      this.retry
     );
   }
 }
@@ -448,7 +478,7 @@ describe('GitHub adapter', () => {
     };
     http.replies = [{ status: 200, body: { state: 'closed' } }, partial, partial, partial];
     await expect(
-      cleanupPullRequestCaches(http.api(), 7, { apply: true, retry: http.listingRetry })
+      cleanupPullRequestCaches(http.api(), 7, { apply: true, retry: http.retry })
     ).rejects.toThrow('Incomplete actions_caches listing 1/2');
     expect(http.calls.map(({ init }) => init.method)).toEqual(['GET', 'GET', 'GET', 'GET']);
     expect(http.environment.waits).toEqual([5_000, 10_000]);
@@ -476,7 +506,7 @@ describe('GitHub adapter', () => {
     ];
     const result = await cleanupPullRequestCaches(http.api(), 7, {
       apply: true,
-      retry: http.listingRetry,
+      retry: http.retry,
     });
     expect(result.deletedIds).toEqual([1, 2]);
     expect(http.environment.waits).toEqual([5_000, 10_000]);
@@ -516,6 +546,76 @@ describe('GitHub adapter', () => {
     await expect(api.deleteCache(5)).rejects.toThrow('returned 403');
     expect(http.calls.every(({ url }) => url.pathname.endsWith('/actions/caches/5'))).toBe(true);
     await expect(api.deleteCache(0)).rejects.toThrow('Invalid cache ID 0');
+  });
+
+  test.each([
+    { label: 'a timeout', first: { networkError: 'timed out' } },
+    { label: 'a 502', first: { status: 502, text: 'Bad Gateway' } },
+  ])(
+    'a DELETE retried after $label that then answers 404 is reported deleted, not already gone',
+    async ({ first }) => {
+      const http = new FakeGithubHttp();
+      http.replies = [
+        { status: 200, body: { state: 'closed' } },
+        { status: 200, body: { total_count: 1, actions_caches: [cache(1, 'refs/pull/7/merge')] } },
+        first,
+        { status: 404 },
+      ];
+      const result = await cleanupPullRequestCaches(http.api(), 7, {
+        apply: true,
+        retry: http.retry,
+      });
+      expect(
+        { deletedIds: result.deletedIds, alreadyGoneIds: result.alreadyGoneIds },
+        'expected the cache deleted by the first attempt to count as deleted'
+      ).toEqual({ deletedIds: [1], alreadyGoneIds: [] });
+      expect(http.environment.waits).toEqual([5_000]);
+    }
+  );
+
+  test('a first-attempt DELETE 404 stays already gone, also after a rate-limited retry', async () => {
+    const http = new FakeGithubHttp();
+    http.replies = [
+      { status: 404 },
+      { status: 429, headers: { 'retry-after': '1' } },
+      { status: 404 },
+    ];
+    const api = http.api();
+    expect(await api.deleteCache(5)).toBe(false);
+    // A rate limit rejects the request before it is processed, so a 404 after one is a real absence.
+    expect(await api.deleteCache(6)).toBe(false);
+  });
+
+  test('requests and listing passes spend one 60 s wait budget', async () => {
+    const http = new FakeGithubHttp();
+    const partial = {
+      status: 200,
+      body: { total_count: 2, actions_caches: [cache(1, 'refs/pull/7/merge')] },
+    };
+    const limited = { status: 429, headers: { 'retry-after': '30' } };
+    http.replies = [
+      { status: 200, body: { state: 'closed' } },
+      // The page request alone spends the whole budget: 30 s + 30 s.
+      limited,
+      limited,
+      partial,
+      // A second budget for the listing pass would make this complete read reachable.
+      {
+        status: 200,
+        body: {
+          total_count: 2,
+          actions_caches: [cache(1, 'refs/pull/7/merge'), cache(2, 'refs/pull/7/merge')],
+        },
+      },
+    ];
+    await expect(
+      cleanupPullRequestCaches(http.api(), 7, { apply: true, retry: http.retry })
+    ).rejects.toThrow(
+      'Incomplete actions_caches listing 1/2; expected every entry; caches on refs/pull/7/merge gave up after 1 attempts (60 s wait budget spent)'
+    );
+    expect(http.environment.waits).toEqual([30_000, 30_000]);
+    expect(http.retry.waitedMs).toBe(60_000);
+    expect(http.replies).toHaveLength(1);
   });
 
   test('reads pull request state from the pulls endpoint', async () => {

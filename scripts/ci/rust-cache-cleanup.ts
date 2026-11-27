@@ -5,6 +5,7 @@
 
 import { appendFileSync, readFileSync } from 'node:fs';
 
+import { GitHubRetry } from '../lib/github-retry';
 import { parseCacheEntry, record } from './actions-api/client';
 import { cleanupRustCaches } from './rust-cache/cleanup';
 import { MAIN_CACHE_REF } from './rust-cache/families';
@@ -97,8 +98,19 @@ async function main(): Promise<void> {
     );
   const event: unknown = JSON.parse(readFileSync(eventPath, 'utf8'));
   const context = readCleanupContext(process.env, event);
-  const api = new GithubRustCacheApi(context.repository, process.env.GITHUB_TOKEN ?? '');
-  const result = await cleanupRustCaches(api, { ...context, apply: args[0] === '--delete' });
+  // One runtime for the API client and the cleanup: they spend a single wait budget.
+  const retry = new GitHubRetry();
+  const api = new GithubRustCacheApi(
+    context.repository,
+    process.env.GITHUB_TOKEN ?? '',
+    undefined,
+    retry
+  );
+  const result = await cleanupRustCaches(api, {
+    ...context,
+    apply: args[0] === '--delete',
+    retry,
+  });
   console.log(JSON.stringify(result, null, 2));
   if (!process.env.GITHUB_STEP_SUMMARY) return;
   const bytes = result.planned

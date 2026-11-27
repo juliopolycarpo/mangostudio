@@ -146,6 +146,11 @@ describe('Rust cache generation selection', () => {
   });
 });
 
+/** A retry runtime that records its waits instead of sleeping, for fakes that bypass HTTP. */
+function inertRetry(): GitHubRetry {
+  return new GitHubRetry(STANDARD_RETRY_POLICY, new RecordedRetryEnvironment());
+}
+
 class FakeRustCacheApi implements RustCacheApi {
   entries: RustCacheEntry[] = [OLD, NEW];
   snapshots: RustCacheEntry[][] = [];
@@ -178,7 +183,12 @@ class FakeRustCacheApi implements RustCacheApi {
 describe('post-save cleanup', () => {
   test('deletes exact old IDs only and retains replacements', async () => {
     const api = new FakeRustCacheApi();
-    const result = await cleanupRustCaches(api, { repository: REPOSITORY, runId: 42, apply: true });
+    const result = await cleanupRustCaches(api, {
+      repository: REPOSITORY,
+      runId: 42,
+      apply: true,
+      retry: inertRetry(),
+    });
     expect(result.deletedIds).toEqual([OLD.id]);
     expect(api.entries).toEqual([NEW]);
     expect(result.deferred).toBeNull();
@@ -190,6 +200,7 @@ describe('post-save cleanup', () => {
       repository: REPOSITORY,
       runId: 42,
       apply: false,
+      retry: inertRetry(),
     });
     expect(result.planned).toHaveLength(1);
     expect(api.deletedIds).toEqual([]);
@@ -198,7 +209,12 @@ describe('post-save cleanup', () => {
   test('defers when a main writer is saving', async () => {
     const api = new FakeRustCacheApi();
     api.writers = [{ ...MAIN_RUN, id: 43, status: 'in_progress' }];
-    const result = await cleanupRustCaches(api, { repository: REPOSITORY, runId: 42, apply: true });
+    const result = await cleanupRustCaches(api, {
+      repository: REPOSITORY,
+      runId: 42,
+      apply: true,
+      retry: inertRetry(),
+    });
     expect(result.deferred).toContain('43');
     expect(api.deletedIds).toEqual([]);
   });
@@ -214,7 +230,12 @@ describe('post-save cleanup', () => {
       [OLD, NEW],
       [OLD, NEW, newer],
     ];
-    const result = await cleanupRustCaches(api, { repository: REPOSITORY, runId: 42, apply: true });
+    const result = await cleanupRustCaches(api, {
+      repository: REPOSITORY,
+      runId: 42,
+      apply: true,
+      retry: inertRetry(),
+    });
     expect(result.deferred).toContain('changed or disappeared');
     expect(api.deletedIds).toEqual([]);
   });
@@ -227,6 +248,7 @@ describe('post-save cleanup', () => {
         repository: REPOSITORY,
         runId: 42,
         apply: true,
+        retry: inertRetry(),
       });
       expect(result.deferred).toContain('changed or disappeared');
       expect(api.deletedIds).toEqual([]);
@@ -242,7 +264,12 @@ describe('post-save cleanup', () => {
     });
     api.entries = [oldest, OLD, NEW];
     api.writerSnapshots = [[], [{ ...MAIN_RUN, id: 43, status: 'queued' }]];
-    const result = await cleanupRustCaches(api, { repository: REPOSITORY, runId: 42, apply: true });
+    const result = await cleanupRustCaches(api, {
+      repository: REPOSITORY,
+      runId: 42,
+      apply: true,
+      retry: inertRetry(),
+    });
     expect(result.deletedIds).toEqual([OLD.id]);
     expect(result.deferred).toContain('43');
     expect(api.entries).toEqual([oldest, NEW]);
@@ -252,12 +279,22 @@ describe('post-save cleanup', () => {
     const api = new FakeRustCacheApi();
     api.dropReplacementAfterDelete = true;
     await expect(
-      cleanupRustCaches(api, { repository: REPOSITORY, runId: 42, apply: true })
+      cleanupRustCaches(api, {
+        repository: REPOSITORY,
+        runId: 42,
+        apply: true,
+        retry: inertRetry(),
+      })
     ).rejects.toThrow(`Replacement cache ${NEW.id}`);
     const forbidden = new FakeRustCacheApi();
     forbidden.deleteError = new Error('DELETE returned 403');
     await expect(
-      cleanupRustCaches(forbidden, { repository: REPOSITORY, runId: 42, apply: true })
+      cleanupRustCaches(forbidden, {
+        repository: REPOSITORY,
+        runId: 42,
+        apply: true,
+        retry: inertRetry(),
+      })
     ).rejects.toThrow('403');
     expect(forbidden.deletedIds).toEqual([]);
   });
@@ -272,7 +309,12 @@ describe('post-save cleanup', () => {
     const api = new FakeRustCacheApi();
     api.trigger = trigger;
     await expect(
-      cleanupRustCaches(api, { repository: REPOSITORY, runId: 42, apply: true })
+      cleanupRustCaches(api, {
+        repository: REPOSITORY,
+        runId: 42,
+        apply: true,
+        retry: inertRetry(),
+      })
     ).rejects.toThrow('expected a completed same-repository main writer');
     expect(api.deletedIds).toEqual([]);
   });
@@ -280,24 +322,18 @@ describe('post-save cleanup', () => {
 
 class FakeGithubHttp extends ScriptedGitHubHttp {
   readonly environment = new RecordedRetryEnvironment();
-  // The adapter and the cleanup each hold their own retry runtime, as in production.
-  readonly requestRetry = new GitHubRetry(STANDARD_RETRY_POLICY, this.environment);
-  readonly listingRetry = new GitHubRetry(STANDARD_RETRY_POLICY, this.environment);
+  // One runtime for the adapter and the cleanup, as in the entrypoint.
+  readonly retry = new GitHubRetry(STANDARD_RETRY_POLICY, this.environment);
 
   api(): GithubRustCacheApi {
-    return new GithubRustCacheApi(
-      REPOSITORY,
-      'fake-token',
-      this.request.bind(this),
-      this.requestRetry
-    );
+    return new GithubRustCacheApi(REPOSITORY, 'fake-token', this.request.bind(this), this.retry);
   }
 
   cleanup(context: { runId?: number; apply: boolean }) {
     return cleanupRustCaches(this.api(), {
       repository: REPOSITORY,
       runId: MAIN_RUN.id,
-      retry: this.listingRetry,
+      retry: this.retry,
       ...context,
     });
   }
@@ -336,17 +372,35 @@ describe('GitHub cache adapter', () => {
   });
 
   test('rejects incomplete, changing, duplicate and malformed listings', async () => {
-    for (const body of [
-      { total_count: 2, actions_caches: [OLD] },
-      { total_count: 2, actions_caches: [OLD, OLD] },
-      { total_count: 1, actions_caches: [{ ...OLD, id: -1 }] },
-      { total_count: 1, actions_caches: [{ ...OLD, size_in_bytes: 0 }] },
-      { total_count: 1, actions_caches: [null] },
-      { total_count: '1', actions_caches: [OLD] },
+    // Each case names its own failure: a bare toThrow would also pass on a
+    // retried transport failure from an unscripted request.
+    for (const { body, message } of [
+      {
+        body: { total_count: 2, actions_caches: [OLD] },
+        message: 'Incomplete actions_caches listing 1/2',
+      },
+      {
+        body: { total_count: 2, actions_caches: [OLD, OLD] },
+        message: 'Duplicate cache IDs in paginated listing',
+      },
+      {
+        body: { total_count: 1, actions_caches: [{ ...OLD, id: -1 }] },
+        message: 'Invalid cache entry',
+      },
+      {
+        body: { total_count: 1, actions_caches: [{ ...OLD, size_in_bytes: 0 }] },
+        message: 'Invalid cache entry',
+      },
+      { body: { total_count: 1, actions_caches: [null] }, message: 'Invalid cache entry null' },
+      {
+        body: { total_count: '1', actions_caches: [OLD] },
+        message: 'expected an object with a nonnegative integer total_count',
+      },
     ]) {
       const http = new FakeGithubHttp();
       http.replies = [{ status: 200, body }];
-      await expect(http.api().listCaches()).rejects.toThrow();
+      await expect(http.api().listCaches()).rejects.toThrow(message);
+      expect(http.calls).toHaveLength(1);
     }
     const changing = new FakeGithubHttp();
     changing.replies = [
@@ -593,6 +647,111 @@ describe('GitHub cache adapter', () => {
     expect(http.replies).toEqual([]);
   });
 
+  test('audits writers again when a retry wait passed between the audit and the DELETE', async () => {
+    const http = new FakeGithubHttp();
+    const empty = { status: 200, body: { total_count: 0, workflow_runs: [] } };
+    const emptyAudit = Array<typeof empty>(5).fill(empty);
+    const both = { status: 200, body: { total_count: 2, actions_caches: [NEW, OLD] } };
+    http.replies = [
+      { status: 200, body: MAIN_RUN },
+      both,
+      ...emptyAudit,
+      // The revalidation listing fails once and succeeds after a 5 s wait: the audit above is now stale.
+      { status: 502, text: 'Bad Gateway' },
+      both,
+      ...emptyAudit,
+      both,
+      { status: 204 },
+      { status: 200, body: { total_count: 1, actions_caches: [NEW] } },
+    ];
+    // Read the requests first: a missing re-audit shows up as a stray DELETE here, not as a scripted-reply error.
+    const result = await http.cleanup({ apply: true }).catch((error: Error) => error);
+    const sequence = http.calls.map(({ url, init }) =>
+      init.method === 'DELETE'
+        ? 'DELETE'
+        : (url.searchParams.get('status') ?? url.pathname.split('/').at(-1))
+    );
+    const audit = ['requested', 'pending', 'waiting', 'queued', 'in_progress'];
+    expect(
+      sequence,
+      'expected a second writer audit after the retry wait and before the DELETE'
+    ).toEqual([
+      '42',
+      'caches',
+      ...audit,
+      'caches',
+      'caches',
+      ...audit,
+      'caches',
+      'DELETE',
+      'caches',
+    ]);
+    expect(result).toMatchObject({ deletedIds: [OLD.id] });
+    expect(http.environment.waits).toEqual([5_000]);
+  });
+
+  test('a writer that starts during the retry wait defers the deletion', async () => {
+    const http = new FakeGithubHttp();
+    const empty = { status: 200, body: { total_count: 0, workflow_runs: [] } };
+    const writer = { ...MAIN_RUN, id: 43, status: 'requested' };
+    const both = { status: 200, body: { total_count: 2, actions_caches: [NEW, OLD] } };
+    http.replies = [
+      { status: 200, body: MAIN_RUN },
+      both,
+      ...Array<typeof empty>(5).fill(empty),
+      { status: 502, text: 'Bad Gateway' },
+      both,
+      // The second audit sees the writer that appeared while the retry slept.
+      { status: 200, body: { total_count: 1, workflow_runs: [writer] } },
+      ...Array<typeof empty>(4).fill(empty),
+    ];
+    const result = await http.cleanup({ apply: true }).catch((error: Error) => error);
+    expect(
+      http.calls.map(({ init }) => init.method),
+      'expected no DELETE after the writer that appeared during the retry wait'
+    ).not.toContain('DELETE');
+    expect(result).toMatchObject({ deferred: 'Active main cache writers: 43' });
+  });
+
+  test.each([
+    { label: 'a timeout', first: { networkError: 'timed out' } },
+    { label: 'a 502', first: { status: 502, text: 'Bad Gateway' } },
+  ])('a DELETE retried after $label that then answers 404 counts as deleted', async ({ first }) => {
+    const http = new FakeGithubHttp();
+    const empty = { status: 200, body: { total_count: 0, workflow_runs: [] } };
+    const both = { status: 200, body: { total_count: 2, actions_caches: [NEW, OLD] } };
+    http.replies = [
+      { status: 200, body: MAIN_RUN },
+      both,
+      ...Array<typeof empty>(5).fill(empty),
+      both,
+      first,
+      { status: 404 },
+      { status: 200, body: { total_count: 1, actions_caches: [NEW] } },
+    ];
+    const result = await http.cleanup({ apply: true });
+    expect(
+      result.deletedIds,
+      'expected the cache removed by the first DELETE attempt to be reported deleted'
+    ).toEqual([OLD.id]);
+  });
+
+  test('a first-attempt DELETE 404 is not counted as deleted', async () => {
+    const http = new FakeGithubHttp();
+    const empty = { status: 200, body: { total_count: 0, workflow_runs: [] } };
+    const both = { status: 200, body: { total_count: 2, actions_caches: [NEW, OLD] } };
+    http.replies = [
+      { status: 200, body: MAIN_RUN },
+      both,
+      ...Array<typeof empty>(5).fill(empty),
+      both,
+      { status: 404 },
+      { status: 200, body: { total_count: 1, actions_caches: [NEW] } },
+    ];
+    const result = await http.cleanup({ apply: true });
+    expect(result.deletedIds).toEqual([]);
+  });
+
   test('rejects duplicate workflow run IDs across pages of one status', async () => {
     const http = new FakeGithubHttp();
     const first = Array.from({ length: 100 }, (_, index) => ({
@@ -671,10 +830,15 @@ describe('GitHub cache adapter', () => {
     http.replies = [{ status: 200, body: MAIN_RUN }];
     expect(await http.api().getRun(42)).toEqual(MAIN_RUN);
     expect(http.calls[0].url.pathname).toEndWith('/runs/42');
-    for (const body of [null, { ...MAIN_RUN, id: 43 }, { ...MAIN_RUN, head_repository: null }]) {
+    for (const { body, message } of [
+      { body: null, message: 'Invalid workflow run null' },
+      { body: { ...MAIN_RUN, id: 43 }, message: 'Unexpected run ID 43; expected 42' },
+      { body: { ...MAIN_RUN, head_repository: null }, message: 'Invalid workflow run' },
+    ]) {
       const invalid = new FakeGithubHttp();
       invalid.replies = [{ status: 200, body }];
-      await expect(invalid.api().getRun(42)).rejects.toThrow();
+      await expect(invalid.api().getRun(42)).rejects.toThrow(message);
+      expect(invalid.calls).toHaveLength(1);
     }
     await expect(http.api().getRun(0)).rejects.toThrow('Invalid run ID 0');
   });
