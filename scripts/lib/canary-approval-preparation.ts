@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import type { CanaryApprovalAcquisition } from './canary-approval';
 import { parseCanaryPushContext } from './canary-promotion';
 import {
@@ -12,6 +10,7 @@ import {
 import type { CanarySource } from './canary-source';
 import { writeCanarySourceSnapshot } from './canary-source-snapshot';
 import type { CanaryValidationReceipt } from './canary-validation';
+import { sha256OfBytes } from './script-guards';
 
 /** Authenticated acquisition and qualification boundaries; qualification must read the exact selected CI attempt. */
 export interface CanaryApprovalPreparationServices {
@@ -119,7 +118,7 @@ export async function prepareCanaryApproval(
     (!['release', 'actions'].includes(acquisition.origin) ||
       !recovered ||
       !acquisition.approvalPayload ||
-      hash(acquisition.approvalPayload) !== pin)
+      sha256OfBytes(acquisition.approvalPayload) !== pin)
   )
     throw new Error(
       `Approved payload unavailable: expected existing approval SHA256 ${pin}; refusing new approval`
@@ -160,7 +159,7 @@ export async function prepareCanaryApproval(
     schemaVersion: 1,
     selectedRun: source,
     workflowRevision: input.executionRevision,
-    manifestSha256: hash(Buffer.from(acquisition.manifestRaw)),
+    manifestSha256: sha256OfBytes(Buffer.from(acquisition.manifestRaw)),
     distribution: acquisition.distribution,
     qualification: originalQualification,
   };
@@ -200,7 +199,7 @@ export async function prepareCanaryApproval(
       'Recovered promotion encoding differs from frozen publication metadata; refusing to rewrite original receipt'
     );
   const expectedRaw = `${JSON.stringify(evidence.expected, null, 2)}\n`;
-  const payloadSha256 = hash(payload);
+  const payloadSha256 = sha256OfBytes(payload);
   return {
     acquisition,
     receipt,
@@ -209,7 +208,7 @@ export async function prepareCanaryApproval(
     payloadSha256,
     artifactName: `canary-approval-${source.sourceSha}-${input.version}-${payloadSha256}-${input.producerAttempt}`,
     expectedRaw,
-    expectedSha256: hash(Buffer.from(expectedRaw)),
+    expectedSha256: sha256OfBytes(Buffer.from(expectedRaw)),
     generated: evidence.generated,
     currentQualification,
     originalQualification,
@@ -229,7 +228,4 @@ function sameSource(left: CanarySource, right: CanarySource): boolean {
       'workflowPath',
     ] as const
   ).every((key) => left[key] === right[key]);
-}
-function hash(bytes: Uint8Array): string {
-  return createHash('sha256').update(bytes).digest('hex');
 }

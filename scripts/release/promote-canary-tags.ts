@@ -15,6 +15,7 @@ import {
 } from '../lib/canary-tags';
 import { readDistributionManifest } from '../lib/distribution-manifest';
 import type { NpmCommandResult } from '../lib/npm-publish';
+import { requireJsonRecord } from '../lib/script-guards';
 
 /** Subprocess I/O retained behind the project-owned command adapter. */
 export interface CanaryTagProcess {
@@ -180,8 +181,8 @@ export class GitHubCanaryTagAncestry implements CanaryTagAncestry {
       );
     }
     const comparison = await this.get(`repos/${this.repository}/compare/${base}...${head}`, signal);
-    const baseCommit = record(comparison.base_commit, 'compare base');
-    const mergeBase = record(comparison.merge_base_commit, 'compare merge base');
+    const baseCommit = requireJsonRecord(comparison.base_commit, 'compare base');
+    const mergeBase = requireJsonRecord(comparison.merge_base_commit, 'compare merge base');
     const status = comparison.status;
     if (
       baseCommit.sha !== base ||
@@ -211,7 +212,7 @@ export class GitHubCanaryTagAncestry implements CanaryTagAncestry {
     } catch (cause) {
       throw new Error(`GitHub canary ancestry ${path}: expected valid JSON`, { cause });
     }
-    return record(body, path);
+    return requireJsonRecord(body, path);
   }
 }
 
@@ -262,12 +263,6 @@ export async function runPromoteCanaryTagsCli(
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-}
-
-function record(value: unknown, label: string): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value))
-    throw new Error(`Invalid ${label}: expected object; received ${JSON.stringify(value)}`);
-  return value as Record<string, unknown>;
 }
 
 function validateRepository(repository: unknown): asserts repository is string {

@@ -478,6 +478,7 @@ const runMergeCli = async (
   for (const path of [
     script,
     'scripts/lib/config.ts',
+    'scripts/lib/script-guards.ts',
     'scripts/lib/shard-receipt.ts',
     'scripts/lib/test-lanes.ts',
     'scripts/lib/log-lines.ts',

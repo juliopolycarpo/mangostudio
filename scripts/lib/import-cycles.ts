@@ -11,6 +11,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import ts from '@typescript/typescript6';
 
+import { toPosixPath } from './script-guards';
 import { isCycleScanExcluded } from './source-scan-paths';
 
 const SOURCE = /\.(?:[cm]?[jt]s|[jt]sx)$/i;
@@ -211,7 +212,7 @@ function readBoundedSource(path: string, root: string): string {
   const descriptor = openSync(path, 'r');
   try {
     const before = fstatSync(descriptor, { bigint: true });
-    const relativePath = () => relative(root, path).split(sep).join('/');
+    const relativePath = () => toPosixPath(relative(root, path));
     if (before.size > MAX_SOURCE_BYTES) {
       throw new Error(
         `${relativePath()}: expected at most ${MAX_SOURCE_BYTES} bytes | received ${before.size}`
@@ -320,7 +321,7 @@ function loadImportGraph(
  */
 export function listImportGraphFiles(roots: readonly string[], root: string): string[] {
   const { base, graph } = loadImportGraph(roots, root);
-  return [...graph.keys()].map((file) => relative(base, file).split(sep).join('/')).sort();
+  return [...graph.keys()].map((file) => toPosixPath(relative(base, file))).sort();
 }
 
 /**
@@ -364,7 +365,7 @@ export function scanImportCycles(roots: readonly string[], root: string): Import
         const firstEdge = graph.get(cycle[0])?.find((item) => item.target === cycle[1]);
         if (!firstEdge) throw new Error(`Missing cycle edge: ${cycle[0]} -> ${cycle[1]}`);
         cycles.push({
-          files: cycle.map((path) => relative(base, path).split(sep).join('/')),
+          files: cycle.map((path) => toPosixPath(relative(base, path))),
           line: firstEdge.line,
           column: firstEdge.column,
         });

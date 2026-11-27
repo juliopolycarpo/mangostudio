@@ -1,8 +1,7 @@
-import { createHash } from 'node:crypto';
-
 import type { CanaryApprovalApi } from './canary-approval';
 import { type CanarySource, canarySourceRunsQuery, selectCanarySource } from './canary-source';
 import { isValidSemver, normalizeVersion } from './release-version';
+import { requireJsonRecord, requirePositiveSafeInteger, sha256OfBytes } from './script-guards';
 
 /** One canary execution remains tied to this selection across full workflow reruns. */
 interface CanarySourceSnapshot {
@@ -58,8 +57,8 @@ export async function resolveCanarySourceSnapshot(
   validateExecution(execution);
   const recovery = parseRecovery(recoveryInput);
   const base = `repos/${execution.repository}`;
-  const repository = record(await get(deps, base), 'repository');
-  const repositoryId = positive(repository.id, 'repository ID');
+  const repository = requireJsonRecord(await get(deps, base), 'repository');
+  const repositoryId = requirePositiveSafeInteger(repository.id, 'repository ID');
   if (repository.full_name !== execution.repository)
     throw new Error('Invalid source-snapshot repository: expected current repository identity');
   const canaryWorkflow = await workflow(deps, base, 'canary.yml');
@@ -99,12 +98,12 @@ export async function resolveCanarySourceSnapshot(
       'jobs'
     )
   )
-    .map((job) => record(job, 'source job'))
+    .map((job) => requireJsonRecord(job, 'source job'))
     .filter((job) => job.name === SOURCE_JOB);
   const attempts = new Set<number>();
   for (const job of allJobs) {
-    const attempt = positive(job.run_attempt, 'source producer attempt');
-    positive(job.id, 'source job ID');
+    const attempt = requirePositiveSafeInteger(job.run_attempt, 'source producer attempt');
+    requirePositiveSafeInteger(job.id, 'source job ID');
     if (
       job.run_id !== execution.runId ||
       job.head_sha !== execution.executionRevision ||
@@ -144,7 +143,7 @@ export async function resolveCanarySourceSnapshot(
     assertCiRepositories(raw, execution.repository, repositoryId);
     return { source: selected, executionRevision: execution.executionRevision, restored: false };
   }
-  const attempt = positive(original.run_attempt, 'original source attempt');
+  const attempt = requirePositiveSafeInteger(original.run_attempt, 'original source attempt');
   const historical = validateCanaryRun(
     await get(deps, `${base}/actions/runs/${execution.runId}/attempts/${attempt}`),
     execution,
@@ -164,14 +163,14 @@ export async function resolveCanarySourceSnapshot(
       `${base}/actions/runs/${execution.runId}/artifacts?per_page=100`,
       'artifacts'
     )
-  ).map((value) => record(value, 'source artifact'));
+  ).map((value) => requireJsonRecord(value, 'source artifact'));
   const matches = artifacts.filter((artifact) => artifact.name === artifactName);
   const artifact = matches[0];
   if (matches.length !== 1 || !artifact || artifact.expired === true)
     throw unavailable(attempt, 'original snapshot missing, ambiguous or expired');
-  const association = record(artifact.workflow_run, 'source artifact workflow_run');
-  positive(association.repository_id, 'snapshot repository ID');
-  positive(association.head_repository_id, 'snapshot head repository ID');
+  const association = requireJsonRecord(artifact.workflow_run, 'source artifact workflow_run');
+  requirePositiveSafeInteger(association.repository_id, 'snapshot repository ID');
+  requirePositiveSafeInteger(association.head_repository_id, 'snapshot head repository ID');
   const created = timestamp(artifact.created_at, 'snapshot upload');
   if (
     association.id !== execution.runId ||
@@ -186,8 +185,8 @@ export async function resolveCanarySourceSnapshot(
     throw new Error(
       'Invalid source snapshot association: expected original successful main canary source job and upload interval'
     );
-  const artifactId = positive(artifact.id, 'snapshot artifact ID');
-  const size = positive(artifact.size_in_bytes, 'snapshot ZIP size');
+  const artifactId = requirePositiveSafeInteger(artifact.id, 'snapshot artifact ID');
+  const size = requirePositiveSafeInteger(artifact.size_in_bytes, 'snapshot ZIP size');
   if (
     size > LIMIT ||
     typeof artifact.digest !== 'string' ||
@@ -200,7 +199,10 @@ export async function resolveCanarySourceSnapshot(
   if (response.status === 404 || response.status === 410)
     throw unavailable(attempt, 'original snapshot deleted after listing');
   ok(response.status, 'source snapshot ZIP');
-  if (response.body.byteLength !== size || `sha256:${hash(response.body)}` !== artifact.digest)
+  if (
+    response.body.byteLength !== size ||
+    `sha256:${sha256OfBytes(response.body)}` !== artifact.digest
+  )
     throw new Error('Corrupt source snapshot ZIP: expected immutable size and SHA256 digest');
   const members = await deps.unzip(response.body);
   const bytes = members.get('source.json');
@@ -241,7 +243,7 @@ export function writeCanarySourceSnapshot(
     readonly executionRevision: string;
   }
 ): { readonly raw: string; readonly snapshot: CanarySourceSnapshot } {
-  const selection = record(resolution, 'source resolution');
+  const selection = requireJsonRecord(resolution, 'source resolution');
   const source = parseSource(selection.source);
   if (
     typeof selection.restored !== 'boolean' ||
@@ -295,7 +297,7 @@ function parseRecovery(input: CanarySourceRecoveryInput) {
       throw new Error(
         `Invalid ${field}: expected positive safe integer; received ${JSON.stringify(value)}`
       );
-    return positive(Number(value), field);
+    return requirePositiveSafeInteger(Number(value), field);
   };
   const runId = integer(input.runId, 'recover_source_run_id');
   const runAttempt = integer(input.runAttempt, 'recover_source_attempt');
@@ -313,7 +315,7 @@ function parseSnapshot(raw: string, repository: string, revision: string): Canar
   } catch (cause) {
     throw new Error('Invalid source snapshot: expected schema1 JSON', { cause });
   }
-  const snapshot = record(value, 'source snapshot');
+  const snapshot = requireJsonRecord(value, 'source snapshot');
   const source = parseSource(snapshot.source);
   if (
     snapshot.schemaVersion !== 1 ||
@@ -335,9 +337,9 @@ function parseSnapshot(raw: string, repository: string, revision: string): Canar
   };
 }
 function parseSource(raw: unknown): CanarySource {
-  const source = record(raw, 'frozen CI source');
+  const source = requireJsonRecord(raw, 'frozen CI source');
   for (const key of ['runId', 'runAttempt', 'runNumber', 'workflowId'])
-    positive(source[key], `CI ${key}`);
+    requirePositiveSafeInteger(source[key], `CI ${key}`);
   if (
     typeof source.repository !== 'string' ||
     !/^[\w.-]+\/[\w.-]+$/.test(source.repository) ||
@@ -374,8 +376,8 @@ function validateVersion(version: string, channel: string, sha: string): void {
     );
 }
 function validateExecution(execution: CanarySourceExecution): void {
-  positive(execution.runId, 'canary run ID');
-  positive(execution.runAttempt, 'canary run attempt');
+  requirePositiveSafeInteger(execution.runId, 'canary run ID');
+  requirePositiveSafeInteger(execution.runAttempt, 'canary run attempt');
   if (
     !/^[\w.-]+\/[\w.-]+$/.test(execution.repository) ||
     !/^[a-f0-9]{40}$/.test(execution.executionRevision)
@@ -391,12 +393,12 @@ function validateCanaryRun(
   workflowId: number,
   attempt: number
 ): Record<string, unknown> {
-  const run = record(raw, 'canary execution');
-  const repository = record(run.repository, 'execution repository');
-  const head = record(run.head_repository, 'execution head repository');
-  positive(repository.id, 'execution repository ID');
-  positive(head.id, 'execution head repository ID');
-  positive(run.run_number, 'canary run number');
+  const run = requireJsonRecord(raw, 'canary execution');
+  const repository = requireJsonRecord(run.repository, 'execution repository');
+  const head = requireJsonRecord(run.head_repository, 'execution head repository');
+  requirePositiveSafeInteger(repository.id, 'execution repository ID');
+  requirePositiveSafeInteger(head.id, 'execution head repository ID');
+  requirePositiveSafeInteger(run.run_number, 'canary run number');
   if (
     run.id !== execution.runId ||
     run.run_attempt !== attempt ||
@@ -417,11 +419,11 @@ function validateCanaryRun(
   return run;
 }
 function assertCiRepositories(raw: unknown, repository: string, id: number): void {
-  const run = record(raw, 'selected CI');
-  const own = record(run.repository, 'selected CI repository');
-  const head = record(run.head_repository, 'selected CI head repository');
-  positive(own.id, 'selected CI repository ID');
-  positive(head.id, 'selected CI head repository ID');
+  const run = requireJsonRecord(raw, 'selected CI');
+  const own = requireJsonRecord(run.repository, 'selected CI repository');
+  const head = requireJsonRecord(run.head_repository, 'selected CI head repository');
+  requirePositiveSafeInteger(own.id, 'selected CI repository ID');
+  requirePositiveSafeInteger(head.id, 'selected CI head repository ID');
   if (
     own.id !== id ||
     head.id !== id ||
@@ -449,10 +451,10 @@ async function workflow(
   base: string,
   name: string
 ): Promise<number> {
-  const value = record(await get(deps, `${base}/actions/workflows/${name}`), 'workflow');
+  const value = requireJsonRecord(await get(deps, `${base}/actions/workflows/${name}`), 'workflow');
   if (value.path !== `.github/workflows/${name}` || value.state !== 'active')
     throw new Error(`Invalid source workflow: expected active ${name}`);
-  return positive(value.id, 'workflow ID');
+  return requirePositiveSafeInteger(value.id, 'workflow ID');
 }
 async function get(deps: CanarySourceSnapshotDependencies, path: string): Promise<unknown> {
   const response = await deps.github.getJson(path);
@@ -461,16 +463,6 @@ async function get(deps: CanarySourceSnapshotDependencies, path: string): Promis
 }
 function ok(status: number, name: string): void {
   if (status !== 200) throw new Error(`Snapshot ${name}: expected HTTP200; received HTTP${status}`);
-}
-function record(value: unknown, name: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new Error(`Invalid ${name}: expected object`);
-  return value as Record<string, unknown>;
-}
-function positive(value: unknown, name: string): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1)
-    throw new Error(`Invalid ${name}: expected positive safe integer; received ${String(value)}`);
-  return value;
 }
 function timestamp(value: unknown, name: string): number {
   if (
@@ -487,9 +479,6 @@ function timestamp(value: unknown, name: string): number {
   throw new Error(
     `Invalid ${name}: expected canonical UTC ISO timestamp; received ${JSON.stringify(value)}`
   );
-}
-function hash(bytes: Uint8Array): string {
-  return createHash('sha256').update(bytes).digest('hex');
 }
 function unavailable(attempt: number, reason: string): Error {
   return new Error(

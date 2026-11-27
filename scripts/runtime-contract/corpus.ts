@@ -24,6 +24,8 @@ import { RUNTIME_CONTRACT } from '@mangostudio/shared/runtime-contract';
 import type { TSchema } from 'typebox';
 import Value from 'typebox/value';
 
+import { isJsonRecord } from '../lib/script-guards';
+
 /**
  * Thrown by {@link patternSeed} and {@link manualCreate} for the specific shapes that are
  * unsatisfiable outright — an unrecognised `pattern`, or a `uniqueItems` array needing more
@@ -293,10 +295,6 @@ function arrayShapeOf(propertySchema: TSchema): ArrayShape | null {
   };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /** Runs `Value.Check` and reports the verdict the way the corpus records it. */
 function verdictOf(schema: TSchema, value: unknown): 'valid' | 'invalid' {
   return Value.Check(schema, value) ? 'valid' : 'invalid';
@@ -336,7 +334,7 @@ export function buildFixturesForSubject(subject: CorpusSubject, schema: TSchema)
   const fixtures: CorpusFixture[] = [{ subject, mutation: 'seed', value: seed, expect: 'valid' }];
 
   const shape = objectShapeOf(schema, seed);
-  if (!shape || !isRecord(seed)) return fixtures;
+  if (!shape || !isJsonRecord(seed)) return fixtures;
   const add = (mutation: CorpusMutation, value: unknown): void => {
     fixtures.push({ subject, mutation, value, expect: verdictOf(schema, value) });
   };

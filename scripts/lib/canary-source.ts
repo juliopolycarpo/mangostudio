@@ -1,3 +1,5 @@
+import { requireJsonRecord, requirePositiveSafeInteger } from './script-guards';
+
 /** Metadata frozen before any canary build or publication starts. */
 export interface CanarySource {
   readonly runId: number;
@@ -44,20 +46,6 @@ export function canarySourceRunsQuery(
   };
 }
 
-function record(value: unknown, field = 'workflow run'): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`Expected ${field} object, received: ${JSON.stringify(value)}`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function positiveInteger(value: unknown, field: string): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
-    throw new Error(`Invalid ${field}: ${JSON.stringify(value)}; expected positive safe integer`);
-  }
-  return value;
-}
-
 function noEligibleRun(since: string | undefined): Error {
   return new Error(
     `No eligible CI source | expected a completed successful main push CI run${since === undefined ? '' : ` created since ${since}`} | received: none`
@@ -82,13 +70,13 @@ export function selectCanarySource(
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
     throw new Error(`Invalid repository: ${repository}; expected owner/repository`);
   }
-  positiveInteger(workflowId, 'workflow_id');
+  requirePositiveSafeInteger(workflowId, 'workflow_id');
   const candidates = runs
-    .map((value) => record(value))
+    .map((value) => requireJsonRecord(value, 'workflow run'))
     .filter((run) => run.status === 'completed' && run.conclusion === 'success');
   if (candidates.length === 0) throw noEligibleRun(since);
   const ranked = candidates
-    .map((run) => ({ run, runNumber: positiveInteger(run.run_number, 'run_number') }))
+    .map((run) => ({ run, runNumber: requirePositiveSafeInteger(run.run_number, 'run_number') }))
     .sort((left, right) => right.runNumber - left.runNumber);
   if (ranked.length > 1 && ranked[0]?.runNumber === ranked[1]?.runNumber) {
     throw new Error(`Ambiguous CI run_number: ${ranked[0]?.runNumber}; expected unique push run`);
@@ -96,7 +84,7 @@ export function selectCanarySource(
   const selected = ranked[0];
   if (!selected) throw noEligibleRun(since);
   const { run, runNumber } = selected;
-  const runId = positiveInteger(run.id, 'id');
+  const runId = requirePositiveSafeInteger(run.id, 'id');
   if (since !== undefined) {
     const created = typeof run.created_at === 'string' ? Date.parse(run.created_at) : Number.NaN;
     if (!Number.isFinite(created))
@@ -108,8 +96,11 @@ export function selectCanarySource(
         `CI run ${runId} outside source window: expected created since ${since} | received: ${String(run.created_at)}`
       );
   }
-  const runRepository = record(run.repository, `CI run ${runId} repository`).full_name;
-  const headRepository = record(run.head_repository, `CI run ${runId} head_repository`).full_name;
+  const runRepository = requireJsonRecord(run.repository, `CI run ${runId} repository`).full_name;
+  const headRepository = requireJsonRecord(
+    run.head_repository,
+    `CI run ${runId} head_repository`
+  ).full_name;
   const workflowPath = '.github/workflows/ci.yml';
   const runUrl = `https://github.com/${repository}/actions/runs/${runId}`;
   const received: Record<string, unknown> = {
@@ -147,7 +138,7 @@ export function selectCanarySource(
   }
   return {
     runId,
-    runAttempt: positiveInteger(run.run_attempt, 'run_attempt'),
+    runAttempt: requirePositiveSafeInteger(run.run_attempt, 'run_attempt'),
     runNumber,
     sourceSha: run.head_sha,
     repository,

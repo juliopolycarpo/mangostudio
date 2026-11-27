@@ -1,10 +1,9 @@
-import { createHash } from 'node:crypto';
-
 import {
   assertCanaryManifestIdentity,
   type CanaryPromotionReceipt,
   createCanaryPublicationEvidence,
 } from './canary-publication-evidence';
+import { sha256OfBytes } from './script-guards';
 
 /** Downloaded original assets and output boundary; stage must use the supplied fixed builder completion time. */
 export interface CanaryApprovalStageStore {
@@ -28,7 +27,7 @@ export async function stageApprovedCanary(
   assertCanaryManifestIdentity(input.manifestRaw, input.receipt);
   if (
     !/^[a-f0-9]{64}$/.test(input.approvalPayloadSha256) ||
-    hash(input.approvalPayload) !== input.approvalPayloadSha256
+    sha256OfBytes(input.approvalPayload) !== input.approvalPayloadSha256
   )
     throw new Error(`Invalid approved archive: expected SHA256 ${input.approvalPayloadSha256}`);
   const evidence = createCanaryPublicationEvidence(
@@ -40,7 +39,7 @@ export async function stageApprovedCanary(
   const expectedRaw = `${JSON.stringify(evidence.expected, null, 2)}\n`;
   if (
     !/^[a-f0-9]{64}$/.test(input.expectedReleaseSha256) ||
-    hash(Buffer.from(expectedRaw)) !== input.expectedReleaseSha256
+    sha256OfBytes(Buffer.from(expectedRaw)) !== input.expectedReleaseSha256
   )
     throw new Error(
       `Invalid expected release map: expected prepare-job SHA256 ${input.expectedReleaseSha256}`
@@ -53,13 +52,10 @@ export async function stageApprovedCanary(
   for (const [name, bytes] of evidence.generated) await store.write(name, bytes);
   for (const asset of evidence.expected.assets) {
     const bytes = await store.read(asset.name);
-    if (bytes.byteLength !== asset.size || hash(bytes) !== asset.sha256)
+    if (bytes.byteLength !== asset.size || sha256OfBytes(bytes) !== asset.sha256)
       throw new Error(
         `Invalid staged asset ${asset.name}: expected ${asset.size} bytes and SHA256 ${asset.sha256}`
       );
   }
   return evidence.expected.assets.map((asset) => asset.name);
-}
-function hash(bytes: Uint8Array): string {
-  return createHash('sha256').update(bytes).digest('hex');
 }

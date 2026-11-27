@@ -18,13 +18,14 @@
  * if (plan.run) tasks.push(...chainRustTasks(RUST_CHECK_TASKS, runRustTask));
  */
 
-import { isAbsolute, relative, sep } from 'node:path';
+import { isAbsolute, relative } from 'node:path';
 
 import { scanCrateInputs } from './crate-inputs';
 import { captureCommand, type CaptureResult, type RunResult } from './exec';
 import { listCheckoutFiles } from './git';
 import { cargoTargetDir } from './runtime-build';
 import { classifyChangedPaths, RUST_WORKSPACE_PATHS } from './rust-lanes';
+import { toPosixPath } from './script-guards';
 
 /** The executable a task needs on PATH beside `cargo` itself. */
 type RustTool = 'cargo' | 'cargo-nextest' | 'cargo-shear';
@@ -217,7 +218,7 @@ export function rustCleanPaths(
         'remove it with "cargo clean"'
     );
   }
-  return [inRepository.split(sep).join('/'), FUZZ_TARGET_DIR];
+  return [toPosixPath(inRepository), FUZZ_TARGET_DIR];
 }
 
 /**

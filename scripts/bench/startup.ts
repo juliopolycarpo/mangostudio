@@ -21,7 +21,7 @@ import {
   type ProcessResourceObservation,
   startProcessResourceMonitor,
 } from '../lib/process-resource-monitor';
-import { sha256File } from '../release/verify-checksum';
+import { sha256OfFile } from '../lib/script-guards';
 import {
   BenchmarkChildScope,
   benchmarkResourceCleanupError,
@@ -248,7 +248,7 @@ async function main(): Promise<void> {
     fatal(`--resources: expected Linux procfs | received: ${process.platform}`);
   assertBenchmarkPlatform(process.platform);
   const units = flags['--resources'] ? linuxProcessResourceUnits() : undefined;
-  const binarySha256 = await sha256File(binary);
+  const binarySha256 = await sha256OfFile(binary);
   const gitHead = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], {
     cwd: ROOT,
     stdout: 'pipe',
@@ -402,8 +402,8 @@ async function main(): Promise<void> {
       measured.length === runs &&
       !cleanupError &&
       !cancellation.signal.aborted &&
-      (await sha256File(binary)) === binarySha256,
-    artifactIdentityUnchanged: (await sha256File(binary)) === binarySha256,
+      (await sha256OfFile(binary)) === binarySha256,
+    artifactIdentityUnchanged: (await sha256OfFile(binary)) === binarySha256,
     toHealthMs: health.length ? summarizeLatencies(health) : null,
     peakRssKb: rss.length ? summarizeLatencies(rss).median : null,
     resourceUnits: units ?? null,

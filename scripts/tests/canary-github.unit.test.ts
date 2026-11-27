@@ -163,7 +163,7 @@ test.each([200, 401, 403, 429, 500, 503])(
 test.each([
   { pages: [], message: 'expected nonempty array of pages' },
   { pages: [{}], message: 'expected complete array collection' },
-  { pages: [[null]], message: 'GitHub release listing entry: expected object' },
+  { pages: [[null]], message: 'Invalid release listing entry: expected object; received null' },
   {
     pages: [[{ id: 1, draft: true }]],
     message: 'expected tag_name string and draft boolean',

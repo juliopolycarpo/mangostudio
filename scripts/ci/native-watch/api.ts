@@ -8,6 +8,7 @@ import {
   parseJsonReply,
   sendGitHubRequest,
 } from '../../lib/github-retry';
+import { isJsonRecord } from '../../lib/script-guards';
 
 export interface TrackingIssue {
   readonly number: number;
@@ -49,10 +50,6 @@ export const NATIVE_WATCH_REQUEST_TIMEOUT_MS = 10_000;
 // Close is a PATCH to a fixed state, so repeating it is safe; creating an issue
 // or a comment is not, and is only retried when GitHub rejected it for a rate limit.
 const REPEATABLE_METHODS = new Set(['GET', 'PATCH']);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 /**
  * REST implementation for one repository, authenticated with the workflow's token.
@@ -119,7 +116,7 @@ export class GithubNativeWatchApi implements NativeWatchApi {
         undefined,
         { expected, page }
       );
-      const batch = field === undefined ? body : isRecord(body) ? body[field] : undefined;
+      const batch = field === undefined ? body : isJsonRecord(body) ? body[field] : undefined;
       // A body of the wrong shape is not an empty listing: reading it as one
       // would close nothing on a green run and open a duplicate on a red one.
       if (!Array.isArray(batch)) {
@@ -141,9 +138,9 @@ export class GithubNativeWatchApi implements NativeWatchApi {
     const path = `/actions/workflows/${workflowFile}/runs?${query}`;
     const expected = 'an object with a "workflow_runs" array';
     const body = await this.call('GET', path, undefined, { expected });
-    const runs = isRecord(body) ? body.workflow_runs : undefined;
+    const runs = isJsonRecord(body) ? body.workflow_runs : undefined;
     if (!Array.isArray(runs)) throw malformedResponse({ request: `GET ${path}` }, expected, body);
-    const sha = isRecord(runs[0]) ? runs[0].head_sha : undefined;
+    const sha = isJsonRecord(runs[0]) ? runs[0].head_sha : undefined;
     if (runs.length === 0) return null;
     if (typeof sha !== 'string' || !/^[a-f0-9]{40}$/.test(sha)) {
       throw new Error(
@@ -156,7 +153,7 @@ export class GithubNativeWatchApi implements NativeWatchApi {
   async listJobs(runId: number): Promise<WorkflowJobResult[]> {
     const entries = await this.pages(`/actions/runs/${runId}/jobs?filter=latest`, 'jobs');
     return entries.map((entry) => {
-      if (!isRecord(entry) || typeof entry.name !== 'string') {
+      if (!isJsonRecord(entry) || typeof entry.name !== 'string') {
         throw new Error(`Invalid job ${JSON.stringify(entry)}; expected a name`);
       }
       return {
@@ -170,12 +167,12 @@ export class GithubNativeWatchApi implements NativeWatchApi {
     const query = new URLSearchParams({ state: 'open', labels: label });
     const entries = await this.pages(`/issues?${query}`);
     return entries.flatMap((entry) => {
-      if (!isRecord(entry) || !Number.isSafeInteger(entry.number)) {
+      if (!isJsonRecord(entry) || !Number.isSafeInteger(entry.number)) {
         throw new Error(`Invalid issue ${JSON.stringify(entry)}; expected a number`);
       }
       // The issues endpoint also lists pull requests.
       if (entry.pull_request !== undefined) return [];
-      const user = isRecord(entry.user) ? entry.user.login : undefined;
+      const user = isJsonRecord(entry.user) ? entry.user.login : undefined;
       return [
         {
           number: Number(entry.number),
@@ -189,7 +186,7 @@ export class GithubNativeWatchApi implements NativeWatchApi {
   async listIssueCommentBodies(issueNumber: number): Promise<string[]> {
     const entries = await this.pages(`/issues/${issueNumber}/comments`);
     return entries.map((entry) =>
-      isRecord(entry) && typeof entry.body === 'string' ? entry.body : ''
+      isJsonRecord(entry) && typeof entry.body === 'string' ? entry.body : ''
     );
   }
 
@@ -201,7 +198,7 @@ export class GithubNativeWatchApi implements NativeWatchApi {
     const created = await this.call('POST', '/issues', issue, {
       expected: 'a created issue object',
     });
-    if (!isRecord(created) || !Number.isSafeInteger(created.number)) {
+    if (!isJsonRecord(created) || !Number.isSafeInteger(created.number)) {
       throw new Error(`Invalid created issue ${JSON.stringify(created)}; expected a number`);
     }
     return Number(created.number);

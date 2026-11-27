@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 
 import type { CanaryDistribution } from './canary-promotion';
@@ -10,6 +9,12 @@ import {
 import type { CanarySource } from './canary-source';
 import { type DistributionManifest, parseDistributionManifest } from './distribution-manifest';
 import { isValidSemver, normalizeVersion } from './release-version';
+import {
+  invalidValue,
+  requireJsonRecord,
+  requirePositiveSafeInteger,
+  sha256OfBytes,
+} from './script-guards';
 
 type Response<T> = { readonly status: number; readonly body: T };
 /** Read boundary retaining real status and every page; transport/incomplete reads reject. */
@@ -122,7 +127,7 @@ function pinnedApproval(
 ): CanaryApprovalAcquisition {
   if (
     expectedSha256 !== undefined &&
-    (!acquisition.approvalPayload || hash(acquisition.approvalPayload) !== expectedSha256)
+    (!acquisition.approvalPayload || sha256OfBytes(acquisition.approvalPayload) !== expectedSha256)
   )
     throw new Error(
       `Approved payload unavailable: expected existing approval SHA256 ${expectedSha256}; refusing new approval`
@@ -139,8 +144,8 @@ async function recoverRelease(
   const response = await deps.github.getRelease(tag);
   if (response.status === 404) return undefined;
   ok(response.status, 'release evidence');
-  const release = object(response.body, 'release evidence');
-  const id = positive(release.id, 'release ID');
+  const release = requireJsonRecord(response.body, 'release evidence');
+  const id = requirePositiveSafeInteger(release.id, 'release ID');
   const url = `https://github.com/${source.repository}/releases/tag/`;
   const draft = release.draft === true;
   if (
@@ -178,7 +183,7 @@ async function recoverRelease(
   ];
   const found = new Map<string, Record<string, unknown>>();
   for (const raw of records) {
-    const asset = object(raw, 'release asset');
+    const asset = requireJsonRecord(raw, 'release asset');
     if (typeof asset.name !== 'string')
       throw new Error('Invalid release evidence asset name: expected string');
     if (names.includes(asset.name)) {
@@ -192,12 +197,12 @@ async function recoverRelease(
   for (const name of names) {
     const asset = found.get(name);
     if (!asset) throw new Error(`Missing release evidence asset ${name}`);
-    const assetId = positive(asset.id, 'evidence asset ID');
+    const assetId = requirePositiveSafeInteger(asset.id, 'evidence asset ID');
     const size = sizeValue(asset.size, 'evidence asset size');
     const digest = digestValue(asset.digest, 'evidence asset digest');
     const downloaded = await deps.github.readAsset(assetId);
     ok(downloaded.status, `release evidence ${name}`);
-    if (downloaded.body.byteLength !== size || hash(downloaded.body) !== digest.slice(7))
+    if (downloaded.body.byteLength !== size || sha256OfBytes(downloaded.body) !== digest.slice(7))
       throw new Error(`Corrupt release evidence ${name}: expected size and SHA256 ${digest}`);
     bytes.set(name, downloaded.body);
   }
@@ -207,7 +212,7 @@ async function recoverRelease(
   await deps.verifyAttestation(sums, policy('canary.yml', receipt.workflowRevision));
   const checksumMap = checksums(text(sums));
   for (const name of ['promotion.json', 'promotion-checksums.tar.gz', 'promotion-approval.tar.gz'])
-    if (checksumMap.get(name) !== hash(required(bytes, name)))
+    if (checksumMap.get(name) !== sha256OfBytes(required(bytes, name)))
       throw new Error(`Invalid publisher checksum for ${name}: expected exact durable bytes`);
   const payload = required(bytes, 'promotion-approval.tar.gz');
   await deps.verifyAttestation(payload, policy('canary.yml', receipt.workflowRevision));
@@ -236,15 +241,15 @@ async function recoverActions(
   deps: CanaryApprovalDependencies
 ): Promise<CanaryApprovalAcquisition | undefined> {
   const base = `repos/${source.repository}`;
-  const repository = object(await get(deps, base), 'repository');
-  const repositoryId = positive(repository.id, 'repository ID');
+  const repository = requireJsonRecord(await get(deps, base), 'repository');
+  const repositoryId = requirePositiveSafeInteger(repository.id, 'repository ID');
   if (repository.full_name !== source.repository)
     throw new Error('Invalid repository identity for approval discovery');
-  const workflow = object(
+  const workflow = requireJsonRecord(
     await get(deps, `${base}/actions/workflows/canary.yml`),
     'canary workflow'
   );
-  const workflowId = positive(workflow.id, 'canary workflow ID');
+  const workflowId = requirePositiveSafeInteger(workflow.id, 'canary workflow ID');
   if (workflow.path !== '.github/workflows/canary.yml' || workflow.state !== 'active')
     throw new Error('Invalid approval workflow: expected active canary.yml');
   const runs = await deps.github.list(
@@ -258,20 +263,20 @@ async function recoverActions(
   const prefix = `canary-approval-${source.sourceSha}-${version}-`;
   for (const raw of runs) {
     const run = validateCanaryRun(raw, source.repository, repositoryId, workflowId);
-    const runId = positive(run.id, 'canary run ID');
-    const runNumber = positive(run.run_number, 'canary run number');
+    const runId = requirePositiveSafeInteger(run.id, 'canary run ID');
+    const runNumber = requirePositiveSafeInteger(run.run_number, 'canary run number');
     if (runNumbers.has(runNumber)) throw new Error(`Ambiguous canary run number ${runNumber}`);
     runNumbers.add(runNumber);
-    const latest = positive(run.run_attempt, 'latest canary attempt');
+    const latest = requirePositiveSafeInteger(run.run_attempt, 'latest canary attempt');
     const jobs = (
       await deps.github.list(`${base}/actions/runs/${runId}/jobs?filter=all&per_page=100`, 'jobs')
     )
-      .map((rawJob) => object(rawJob, 'approval job'))
+      .map((rawJob) => requireJsonRecord(rawJob, 'approval job'))
       .filter((job) => job.name === jobName);
     const attempts = new Set<number>();
     for (const job of jobs) {
-      const attempt = positive(job.run_attempt, 'approval producer attempt');
-      positive(job.id, 'approval job ID');
+      const attempt = requirePositiveSafeInteger(job.run_attempt, 'approval producer attempt');
+      requirePositiveSafeInteger(job.id, 'approval job ID');
       if (
         attempts.has(attempt) ||
         attempt > latest ||
@@ -289,13 +294,13 @@ async function recoverActions(
     if (successful.length === 0) continue;
     const artifacts = (
       await deps.github.list(`${base}/actions/runs/${runId}/artifacts?per_page=100`, 'artifacts')
-    ).map((rawArtifact) => object(rawArtifact, 'approval artifact'));
+    ).map((rawArtifact) => requireJsonRecord(rawArtifact, 'approval artifact'));
     for (const artifact of artifacts) {
       if (typeof artifact.name !== 'string')
         throw new Error('Invalid approval artifact name: expected string');
     }
     for (const job of successful) {
-      const attempt = positive(job.run_attempt, 'approval producer attempt');
+      const attempt = requirePositiveSafeInteger(job.run_attempt, 'approval producer attempt');
       const started = timestamp(job.started_at, 'approval start');
       const completed = timestamp(job.completed_at, 'approval completion');
       if (completed < started)
@@ -312,12 +317,15 @@ async function recoverActions(
             `Invalid approval artifact name ${name}: expected full payload SHA256 and producer attempt`
           );
         const producer = Number(suffix[2]);
-        positive(producer, 'artifact producing attempt');
+        requirePositiveSafeInteger(producer, 'artifact producing attempt');
         if (producer !== attempt) continue;
         bound += 1;
-        const association = object(artifact.workflow_run, 'approval artifact workflow_run');
+        const association = requireJsonRecord(
+          artifact.workflow_run,
+          'approval artifact workflow_run'
+        );
         for (const value of [association.repository_id, association.head_repository_id])
-          positive(value, 'artifact repository ID');
+          requirePositiveSafeInteger(value, 'artifact repository ID');
         const created = timestamp(artifact.created_at, 'approval artifact creation');
         if (
           association.id !== runId ||
@@ -350,8 +358,8 @@ async function recoverActions(
             runId,
             runNumber,
             producerAttempt: attempt,
-            jobId: positive(job.id, 'approval job ID'),
-            artifactId: positive(artifact.id, 'approval artifact ID'),
+            jobId: requirePositiveSafeInteger(job.id, 'approval job ID'),
+            artifactId: requirePositiveSafeInteger(artifact.id, 'approval artifact ID'),
             artifactName: name,
             artifactDigest: digestValue(artifact.digest, 'approval artifact digest'),
             payloadSha256: suffix[1] ?? '',
@@ -399,14 +407,14 @@ async function recoverActions(
     ok(response.status, 'approval ZIP download');
     if (
       response.body.byteLength !== candidate.size ||
-      hash(response.body) !== candidate.pointer.artifactDigest.slice(7)
+      sha256OfBytes(response.body) !== candidate.pointer.artifactDigest.slice(7)
     )
       throw new Error('Corrupt approval ZIP: expected immutable API size and SHA256 digest');
     const members = await deps.unzip(response.body);
     if (members.size !== 1 || !members.has('approval.tar.gz'))
       throw new Error('Invalid approval ZIP: expected sole flat approval.tar.gz');
     const payload = required(members, 'approval.tar.gz');
-    if (hash(payload) !== candidate.pointer.payloadSha256)
+    if (sha256OfBytes(payload) !== candidate.pointer.payloadSha256)
       throw new Error('Corrupt approval payload: expected full content-addressed SHA256');
     await deps.verifyAttestation(
       payload,
@@ -496,7 +504,7 @@ async function verifyBuilderBundle(
 }
 function verifyManifestChecksums(manifest: DistributionManifest, bytes: Uint8Array): void {
   const recorded = manifest.files.find((file) => file.path === 'release-assets/SHA256SUMS');
-  if (recorded?.size !== bytes.byteLength || recorded.sha256 !== hash(bytes))
+  if (recorded?.size !== bytes.byteLength || recorded.sha256 !== sha256OfBytes(bytes))
     throw new Error('Invalid original checksum file: expected manifest size and SHA256');
   const entries = checksums(text(bytes));
   for (const file of manifest.files.filter(
@@ -595,14 +603,14 @@ function validateCanaryRun(
   repositoryId: number,
   workflowId: number
 ): Record<string, unknown> {
-  const run = object(raw, 'canary run');
-  const own = object(run.repository, 'canary repository');
-  const head = object(run.head_repository, 'canary head repository');
-  positive(own.id, 'canary repository ID');
-  positive(head.id, 'canary head repository ID');
-  const id = positive(run.id, 'canary run ID');
-  positive(run.run_attempt, 'canary attempt');
-  positive(run.run_number, 'canary run number');
+  const run = requireJsonRecord(raw, 'canary run');
+  const own = requireJsonRecord(run.repository, 'canary repository');
+  const head = requireJsonRecord(run.head_repository, 'canary head repository');
+  requirePositiveSafeInteger(own.id, 'canary repository ID');
+  requirePositiveSafeInteger(head.id, 'canary head repository ID');
+  const id = requirePositiveSafeInteger(run.id, 'canary run ID');
+  requirePositiveSafeInteger(run.run_attempt, 'canary attempt');
+  requirePositiveSafeInteger(run.run_number, 'canary run number');
   if (
     own.id !== repositoryId ||
     head.id !== repositoryId ||
@@ -623,7 +631,7 @@ function validateCanaryRun(
 }
 function validateSelection(source: CanarySource, version: string, revision: string): void {
   for (const value of [source.runId, source.runAttempt, source.runNumber, source.workflowId])
-    positive(value, 'selected run identity');
+    requirePositiveSafeInteger(value, 'selected run identity');
   const short = typeof source.sourceSha === 'string' ? source.sourceSha.slice(0, 7) : '';
   const identifier = /^0\d+$/.test(short) ? `g${short}` : short;
   if (
@@ -654,25 +662,15 @@ async function get(deps: CanaryApprovalDependencies, path: string): Promise<unkn
 function ok(status: number, name: string): void {
   if (status !== 200) throw new Error(`Approval ${name}: expected HTTP200; received HTTP${status}`);
 }
-function object(value: unknown, name: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new Error(`Invalid ${name}: expected object`);
-  return value as Record<string, unknown>;
-}
-function positive(value: unknown, name: string): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1)
-    throw new Error(`Invalid ${name}: expected positive safe integer; received ${String(value)}`);
-  return value;
-}
 function sizeValue(value: unknown, name: string): number {
-  const size = positive(value, name);
+  const size = requirePositiveSafeInteger(value, name);
   if (size > LIMIT)
     throw new Error(`Invalid ${name}: expected at most ${LIMIT} bytes; received ${size}`);
   return size;
 }
 function digestValue(value: unknown, name: string): string {
   if (typeof value !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(value))
-    throw new Error(`Invalid ${name}: expected sha256:64 lowercase hex`);
+    throw invalidValue(name, 'sha256:64 lowercase hex', value);
   return value;
 }
 function timestamp(value: unknown, name: string): number {
@@ -687,15 +685,12 @@ function timestamp(value: unknown, name: string): number {
     )
       return parsed;
   }
-  throw new Error(`Invalid ${name}: expected canonical UTC ISO timestamp`);
+  throw invalidValue(name, 'canonical UTC ISO timestamp', value);
 }
 function required(files: ReadonlyMap<string, Uint8Array>, name: string): Uint8Array {
   const bytes = files.get(name);
   if (!bytes) throw new Error(`Missing evidence file ${name}`);
   return bytes;
-}
-function hash(bytes: Uint8Array): string {
-  return createHash('sha256').update(bytes).digest('hex');
 }
 function text(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('utf8');

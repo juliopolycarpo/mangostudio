@@ -355,6 +355,8 @@ describe('bounded read-only adapter', () => {
         'ci/cache-usage/github.ts',
         'ci/rust-cache/families.ts',
         'lib/github-retry.ts',
+        // The report imports the shared guards, which must load with Node built-ins alone.
+        'lib/script-guards.ts',
       ]) {
         const destination = join(directory, 'scripts', path);
         mkdirSync(dirname(destination), { recursive: true });

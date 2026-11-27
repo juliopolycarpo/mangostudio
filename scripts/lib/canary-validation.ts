@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { rustCoverageFromGitHub } from './canary-codeql-coverage';
 import { touchesProtocolSurface } from './protocol';
 import { classifyChangedPaths } from './rust-lanes';
+import { requireJsonRecord, requirePositiveSafeInteger } from './script-guards';
 
 /** Frozen selection supplied by the canary source job. */
 export interface CanaryValidationSource {
@@ -54,35 +55,20 @@ export interface CanaryValidationReceipt {
   };
 }
 
-function object(value: unknown, description: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`${description}: expected object; received ${JSON.stringify(value)}`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function integer(value: unknown, description: string): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
-    throw new Error(
-      `${description}: expected positive safe integer; received ${JSON.stringify(value)}`
-    );
-  }
-  return value;
-}
-
 function validateRun(
   value: unknown,
   source: CanaryValidationSource,
   workflow: string,
   workflowId: number
 ): Record<string, unknown> {
-  const run = object(value, workflow);
+  const run = requireJsonRecord(value, workflow);
   const expectedPath = `.github/workflows/${workflow}`;
   const valid =
     run.workflow_id === workflowId &&
     run.path === expectedPath &&
-    object(run.repository, `${workflow} repository`).full_name === source.repository &&
-    object(run.head_repository, `${workflow} head_repository`).full_name === source.repository &&
+    requireJsonRecord(run.repository, `${workflow} repository`).full_name === source.repository &&
+    requireJsonRecord(run.head_repository, `${workflow} head_repository`).full_name ===
+      source.repository &&
     run.head_sha === source.sourceSha &&
     run.event === 'push' &&
     run.head_branch === 'main' &&
@@ -93,9 +79,9 @@ function validateRun(
       `${workflow}: expected completed successful ${source.repository} main push ${source.sourceSha} from workflow ${workflowId}; received ${JSON.stringify(run)}`
     );
   }
-  integer(run.id, `${workflow} run ID`);
-  integer(run.run_attempt, `${workflow} run attempt`);
-  integer(run.run_number, `${workflow} run number`);
+  requirePositiveSafeInteger(run.id, `${workflow} run ID`);
+  requirePositiveSafeInteger(run.run_attempt, `${workflow} run attempt`);
+  requirePositiveSafeInteger(run.run_number, `${workflow} run number`);
   return run;
 }
 
@@ -106,7 +92,7 @@ function listRunJobs(
 ): Record<string, unknown>[] {
   return api
     .list(`repos/${repository}/actions/runs/${runId}/jobs?filter=all&per_page=100`, 'jobs')
-    .map((job) => object(job, `run ${runId} job`));
+    .map((job) => requireJsonRecord(job, `run ${runId} job`));
 }
 
 /** Newest attempt of a named job through `attempt`; undefined when the run has none. */
@@ -118,7 +104,7 @@ function latestJob(
 ): Record<string, unknown> | undefined {
   const eligible = jobs
     .filter((job) => job.name === name)
-    .filter((job) => integer(job.run_attempt, `${name} attempt`) <= attempt);
+    .filter((job) => requirePositiveSafeInteger(job.run_attempt, `${name} attempt`) <= attempt);
   eligible.sort((left, right) => Number(right.run_attempt) - Number(left.run_attempt));
   if (eligible[1] && eligible[0]?.run_attempt === eligible[1].run_attempt) {
     throw new Error(
@@ -139,9 +125,9 @@ function successfulJobReceipt(
     );
   }
   return {
-    id: integer(latest.id, `${name} job ID`),
+    id: requirePositiveSafeInteger(latest.id, `${name} job ID`),
     name,
-    attempt: integer(latest.run_attempt, `${name} attempt`),
+    attempt: requirePositiveSafeInteger(latest.run_attempt, `${name} attempt`),
   };
 }
 
@@ -174,7 +160,7 @@ function matchesQualificationBytes(
   path: string,
   ref: string
 ): boolean {
-  const content = object(
+  const content = requireJsonRecord(
     api.get(`repos/${repository}/contents/${path}?ref=${ref}`),
     `${ref} ${path}`
   );
@@ -203,8 +189,8 @@ function missingRustJobEvidence(
   if (!matchesQualificationBytes(api, repository, path, candidate)) {
     return `no Actions evidence: ${path} at ${candidate} differs from the qualification revision`;
   }
-  const workflowId = integer(
-    object(api.get(`repos/${repository}/actions/workflows/codeql.yml`), 'codeql.yml').id,
+  const workflowId = requirePositiveSafeInteger(
+    requireJsonRecord(api.get(`repos/${repository}/actions/workflows/codeql.yml`), 'codeql.yml').id,
     'codeql.yml ID'
   );
   const runs = api
@@ -212,13 +198,14 @@ function missingRustJobEvidence(
       `repos/${repository}/actions/workflows/${workflowId}/runs?branch=main&head_sha=${candidate}&per_page=100`,
       'workflow_runs'
     )
-    .map((run) => object(run, 'codeql.yml candidate run'))
+    .map((run) => requireJsonRecord(run, 'codeql.yml candidate run'))
     .filter(
       (run) =>
         run.workflow_id === workflowId &&
         run.path === path &&
-        object(run.repository, 'candidate run repository').full_name === repository &&
-        object(run.head_repository, 'candidate run head repository').full_name === repository &&
+        requireJsonRecord(run.repository, 'candidate run repository').full_name === repository &&
+        requireJsonRecord(run.head_repository, 'candidate run head repository').full_name ===
+          repository &&
         run.head_sha === candidate &&
         run.head_branch === 'main' &&
         CODEQL_COVERING_EVENTS.includes(String(run.event)) &&
@@ -233,8 +220,8 @@ function missingRustJobEvidence(
       requireJobs(
         api,
         repository,
-        integer(run.id, 'candidate run ID'),
-        integer(run.run_attempt, 'candidate run attempt'),
+        requirePositiveSafeInteger(run.id, 'candidate run ID'),
+        requirePositiveSafeInteger(run.run_attempt, 'candidate run attempt'),
         CODEQL_RUST_JOBS
       );
       return undefined;
@@ -279,7 +266,7 @@ function settleCodeqlRust(
   // The relevance pattern decides what "no Rust change" means. Trust it only
   // when the source carries the same predicate as this qualification revision.
   const predicatePath = 'scripts/lib/ci-lanes.ts';
-  const predicate = object(
+  const predicate = requireJsonRecord(
     api.get(`repos/${source.repository}/contents/${predicatePath}?ref=${source.sourceSha}`),
     `source ${predicatePath}`
   );
@@ -333,7 +320,7 @@ function relevance(
   };
   if (!source.pushBeforeSha) return unknown;
   for (const path of ['scripts/lib/rust-lanes.ts', 'scripts/lib/protocol.ts']) {
-    const content = object(
+    const content = requireJsonRecord(
       api.get(`repos/${source.repository}/contents/${path}?ref=${source.sourceSha}`),
       `source ${path}`
     );
@@ -350,7 +337,7 @@ function relevance(
       };
     }
   }
-  const comparison = object(
+  const comparison = requireJsonRecord(
     api.get(`repos/${source.repository}/compare/${source.pushBeforeSha}...${source.sourceSha}`),
     'push comparison'
   );
@@ -359,11 +346,11 @@ function relevance(
   // commit-bound root-tree identity can prove the push changed no inputs.
   if (comparison.status === 'diverged') {
     const trees = [source.pushBeforeSha, source.sourceSha].map((sha) => {
-      const commit = object(
+      const commit = requireJsonRecord(
         api.get(`repos/${source.repository}/git/commits/${sha}`),
         `push commit ${sha}`
       );
-      const tree = object(commit.tree, `push commit ${sha} tree`).sha;
+      const tree = requireJsonRecord(commit.tree, `push commit ${sha} tree`).sha;
       if (commit.sha !== sha || typeof tree !== 'string' || !/^[a-f0-9]{40}$/.test(tree)) {
         throw new Error(
           `push tree proof: expected commit ${sha} and full root tree SHA; received ${JSON.stringify(commit)}`
@@ -382,8 +369,9 @@ function relevance(
   if (
     (comparison.truncated !== undefined && comparison.truncated !== false) ||
     !['ahead', 'identical'].includes(String(comparison.status)) ||
-    object(comparison.base_commit, 'comparison base').sha !== source.pushBeforeSha ||
-    object(comparison.merge_base_commit, 'comparison merge base').sha !== source.pushBeforeSha ||
+    requireJsonRecord(comparison.base_commit, 'comparison base').sha !== source.pushBeforeSha ||
+    requireJsonRecord(comparison.merge_base_commit, 'comparison merge base').sha !==
+      source.pushBeforeSha ||
     !Array.isArray(comparison.files) ||
     comparison.files.length >= 300
   )
@@ -398,7 +386,7 @@ function relevance(
     };
   const paths: string[] = [];
   for (const entry of comparison.files) {
-    const file = object(entry, 'changed file');
+    const file = requireJsonRecord(entry, 'changed file');
     if (
       typeof file.filename !== 'string' ||
       (file.status === 'renamed' && typeof file.previous_filename !== 'string')
@@ -435,8 +423,8 @@ export function qualifyCanarySource(
       `Invalid verified push before SHA: ${source.pushBeforeSha}; expected full 40-character SHA`
     );
   }
-  integer(source.runId, 'selected run ID');
-  integer(source.runAttempt, 'selected run attempt');
+  requirePositiveSafeInteger(source.runId, 'selected run ID');
+  requirePositiveSafeInteger(source.runAttempt, 'selected run attempt');
   // Job names alone cannot establish that an older workflow exercised the
   // current smoke matrix or gate policy. Require the reviewed producer contract.
   for (const workflow of [
@@ -449,7 +437,7 @@ export function qualifyCanarySource(
     'codeql.yml',
   ]) {
     const path = `.github/workflows/${workflow}`;
-    const content = object(
+    const content = requireJsonRecord(
       api.get(`repos/${source.repository}/contents/${path}?ref=${source.sourceSha}`),
       `source ${path}`
     );
@@ -464,11 +452,11 @@ export function qualifyCanarySource(
       );
     }
   }
-  const ciWorkflow = object(
+  const ciWorkflow = requireJsonRecord(
     api.get(`repos/${source.repository}/actions/workflows/ci.yml`),
     'CI workflow'
   );
-  const ciWorkflowId = integer(ciWorkflow.id, 'CI workflow ID');
+  const ciWorkflowId = requirePositiveSafeInteger(ciWorkflow.id, 'CI workflow ID');
   const ci = validateRun(
     api.get(
       `repos/${source.repository}/actions/runs/${source.runId}/attempts/${source.runAttempt}`
@@ -514,21 +502,21 @@ export function qualifyCanarySource(
       jobs: ['Analyze (javascript-typescript)'],
     },
   ]) {
-    const workflow = object(
+    const workflow = requireJsonRecord(
       api.get(`repos/${source.repository}/actions/workflows/${policy.workflow}`),
       policy.workflow
     );
-    const workflowId = integer(workflow.id, `${policy.workflow} ID`);
+    const workflowId = requirePositiveSafeInteger(workflow.id, `${policy.workflow} ID`);
     const runs = api
       .list(
         `repos/${source.repository}/actions/workflows/${workflowId}/runs?branch=main&event=push&head_sha=${source.sourceSha}&per_page=100`,
         'workflow_runs'
       )
-      .map((run) => object(run, policy.workflow))
+      .map((run) => requireJsonRecord(run, policy.workflow))
       .sort(
         (left, right) =>
-          integer(right.run_number, 'sibling run number') -
-          integer(left.run_number, 'sibling run number')
+          requirePositiveSafeInteger(right.run_number, 'sibling run number') -
+          requirePositiveSafeInteger(left.run_number, 'sibling run number')
       );
     if (runs.length > 1 && runs[0]?.run_number === runs[1]?.run_number) {
       throw new Error(
@@ -551,8 +539,8 @@ export function qualifyCanarySource(
       continue;
     }
     const run = validateRun(selected, source, policy.workflow, workflowId);
-    const runId = integer(run.id, `${policy.workflow} run ID`);
-    const attempt = integer(run.run_attempt, `${policy.workflow} attempt`);
+    const runId = requirePositiveSafeInteger(run.id, `${policy.workflow} run ID`);
+    const attempt = requirePositiveSafeInteger(run.run_attempt, `${policy.workflow} attempt`);
     const jobs = requireJobs(api, source.repository, runId, attempt, policy.jobs);
     if (policy.workflow === 'codeql.yml') {
       const rust = settleCodeqlRust(api, source, runId, attempt);

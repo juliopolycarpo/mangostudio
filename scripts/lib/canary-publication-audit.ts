@@ -13,6 +13,7 @@ import { type CanaryTagAncestry, planCanaryTagUpdates } from './canary-tags';
 import type { DistributionManifest } from './distribution-manifest';
 import { MAIN_PACKAGE, NPM_PLATFORMS, platformPackageName } from './npm-pack';
 import { isValidSemver, normalizeVersion } from './release-version';
+import { requireJsonRecord } from './script-guards';
 
 /** Complete paginated release reads, in addition to the selected release's integrity boundary. */
 export interface CanaryPublicationAuditGitHub extends CanaryReleaseClient {
@@ -225,7 +226,7 @@ async function inspectPublishedCanaries(
   const seenTags = new Set<string>();
   const result: PublishedCanary[] = [];
   for (const value of releases) {
-    const release = object(value, 'published release');
+    const release = requireJsonRecord(value, 'published release');
     if (typeof release.tag_name !== 'string' || typeof release.draft !== 'boolean') {
       throw new Error(
         `Invalid published release identity: expected tag_name string and draft boolean; received ${JSON.stringify(release)}`
@@ -324,10 +325,4 @@ async function resolveCanaryTag(
     );
   }
   return resolved.body;
-}
-
-function object(value: unknown, label: string): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value))
-    throw new Error(`Invalid ${label}: expected object; received ${JSON.stringify(value)}`);
-  return value as Record<string, unknown>;
 }

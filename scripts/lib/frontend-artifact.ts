@@ -1,9 +1,10 @@
-import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import Type, { type Static } from 'typebox';
 import Value from 'typebox/value';
+
+import { sha256OfBytes } from './script-guards';
 
 const SHA = Type.String({ pattern: '^[a-f0-9]{40}$' });
 const DIGEST = Type.String({ pattern: '^[a-f0-9]{64}$' });
@@ -45,10 +46,6 @@ export function frontendBuildEnvironment(environment: Record<string, string | un
   };
 }
 
-function digest(bytes: Uint8Array): string {
-  return createHash('sha256').update(bytes).digest('hex');
-}
-
 function inventory(root: string): FrontendArtifact['files'] {
   const files: FrontendArtifact['files'] = [];
   const visit = (path: string): void => {
@@ -56,7 +53,7 @@ function inventory(root: string): FrontendArtifact['files'] {
     if (info.isDirectory()) {
       for (const name of readdirSync(join(root, path)).sort()) visit(`${path}/${name}`);
     } else if (info.isFile()) {
-      files.push({ path, sha256: digest(readFileSync(join(root, path))) });
+      files.push({ path, sha256: sha256OfBytes(readFileSync(join(root, path))) });
     } else {
       throw new Error(
         `frontend ${path}: expected regular file or directory; received special file`

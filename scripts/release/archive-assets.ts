@@ -1,8 +1,7 @@
 #!/usr/bin/env bun
 // Assemble the GitHub Release asset set with stable names and flat archive roots.
 
-import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
@@ -23,6 +22,7 @@ import {
 import { runtimeBinaryName } from '../lib/release-targets';
 import { resolveReleaseVersion } from '../lib/release-version';
 import { assertNoUnexpectedArguments, error, header, parseArgs, success } from '../lib/runner';
+import { sha256OfFile } from '../lib/script-guards';
 
 const printHelp = (): never => {
   console.log(`Usage: bun ./scripts/release/archive-assets.ts [--platform <target>]
@@ -182,13 +182,9 @@ function writeChecksumManifest(plan: ReleaseAssetPlan): void {
   // consumed by verify-checksum.ts, the Cargo launcher, and the mangostudio.dev install scripts.
   const lines = plan.checksummedAssetPaths.map((assetPath) => {
     assertFile(assetPath, basename(assetPath));
-    return `${sha256File(assetPath)}  ${basename(assetPath)}`;
+    return `${sha256OfFile(assetPath)}  ${basename(assetPath)}`;
   });
   writeFileSync(plan.checksumPath, `${lines.join('\n')}\n`);
-}
-
-function sha256File(path: string): string {
-  return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
 async function runCommand(cmd: string[], cwd?: string): Promise<void> {

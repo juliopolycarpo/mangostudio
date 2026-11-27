@@ -10,6 +10,7 @@ import {
   releaseArchiveFileName,
   type ReleasePlatformId,
 } from './release-targets';
+import { isJsonRecord, toPosixPath } from './script-guards';
 
 /**
  * Version 2 added bunRevision and bunCompileRevision; version 3 replaced the
@@ -218,7 +219,7 @@ export function parseDistributionManifest(raw: string): DistributionManifest {
     throw new Error(`Distribution manifest is not valid JSON: ${String(cause)}`);
   }
 
-  if (!isRecord(value)) throw new Error('Distribution manifest must be an object.');
+  if (!isJsonRecord(value)) throw new Error('Distribution manifest must be an object.');
   if (value.schemaVersion !== DISTRIBUTION_MANIFEST_SCHEMA_VERSION) {
     throw new Error(`Unsupported distribution manifest schema: ${String(value.schemaVersion)}`);
   }
@@ -362,7 +363,7 @@ function collectFiles(rootDir: string, relativeRoot: string): DistributionFile[]
       } else if (entry.isFile()) {
         const contents = readFileSync(path);
         files.push({
-          path: toPosix(relative(rootDir, path)),
+          path: toPosixPath(relative(rootDir, path)),
           size: contents.byteLength,
           sha256: createHash('sha256').update(contents).digest('hex'),
         });
@@ -433,7 +434,7 @@ function validateFile(rootDir: string, file: DistributionFile): void {
 }
 
 function parseTarget(value: unknown, index: number): DistributionTarget {
-  if (!isRecord(value)) throw new Error(`Distribution target ${index} must be an object.`);
+  if (!isJsonRecord(value)) throw new Error(`Distribution target ${index} must be an object.`);
   for (const key of ['id', 'bunTarget', 'binary', 'archive'] as const) {
     if (typeof value[key] !== 'string' || value[key].length === 0) {
       throw new Error(`Distribution target ${index}.${key} must be a non-empty string.`);
@@ -451,7 +452,7 @@ function parseTarget(value: unknown, index: number): DistributionTarget {
   const npmPackage = value.npmPackage;
   if (
     npmPackage !== null &&
-    (!isRecord(npmPackage) ||
+    (!isJsonRecord(npmPackage) ||
       typeof npmPackage.name !== 'string' ||
       typeof npmPackage.directory !== 'string')
   ) {
@@ -465,7 +466,7 @@ function parseTarget(value: unknown, index: number): DistributionTarget {
 /** Preserve exact compiler identity in every immutable target manifest. */
 function assertHubCompiler(value: unknown, index: number): void {
   if (value === null) return;
-  if (!isRecord(value)) {
+  if (!isJsonRecord(value)) {
     throw new Error(
       `Distribution target ${index}.compiler expected object | null | received: ${JSON.stringify(value)}`
     );
@@ -499,7 +500,7 @@ function assertBunRuntime(value: unknown, index: number): void {
   const invalid = (): never => {
     throw new Error(`Distribution target ${index}.bunRuntime is invalid.`);
   };
-  if (!isRecord(value)) invalid();
+  if (!isJsonRecord(value)) invalid();
   const runtime = value as Record<string, unknown>;
   if (runtime.source !== 'host' && runtime.source !== 'channel') invalid();
   if (typeof runtime.tagAdvanced !== 'boolean') invalid();
@@ -513,7 +514,7 @@ function assertBunRuntime(value: unknown, index: number): void {
 }
 
 function parseFile(value: unknown, index: number): DistributionFile {
-  if (!isRecord(value)) throw new Error(`Distribution file ${index} must be an object.`);
+  if (!isJsonRecord(value)) throw new Error(`Distribution file ${index} must be an object.`);
   if (typeof value.path !== 'string' || value.path.length === 0) {
     throw new Error(`Distribution file ${index}.path must be a non-empty string.`);
   }
@@ -544,14 +545,6 @@ function normalizeSha(value: string): string {
 
 function sanitizeName(value: string): string {
   return value.replace(/[^A-Za-z0-9._-]+/g, '-');
-}
-
-function toPosix(path: string): string {
-  return path.split(sep).join('/');
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function compareText(left: string, right: string): number {

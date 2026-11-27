@@ -2,8 +2,7 @@
 // Stage one canary pre-release's asset set: every platform archive plus a
 // curated set of raw hub+runtime pairs, under their built sha-stamped names.
 
-import { createHash } from 'node:crypto';
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -23,6 +22,7 @@ import {
   requiredEnv,
   success,
 } from '../lib/runner';
+import { sha256OfFile } from '../lib/script-guards';
 
 /** Names the provenance of one canary build; see `canary-manifest.json` below. */
 const MANIFEST_NAME = 'canary-manifest.json';
@@ -101,7 +101,7 @@ export function stageCanaryAssets(options: StageCanaryAssetsOptions): readonly s
   }
 
   const manifest = createCanaryManifestFromDigests({
-    digests: new Map(staged.map((name) => [name, sha256File(join(outDir, name))])),
+    digests: new Map(staged.map((name) => [name, sha256OfFile(join(outDir, name))])),
     version,
     sourceSha,
     builtAt: options.builtAt ?? new Date().toISOString(),
@@ -179,12 +179,8 @@ function prepareOutDir(outDir: string): void {
 function writeChecksums(outDir: string, assetNames: readonly string[]): void {
   const lines = [...assetNames]
     .sort((a, b) => a.localeCompare(b))
-    .map((name) => `${sha256File(join(outDir, name))}  ${name}`);
+    .map((name) => `${sha256OfFile(join(outDir, name))}  ${name}`);
   writeFileSync(join(outDir, 'SHA256SUMS'), `${lines.join('\n')}\n`);
-}
-
-function sha256File(path: string): string {
-  return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
 function main(): void {

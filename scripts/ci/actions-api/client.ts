@@ -15,6 +15,7 @@ import {
   sendGitHubRequest,
   UnstableListing,
 } from '../../lib/github-retry';
+import { isJsonRecord } from '../../lib/script-guards';
 
 export interface ActionsCacheEntry {
   readonly id: number;
@@ -30,17 +31,13 @@ export type ListingField = 'actions_caches' | 'workflow_runs';
 const PAGE_SIZE = 100;
 const MAX_PAGES = 100;
 
-export function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /**
  * Validate one entry of an `actions_caches` page.
  * @example const entry = parseCacheEntry(body.actions_caches[0]);
  */
 export function parseCacheEntry(value: unknown): ActionsCacheEntry {
   if (
-    !record(value) ||
+    !isJsonRecord(value) ||
     !Number.isSafeInteger(value.id) ||
     Number(value.id) < 1 ||
     typeof value.key !== 'string' ||
@@ -200,7 +197,7 @@ export class GithubActionsClient {
         expected
       );
       if (
-        !record(body) ||
+        !isJsonRecord(body) ||
         !Number.isSafeInteger(body.total_count) ||
         Number(body.total_count) < 0 ||
         !Array.isArray(body[field])

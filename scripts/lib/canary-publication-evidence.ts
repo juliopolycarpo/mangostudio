@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import { createCanaryManifestFromDigests } from '../release/stage-canary-assets';
 import { type CanaryDistribution, parseCanaryPushContext } from './canary-promotion';
 import type { CanarySource } from './canary-source';
@@ -8,6 +6,7 @@ import type { ApprovedArtifact } from './distribution-artifact';
 import { type DistributionManifest, parseDistributionManifest } from './distribution-manifest';
 import { createReleaseAssetPlan, selectCanaryAssets } from './release-assets';
 import { isValidSemver, normalizeVersion } from './release-version';
+import { requireJsonRecord, requirePositiveSafeInteger, sha256OfBytes } from './script-guards';
 
 /** Durable publication identity; the publisher attests its SHA256SUMS separately from the original builder bundle. */
 export interface CanaryPromotionReceipt {
@@ -74,14 +73,18 @@ export function createCanaryPublicationEvidence(
   generated.set('promotion-checksums.tar.gz', checksumsBundle);
   generated.set('promotion-approval.tar.gz', approvalPayload);
   for (const [name, bytes] of generated)
-    assets.push({ name, size: bytes.byteLength, sha256: hash(bytes) });
+    assets.push({ name, size: bytes.byteLength, sha256: sha256OfBytes(bytes) });
   const checksums = `${[...assets]
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
     .map((asset) => `${asset.sha256}  ${asset.name}`)
     .join('\n')}\n`;
   const checksumBytes = Buffer.from(checksums);
   generated.set('SHA256SUMS', checksumBytes);
-  assets.push({ name: 'SHA256SUMS', size: checksumBytes.byteLength, sha256: hash(checksumBytes) });
+  assets.push({
+    name: 'SHA256SUMS',
+    size: checksumBytes.byteLength,
+    sha256: sha256OfBytes(checksumBytes),
+  });
   return {
     expected: {
       repository: source.repository,
@@ -132,7 +135,7 @@ function approvedPublicationManifest(
     manifest.dirty ||
     manifest.channel !== 'canary' ||
     manifest.runtimeProfile !== 'shipping' ||
-    hash(Buffer.from(manifestRaw)) !== receipt.manifestSha256
+    sha256OfBytes(Buffer.from(manifestRaw)) !== receipt.manifestSha256
   ) {
     throw new Error(
       `Invalid publication manifest: expected clean shipping canary ${source.sourceSha} with SHA256 ${receipt.manifestSha256}`
@@ -171,11 +174,11 @@ export function parseCanaryPromotionReceipt(
   } catch (cause) {
     throw new Error('Invalid promotion receipt: expected JSON object', { cause });
   }
-  const receipt = object(parsed, 'promotion receipt');
-  const qualification = object(receipt.qualification, 'qualification receipt');
-  const source = object(qualification.source, 'qualified source');
-  const distribution = object(receipt.distribution, 'approved distribution');
-  const selected = object(receipt.selectedRun, 'frozen selected run');
+  const receipt = requireJsonRecord(parsed, 'promotion receipt');
+  const qualification = requireJsonRecord(receipt.qualification, 'qualification receipt');
+  const source = requireJsonRecord(qualification.source, 'qualified source');
+  const distribution = requireJsonRecord(receipt.distribution, 'approved distribution');
+  const selected = requireJsonRecord(receipt.selectedRun, 'frozen selected run');
   if (
     receipt.schemaVersion !== 1 ||
     typeof receipt.workflowRevision !== 'string' ||
@@ -191,9 +194,10 @@ export function parseCanaryPromotionReceipt(
       `Invalid promotion receipt: expected schema 1 ${repository}@${sourceSha}, workflow revision and manifest SHA256`
     );
   }
-  for (const field of ['runId', 'runAttempt']) positive(source[field], `qualified source ${field}`);
+  for (const field of ['runId', 'runAttempt'])
+    requirePositiveSafeInteger(source[field], `qualified source ${field}`);
   for (const field of ['runId', 'runAttempt', 'runNumber', 'workflowId'])
-    positive(selected[field], `selected run ${field}`);
+    requirePositiveSafeInteger(selected[field], `selected run ${field}`);
   if (
     selected.repository !== repository ||
     selected.sourceSha !== sourceSha ||
@@ -206,7 +210,7 @@ export function parseCanaryPromotionReceipt(
       'Invalid frozen selected run: expected qualified repository/source/run/attempt, CI workflow and run URL'
     );
 
-  positive(qualification.builderAttempt, 'builder attempt');
+  requirePositiveSafeInteger(qualification.builderAttempt, 'builder attempt');
   if (Number(qualification.builderAttempt) > Number(source.runAttempt))
     throw new Error('Invalid builder attempt: expected no later than qualified source attempt');
   if (
@@ -227,7 +231,7 @@ export function parseCanaryPromotionReceipt(
   )
     throw new Error('Invalid push-before SHA: expected full SHA');
   assertJobReceipts(qualification.ciJobs, Number(source.runAttempt));
-  const relevance = object(qualification.relevance, 'qualification relevance');
+  const relevance = requireJsonRecord(qualification.relevance, 'qualification relevance');
   if (
     typeof relevance.cargo !== 'boolean' ||
     typeof relevance.protocol !== 'boolean' ||
@@ -237,7 +241,7 @@ export function parseCanaryPromotionReceipt(
     throw new Error('Invalid qualification relevance: expected cargo/protocol booleans and reason');
   // Absent in receipts written before the CodeQL Rust legs could be skipped.
   if (qualification.codeqlRust !== undefined) {
-    const codeqlRust = object(qualification.codeqlRust, 'qualification codeqlRust');
+    const codeqlRust = requireJsonRecord(qualification.codeqlRust, 'qualification codeqlRust');
     if (
       typeof codeqlRust.analyzed !== 'boolean' ||
       typeof codeqlRust.reason !== 'string' ||
@@ -251,7 +255,7 @@ export function parseCanaryPromotionReceipt(
     throw new Error('Invalid qualification siblings: expected receipt array');
   const workflows = new Set<string>();
   for (const value of qualification.siblings) {
-    const sibling = object(value, 'sibling receipt');
+    const sibling = requireJsonRecord(value, 'sibling receipt');
     if (
       typeof sibling.workflow !== 'string' ||
       !/^[a-z][a-z0-9-]*\.yml$/.test(sibling.workflow) ||
@@ -260,8 +264,8 @@ export function parseCanaryPromotionReceipt(
       throw new Error('Invalid sibling workflow: expected unique workflow filename');
     workflows.add(sibling.workflow);
     if (sibling.result === 'success') {
-      positive(sibling.runId, 'sibling run ID');
-      positive(sibling.attempt, 'sibling attempt');
+      requirePositiveSafeInteger(sibling.runId, 'sibling run ID');
+      requirePositiveSafeInteger(sibling.attempt, 'sibling attempt');
       assertJobReceipts(sibling.jobs, Number(sibling.attempt));
     } else if (sibling.result === 'not-triggered') {
       if (
@@ -277,9 +281,9 @@ export function parseCanaryPromotionReceipt(
       );
   }
   for (const scope of ['checksums', 'assets', 'npm']) {
-    const artifact = object(distribution[scope], `${scope} artifact`);
+    const artifact = requireJsonRecord(distribution[scope], `${scope} artifact`);
     for (const field of ['runId', 'runAttempt', 'producerAttempt', 'artifactId'])
-      positive(artifact[field], `${scope} ${field}`);
+      requirePositiveSafeInteger(artifact[field], `${scope} ${field}`);
     if (
       artifact.repository !== repository ||
       artifact.sourceSha !== sourceSha ||
@@ -302,7 +306,7 @@ export function parseCanaryPromotionReceipt(
 
 /** Require a publisher's downloaded scope to carry the exact original approved manifest. Example: assertCanaryManifestIdentity(raw, receipt). */
 export function assertCanaryManifestIdentity(raw: string, receipt: CanaryPromotionReceipt): void {
-  const actual = hash(Buffer.from(raw));
+  const actual = sha256OfBytes(Buffer.from(raw));
   if (actual !== receipt.manifestSha256)
     throw new Error(
       `Mixed distribution manifest: expected ${receipt.manifestSha256}, received ${actual}; recover original approved bytes`
@@ -333,9 +337,9 @@ function assertJobReceipts(value: unknown, maxAttempt: number): void {
   const ids = new Set<number>();
   const names = new Set<string>();
   for (const entry of value) {
-    const job = object(entry, 'qualified job');
-    positive(job.id, 'job ID');
-    positive(job.attempt, 'job attempt');
+    const job = requireJsonRecord(entry, 'qualified job');
+    requirePositiveSafeInteger(job.id, 'job ID');
+    requirePositiveSafeInteger(job.attempt, 'job attempt');
     if (
       typeof job.name !== 'string' ||
       !job.name ||
@@ -352,20 +356,6 @@ function assertJobReceipts(value: unknown, maxAttempt: number): void {
   }
 }
 
-function object(value: unknown, name: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new Error(`Invalid ${name}: expected object, received ${JSON.stringify(value)}`);
-  return value as Record<string, unknown>;
-}
-function positive(value: unknown, name: string): void {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1)
-    throw new Error(
-      `Invalid ${name}: expected positive safe integer, received ${JSON.stringify(value)}`
-    );
-}
 function jsonBytes(value: unknown): Uint8Array {
   return Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
-}
-function hash(bytes: Uint8Array): string {
-  return createHash('sha256').update(bytes).digest('hex');
 }

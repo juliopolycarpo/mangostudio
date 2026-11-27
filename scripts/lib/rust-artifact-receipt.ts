@@ -1,8 +1,8 @@
 import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { sha256File } from '../release/verify-checksum';
 import { parseArtifactSections, qualifiesTextAttribution } from './rust-cost-receipt';
+import { sha256OfFile } from './script-guards';
 
 export interface ArtifactInspector {
   readonly capture: (label: string, command: readonly string[]) => Promise<string>;
@@ -59,8 +59,8 @@ export async function preserveRustArtifact(
   output: string
 ): Promise<{ path: string; bytes: number; sha256: string }> {
   await copyFile(source, output);
-  const before = await sha256File(source);
-  const after = await sha256File(output);
+  const before = await sha256OfFile(source);
+  const after = await sha256OfFile(output);
   if (before !== after)
     throw new Error(`Artifact copy: expected SHA-256 ${before} | received: ${after}`);
   return { path: output, bytes: (await stat(output)).size, sha256: after };
@@ -158,5 +158,5 @@ export async function rustLibraryHashes(directory: string): Promise<Record<strin
     throw new Error(
       `Rust library directory: expected at least one .rlib | received: ${directory} contains none`
     );
-  return Object.fromEntries(names.map((name) => [name, sha256File(join(directory, name))]));
+  return Object.fromEntries(names.map((name) => [name, sha256OfFile(join(directory, name))]));
 }

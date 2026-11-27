@@ -1,3 +1,5 @@
+import { requireJsonRecord } from './script-guards';
+
 /** Render workflow outcomes without inferring rollback from a failed publishing job.
  * @example renderCanaryPromotionSummary(needs, workflowRevision, runUrl)
  */
@@ -6,21 +8,21 @@ export function renderCanaryPromotionSummary(
   workflowRevision: string,
   runUrl: string
 ): string {
-  const jobs = object(needs, 'canary needs');
+  const jobs = requireJsonRecord(needs, 'canary needs');
   if (!/^[a-f0-9]{40}$/.test(workflowRevision))
     throw new Error(`Invalid workflow revision ${workflowRevision}: expected full SHA`);
   if (!/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/actions\/runs\/\d+$/.test(runUrl))
     throw new Error(`Invalid canary run URL ${runUrl}: expected GitHub Actions run URL`);
-  const source = object(jobs.source, 'source job');
-  const approval = object(jobs.approve, 'approval job');
-  const selected = object(source.outputs, 'source outputs');
-  const approved = object(approval.outputs, 'approval outputs');
+  const source = requireJsonRecord(jobs.source, 'source job');
+  const approval = requireJsonRecord(jobs.approve, 'approval job');
+  const selected = requireJsonRecord(source.outputs, 'source outputs');
+  const approved = requireJsonRecord(approval.outputs, 'approval outputs');
   const rows = ['| Channel | Job result | Interpretation |', '| --- | --- | --- |'];
   for (const [jobName, needed] of [
     ['npm-canary', 'npm_needed'],
     ['github-release-canary', 'github_needed'],
   ] as const) {
-    const job = object(jobs[jobName], jobName);
+    const job = requireJsonRecord(jobs[jobName], jobName);
     const result = job.result;
     if (!['success', 'failure', 'cancelled', 'skipped'].includes(String(result)))
       throw new Error(
@@ -66,10 +68,4 @@ export function renderCanaryPromotionSummary(
     'Recovery uses the original approved bytes. Missing, expired or conflicting evidence fails; no rebuild fallback is permitted.',
     '',
   ].join('\n');
-}
-
-function object(value: unknown, name: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new Error(`Invalid ${name}: expected object; received ${JSON.stringify(value)}`);
-  return value as Record<string, unknown>;
 }

@@ -5,6 +5,7 @@ import type { CanaryVisibilityWindow } from './canary-visibility';
 import { type DistributionManifest, parseDistributionManifest } from './distribution-manifest';
 import { MAIN_PACKAGE, NPM_PLATFORMS, platformPackageName } from './npm-pack';
 import { isValidSemver, normalizeVersion } from './release-version';
+import { requireJsonRecord, sha256OfBytes } from './script-guards';
 
 const REGISTRY = 'https://registry.npmjs.org';
 const PROVENANCE_PREDICATE = 'https://slsa.dev/provenance/v1';
@@ -118,7 +119,7 @@ export async function verifyCanaryNpmPublication(
       continue;
     }
     requireSuccess(tagsResponse.status, tagsUrl);
-    const tags = object(tagsResponse.body, `dist-tags for ${expected.name}`);
+    const tags = requireJsonRecord(tagsResponse.body, `dist-tags for ${expected.name}`);
     for (const [tag, version] of Object.entries(tags)) {
       if (
         typeof version !== 'string' ||
@@ -202,13 +203,6 @@ function expectedPackages(manifest: DistributionManifest): readonly ExpectedPack
   return packages;
 }
 
-function object(value: unknown, label: string): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`Invalid ${label}: ${JSON.stringify(value)}; expected object`);
-  }
-  return value as Record<string, unknown>;
-}
-
 function requireSuccess(status: number, url: string): void {
   if (status !== 200)
     throw new Error(`Registry request ${url}: expected HTTP 200, received ${status}`);
@@ -219,7 +213,7 @@ function validatePackageMetadata(
   name: string,
   version: string
 ): VerifiedCanaryPackage {
-  const metadata = object(value, `${name}@${version} metadata`);
+  const metadata = requireJsonRecord(value, `${name}@${version} metadata`);
   if (
     metadata.name !== name ||
     metadata.version !== version ||
@@ -229,7 +223,7 @@ function validatePackageMetadata(
       `Registry identity mismatch for ${name}@${version}: received ${JSON.stringify({ name: metadata.name, version: metadata.version, _id: metadata._id })}`
     );
   }
-  const dist = object(metadata.dist, `${name}@${version} dist`);
+  const dist = requireJsonRecord(metadata.dist, `${name}@${version} dist`);
   if (
     typeof dist.integrity !== 'string' ||
     !/^sha512-[A-Za-z0-9+/]{86}==$/.test(dist.integrity) ||
@@ -246,8 +240,8 @@ function validatePackageMetadata(
       `Invalid tarball for ${name}@${version}: ${JSON.stringify(dist.tarball)}; expected ${tarball}`
     );
   }
-  const attestations = object(dist.attestations, `${name}@${version} attestations`);
-  const provenance = object(attestations.provenance, `${name}@${version} provenance`);
+  const attestations = requireJsonRecord(dist.attestations, `${name}@${version} attestations`);
+  const provenance = requireJsonRecord(attestations.provenance, `${name}@${version} provenance`);
   const provenanceUrl = `${REGISTRY}/-/npm/v1/attestations/${name.replaceAll('/', '%2f')}@${version}`;
   if (attestations.url !== provenanceUrl || provenance.predicateType !== PROVENANCE_PREDICATE) {
     throw new Error(
@@ -298,7 +292,7 @@ async function verifyPackageArchive(
     const entry = entries.get(path);
     if (!entry) throw new Error(`Missing npm archive entry for ${expected.name}: ${path}`);
     const content = await entry.bytes();
-    const digest = createHash('sha256').update(content).digest('hex');
+    const digest = sha256OfBytes(content);
     if (content.byteLength !== file.size || digest !== file.sha256) {
       throw new Error(
         `Published bytes mismatch for ${expected.name} ${path}: expected size ${file.size} sha256 ${file.sha256}, received size ${content.byteLength} sha256 ${digest}`
@@ -315,7 +309,7 @@ async function verifyPackageArchive(
           { cause }
         );
       }
-      const packaged = object(parsed, `${expected.name} package.json`);
+      const packaged = requireJsonRecord(parsed, `${expected.name} package.json`);
       if (packaged.name !== expected.name || packaged.version !== version) {
         throw new Error(
           `Packaged identity mismatch: expected ${expected.name}@${version}, received ${JSON.stringify(packaged)}`

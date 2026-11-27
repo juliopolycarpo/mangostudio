@@ -38,8 +38,8 @@ import {
   shippingRustProfile,
   summarizeRustCosts,
 } from '../lib/rust-cost-receipt';
+import { sha256OfFile } from '../lib/script-guards';
 import { homeEnv } from '../lib/temp-home';
-import { sha256File } from '../release/verify-checksum';
 
 const ROOT = resolve(import.meta.dir, '../..');
 const TARGET = 'x86_64-unknown-linux-gnu';
@@ -251,7 +251,7 @@ async function main(): Promise<void> {
       );
     return readFile(join(out, `logs/${name}.stdout.log`), 'utf8');
   };
-  const inspector = { capture, hash: sha256File };
+  const inspector = { capture, hash: sha256OfFile };
   const checkBudget = async () => {
     const targetAllocatedBytes = await allocatedBytes(targetRoot);
     const receiptAllocatedBytes = await allocatedBytes(out);
@@ -571,7 +571,7 @@ async function main(): Promise<void> {
       const runtime = measured.get('mangostudio-runtime');
       if (!runtime) throw new Error('Startup study: expected the preserved measured runtime');
       const hub = resolve(values['--startup-hub']);
-      const hubHash = await sha256File(hub);
+      const hubHash = await sha256OfFile(hub);
       const startupCommands = [
         [
           'runtime-readiness',
@@ -637,8 +637,8 @@ async function main(): Promise<void> {
         if (receipt.complete !== true)
           throw new Error(`${label}: expected complete readiness batch`);
         if (
-          (await sha256File(hub)) !== hubHash ||
-          (await sha256File(runtime.path)) !== runtime.sha256
+          (await sha256OfFile(hub)) !== hubHash ||
+          (await sha256OfFile(runtime.path)) !== runtime.sha256
         )
           throw new Error(`${label}: expected unchanged startup artifact identities`);
         await checkBudget();

@@ -50,8 +50,8 @@ import {
   type ProcessResourceObservation,
   startProcessResourceMonitor,
 } from '../lib/process-resource-monitor';
+import { sha256OfFile } from '../lib/script-guards';
 import { homeEnv } from '../lib/temp-home';
-import { sha256File } from '../release/verify-checksum';
 import {
   BenchmarkChildScope,
   benchmarkResourceCleanupError,
@@ -274,7 +274,7 @@ async function environmentNotes(
     binary,
     binaryMiB: Math.round((size / 2 ** 20) * 10) / 10,
     runtimeVersion: version,
-    binarySha256: await sha256File(binary),
+    binarySha256: await sha256OfFile(binary),
     build: buildLabel ?? buildProfileOf(binary),
     cache: freshCopy
       ? 'fresh copy per run; page cache warm after the copy'
@@ -461,8 +461,8 @@ async function main(): Promise<void> {
       samples.length === runs &&
       !cleanupError &&
       !cancellation.signal.aborted &&
-      (await sha256File(binary)) === environment.binarySha256,
-    artifactIdentityUnchanged: (await sha256File(binary)) === environment.binarySha256,
+      (await sha256OfFile(binary)) === environment.binarySha256,
+    artifactIdentityUnchanged: (await sha256OfFile(binary)) === environment.binarySha256,
     phasesMs: {
       spawn: phase((sample) => sample.spawnMs),
       hello: phase((sample) => sample.helloMs),
