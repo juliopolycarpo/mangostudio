@@ -1190,7 +1190,9 @@ describe('import cycle checks', () => {
       cwd: root,
     });
     expect(result.exitCode, 'missing root: expected a failing scanner exit').not.toBe(0);
-    expect(posix(result.stderr)).toContain('Invalid cycle root "apps/missing-workspace"');
+    // The CLI hands the scanner a root relative to its own base, so on Windows
+    // the quoted root is a `..\\..` path that ends in the argument.
+    expect(posix(result.stderr)).toMatch(/Invalid cycle root "[^"\n]*apps\/missing-workspace"/);
     expect(posix(result.stderr)).toContain('apps/missing-workspace, ENOENT');
     expect(result.stderr).toContain('expected an existing directory or JS/TS file');
     expect(result.stderr).not.toContain('realpath');

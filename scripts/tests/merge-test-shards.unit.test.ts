@@ -541,7 +541,7 @@ describe('merge-test-shards CLI verdict', () => {
       expect(summary.exitCode).toBe(0);
       expect(Object.keys(summary.unhandledErrorsUnavailable ?? {})).toEqual(['test-shard-1']);
       expect(summary.unhandledErrorsUnavailable?.['test-shard-1']).toContain(
-        'test-shard-1/unhandled-errors.json'
+        join('test-shard-1', 'unhandled-errors.json')
       );
       expect(stderr).toContain('Unhandled-error count unavailable (test-shard-1)');
       expect(exitCode).toBe(1);
@@ -605,7 +605,8 @@ describe('merge of unhandled-error reports', () => {
     // Only the readable shard contributes: the total is a lower bound.
     expect(summary.unhandledErrors.errors).toBe(3);
     const reasons = Object.values(summary.unhandledErrorsUnavailable ?? {});
-    expect(reasons[0]).toMatch(
+    // The reason carries the path as the platform spells it.
+    expect(reasons[0]?.replaceAll('\\', '/')).toMatch(
       /test-shard-1\/unhandled-errors\.json: expected \{.*\} \| received: no such file/
     );
     expect(reasons[1]).toContain('received: an empty file');

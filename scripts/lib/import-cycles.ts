@@ -300,7 +300,7 @@ function loadImportGraph(
     } catch (caught) {
       const code = (caught as NodeJS.ErrnoException).code ?? 'unknown error';
       throw new Error(
-        `Invalid cycle root ${JSON.stringify(path)} (resolved to ${target}, ${code}); ` +
+        `Invalid cycle root "${path}" (resolved to ${target}, ${code}); ` +
           `expected an existing directory or JS/TS file, relative to ${base}`
       );
     }
