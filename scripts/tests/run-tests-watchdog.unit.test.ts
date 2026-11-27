@@ -447,9 +447,17 @@ describe('runTestsWithWatchdog', () => {
       })
     );
 
-    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+    // The retry ran and wrote its receipt. Exit 1, not 0: the unlinked log is also
+    // unreadable to the failure scan, and a first attempt nobody can read is
+    // assumed to have failed (the clean retry cannot clear it).
+    expect(result).toMatchObject({ exitCode: 1, attempts: 2 });
     expect(sink.text()).toContain('Watchdog could not preserve');
-    expect(await Bun.file(join(dir, 'shard-meta.json')).json()).toMatchObject({ exitCode: 0 });
+    expect(sink.text()).toContain(`could not read ${logFile}`);
+    expect(await Bun.file(join(dir, 'shard-meta.json')).json()).toMatchObject({
+      exitCode: 1,
+      attempts: 2,
+      failuresSeen: true,
+    });
   });
 });
 

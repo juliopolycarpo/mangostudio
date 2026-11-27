@@ -131,6 +131,77 @@ describe('shard-meta attempts', () => {
     ).toBe(2);
   }, 30_000);
 
+  // Named fake for the one read the watchdog makes of attempt 1's log: the
+  // real file cannot be made unreadable portably.
+  const unreadableLog = (path: string): Promise<string> =>
+    Promise.reject(new Error(`EACCES: permission denied, open '${path}'`));
+
+  // Attempt 1 hangs, so it is observed non-zero; attempt 2 exits 0. Whatever
+  // attempt 1 printed before the hang is exactly what the log read must find.
+  const hangThenCleanScript = (marker: string): string => `
+    const fs = require("node:fs");
+    if (fs.existsSync(${JSON.stringify(marker)})) process.exit(0);
+    fs.writeFileSync(${JSON.stringify(marker)}, "");
+    setInterval(() => {}, 1000);
+  `;
+
+  it('keeps exit 1 after a clean retry when the hung attempt log cannot be read', async () => {
+    const dir = await makeTemp();
+    const stdout = new CaptureSink();
+    const readPaths: string[] = [];
+
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: ['bun', '-e', hangThenCleanScript(join(dir, 'first-attempt-ran'))],
+        timeoutSeconds: 1,
+        stdout,
+        readAttemptLog: (path) => {
+          readPaths.push(path);
+          return unreadableLog(path);
+        },
+      })
+    );
+
+    // The retry exited 0, so only the unreadable first log can explain a 1.
+    expect(
+      result,
+      'expected a clean retry to keep exit 1 over an unreadable attempt-1 log'
+    ).toMatchObject({
+      exitCode: 1,
+      attempts: 2,
+    });
+    expect(readPaths[0]).toBe(join(dir, 'run.log'));
+    expect(stdout.text()).toContain(`could not read ${join(dir, 'run.log')} (EACCES`);
+    expect(await receipt(dir)).toMatchObject({ attempts: 2, exitCode: 1, failuresSeen: true });
+  }, 30_000);
+
+  // Counter-case: a readable log that reports nothing still lets a clean retry pass.
+  it('still exits 0 after a clean retry when the hung attempt log is readable and empty', async () => {
+    const dir = await makeTemp();
+
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: ['bun', '-e', hangThenCleanScript(join(dir, 'first-attempt-ran'))],
+        timeoutSeconds: 1,
+        readAttemptLog: () => Promise.resolve(''),
+      })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+    expect(await receipt(dir)).toMatchObject({ exitCode: 0, failuresSeen: false });
+  }, 30_000);
+
+  it('keeps a single failing attempt its own exit code when its log cannot be read', async () => {
+    const dir = await makeTemp();
+
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', 'process.exit(3)'], readAttemptLog: unreadableLog })
+    );
+
+    expect(result).toMatchObject({ exitCode: 3, attempts: 1 });
+    expect(await receipt(dir)).toMatchObject({ exitCode: 3, attempts: 1 });
+  });
+
   it('rejects a label the receipt cannot carry before running the suite', async () => {
     const dir = await makeTemp();
     const marker = join(dir, 'suite-ran');

@@ -338,7 +338,8 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
   this process-receipt contract. Version 1 requires a shard identity matching
   its job directory, an integer exit code from 0 to 255, a nonnegative finite
   duration, one or two attempts and a boolean `failuresSeen`. Retained findings
-  always force a nonzero exit, even after a clean retry. Unversioned legacy
+  always force a nonzero exit, even after a clean retry; so does a failed
+  attempt whose log the watchdog could not read. Unversioned legacy
   receipts still require identity and exit; omitted duration, attempt count and
   findings are unavailable. A missing duration makes the merged duration `null`;
   measured zero remains zero. Malformed fields invalidate either format.
