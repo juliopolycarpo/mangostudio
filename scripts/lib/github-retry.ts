@@ -157,7 +157,9 @@ function judgeRequestFailure(failure: unknown, idempotent: boolean, now: number)
 }
 
 /** Turn gh stderr into a classifiable failure, or undefined when it names nothing transient. */
-function failureFromGhStderr(stderr: string): GitHubHttpFailure | GitHubNetworkFailure | undefined {
+export function failureFromGhStderr(
+  stderr: string
+): GitHubHttpFailure | GitHubNetworkFailure | undefined {
   const status = /\bHTTP (\d{3})\b/.exec(stderr)?.[1];
   if (status !== undefined) {
     return new GitHubHttpFailure(
@@ -193,6 +195,16 @@ export class GitHubRetry {
     private readonly environment: RetryEnvironment = SYSTEM_RETRY_ENVIRONMENT
   ) {
     this.remainingWaitMs = policy.maxTotalWaitMs;
+  }
+
+  /**
+   * Milliseconds this runtime has spent waiting so far. A caller that read
+   * state before a wait can compare the value before and after to learn that
+   * the state may have moved while it slept.
+   * @example const before = retry.waitedMs; await read(); if (retry.waitedMs !== before) restart();
+   */
+  get waitedMs(): number {
+    return this.policy.maxTotalWaitMs - this.remainingWaitMs;
   }
 
   private async drive<T>(
@@ -390,6 +402,12 @@ export interface GitHubReply {
   readonly status: number;
   readonly header: (name: string) => string | undefined;
   readonly text: string;
+  /**
+   * True when an earlier attempt of this request ended in a network failure or a
+   * 5xx: the server may have applied it. A retried DELETE that then answers 404
+   * most likely removed the resource itself, so the caller must not call it "already gone".
+   */
+  readonly afterUncertainAttempt: boolean;
 }
 
 /**
@@ -423,7 +441,8 @@ export async function sendGitHubRequest(
     readonly signal?: AbortSignal;
   }
 ): Promise<GitHubReply> {
-  return retry.request(
+  let uncertainAttempt = false;
+  const reply = await retry.request(
     options.label,
     async () => {
       let response: Response;
@@ -432,24 +451,28 @@ export async function sendGitHubRequest(
         response = await request(options.url, options.init());
         text = await response.text();
       } catch (cause) {
+        uncertainAttempt = true;
         const reason = cause instanceof Error ? cause.message : String(cause);
         throw new GitHubNetworkFailure(`${options.label} failed before an answer: ${reason}`, {
           cause,
         });
       }
-      const reply: GitHubReply = {
+      const answered: GitHubReply = {
         status: response.status,
         header: (name) => response.headers.get(name) ?? undefined,
         text,
+        afterUncertainAttempt: false,
       };
-      if (response.ok || options.accept?.(response.status)) return reply;
+      if (response.ok || options.accept?.(response.status)) return answered;
+      if (response.status >= 500) uncertainAttempt = true;
       throw new GitHubHttpFailure(
         options.failure(response.status),
         response.status,
-        reply.header,
+        answered.header,
         text
       );
     },
     { idempotent: options.idempotent, signal: options.signal }
   );
+  return { ...reply, afterUncertainAttempt: uncertainAttempt };
 }

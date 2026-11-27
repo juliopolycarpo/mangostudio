@@ -408,7 +408,12 @@ describe('GitHubRetry.anyFailure', () => {
 
 describe('response shape errors', () => {
   test('a non-JSON 200 names the request, page, expected shape and the body received', () => {
-    const reply = { status: 200, header: () => undefined, text: '<html>Unicorn</html>' };
+    const reply = {
+      status: 200,
+      header: () => undefined,
+      text: '<html>Unicorn</html>',
+      afterUncertainAttempt: false,
+    };
     expect(() =>
       parseJsonReply(reply, { request: 'GET /caches', page: 3 }, 'a cache listing object')
     ).toThrow(
@@ -493,5 +498,49 @@ describe('sendGitHubRequest', () => {
     const environment = new RecordedRetryEnvironment();
     await send(http, environment);
     expect(environment.waits).toEqual([11_000]);
+  });
+
+  test.each([
+    { label: 'a clean first answer', replies: [{ status: 200, body: {} }], uncertain: false },
+    {
+      label: 'a retry after a rate limit, which GitHub rejects before processing',
+      replies: [
+        { status: 429, headers: { 'retry-after': '1' } },
+        { status: 200, body: {} },
+      ],
+      uncertain: false,
+    },
+    {
+      label: 'a retry after a 502',
+      replies: [{ status: 502 }, { status: 200, body: {} }],
+      uncertain: true,
+    },
+    {
+      label: 'a retry after a network failure',
+      replies: [{ networkError: 'reset' }, { status: 200, body: {} }],
+      uncertain: true,
+    },
+  ])('the reply after $label flags an uncertain earlier attempt: $uncertain', async (scenario) => {
+    const http = new ScriptedGitHubHttp();
+    http.replies = [...scenario.replies];
+    const reply = await send(http, new RecordedRetryEnvironment());
+    expect(reply.afterUncertainAttempt).toBe(scenario.uncertain);
+  });
+});
+
+describe('GitHubRetry.waitedMs', () => {
+  test('counts the waits spent by requests and listing passes alike', async () => {
+    const { retry } = fixture();
+    expect(retry.waitedMs).toBe(0);
+    await retry.request('GET /x', failingThenOk([new GitHubNetworkFailure('reset')]).attempt, {
+      idempotent: true,
+    });
+    expect(retry.waitedMs).toBe(5_000);
+    let passes = 0;
+    await retry.listing('listing', () => {
+      if (passes++ === 0) throw new IncompleteListing('short');
+      return Promise.resolve('ok');
+    });
+    expect(retry.waitedMs).toBe(10_000);
   });
 });
