@@ -1125,6 +1125,16 @@ alike — extracts it with `scripts/qa-gate/unhandled-errors.ts` before the log
 leaves the job. If you ever replace that with a structured source, check the
 reporter first rather than assuming the XML grew an `errors` count.
 
+A missing log is not a clean run. The extractor exits 1 naming the path instead
+of printing `{"errors":0}`, and it writes to a temp name first, so a failed
+extraction leaves no `unhandled-errors.json` to upload (the step is skipped only
+when the test step itself never started, where the job is already red). The
+merge job reads an absent, empty or malformed file as unknown: that shard is
+listed in the summary's `unhandledErrorsUnavailable` with the path and expected
+shape, the merge exits 1 after still emitting the summary and every shard's own
+exit code, and the QA fragment marks the suite `partial` (a lower bound) instead
+of reporting zero unhandled errors.
+
 > Bun does not create the parent directory for `--reporter-outfile`, and it does
 > **not** fail the run when it is missing: it prints `JUnitReportFailed` and
 > still exits 0 (measured on 1.4.0-canary.1, re-verified on 1.4.2), so the

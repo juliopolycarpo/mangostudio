@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
 
-import { mergeUnhandledErrors, parseUnhandledErrors } from './unhandled-errors';
+import {
+  mergeUnhandledErrors,
+  parseUnhandledErrors,
+  readUnhandledErrorsFile,
+} from './unhandled-errors';
 
 // Captured runner output: a real `bun test` unhandled-error block, whose JUnit
 // report reads failures="0" while the run exits 1.
@@ -72,5 +76,73 @@ describe('mergeUnhandledErrors', () => {
       ],
     }));
     expect(mergeUnhandledErrors(parts).headlines).toHaveLength(5);
+  });
+});
+
+describe('readUnhandledErrorsFile', () => {
+  const PATH = 'shards/test-shard-2/unhandled-errors.json';
+
+  it('reads the extractor output back unchanged', () => {
+    const value = { errors: 1, headlines: [{ message: 'error: boom', originatedIn: null }] };
+    expect(readUnhandledErrorsFile(PATH, JSON.stringify(value))).toEqual({ kind: 'read', value });
+  });
+
+  // Each of these used to be read as `{errors: 0}`.
+  it.each([
+    ['no file', null, 'no such file'],
+    ['an empty file', '', 'an empty file'],
+    ['whitespace only', ' \n', 'an empty file'],
+    ['truncated JSON', '{"errors": 2, "head', 'invalid JSON'],
+    ['an array', '[]', '[]'],
+    ['a string count', '{"errors":"2","headlines":[]}', '{"errors":"2","headlines":[]}'],
+    ['a negative count', '{"errors":-1,"headlines":[]}', '{"errors":-1,"headlines":[]}'],
+    ['a fractional count', '{"errors":1.5,"headlines":[]}', '{"errors":1.5,"headlines":[]}'],
+    [
+      'headlines that are not an array',
+      '{"errors":0,"headlines":{}}',
+      '{"errors":0,"headlines":{}}',
+    ],
+    [
+      'a headline without a message',
+      '{"errors":1,"headlines":[{}]}',
+      '{"errors":1,"headlines":[{}]}',
+    ],
+    ['null', 'null', 'null'],
+  ])('is unavailable, naming the path and shape, for %s', (_name, text, received) => {
+    const read = readUnhandledErrorsFile(PATH, text);
+    expect(read.kind).toBe('unavailable');
+    if (read.kind !== 'unavailable') return;
+    expect(read.reason).toContain(PATH);
+    expect(read.reason).toContain('expected {"errors": <integer >= 0>');
+    expect(read.reason).toContain(`| received: ${received}`);
+  });
+});
+
+describe('unhandled-errors CLI', () => {
+  const script = join(import.meta.dir, 'unhandled-errors.ts');
+  const run = async (...args: string[]) => {
+    const proc = Bun.spawn({ cmd: ['bun', script, ...args], stdout: 'pipe', stderr: 'pipe' });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    return { stdout, stderr, exitCode };
+  };
+
+  // A shard that died before the runner wrote its log has an unknown count.
+  it('exits 1 naming the path when the log does not exist, printing no JSON', async () => {
+    const missing = join(import.meta.dir, 'testing/fixtures/no-such-run.log');
+    const { stdout, stderr, exitCode } = await run(missing);
+    expect(stdout).toBe('');
+    expect(stderr).toContain(`expected a run log at ${missing} | received: no such file`);
+    expect(exitCode).toBe(1);
+  });
+
+  it('prints the parsed counts for a log that exists', async () => {
+    const log = join(import.meta.dir, 'testing/fixtures/bun-unhandled-between-tests.txt');
+    const { stdout, exitCode } = await run(log);
+    expect(JSON.parse(stdout)).toMatchObject({ errors: 1 });
+    expect(exitCode).toBe(0);
   });
 });

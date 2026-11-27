@@ -354,7 +354,8 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
 - `unhandled-errors.ts` — the one signal JUnit cannot carry, for either runner:
   Vitest's reporter never receives the run's unhandled errors, and Bun's
   between-tests block never reaches its report either. Each shard extracts both
-  from its own log.
+  from its own log. A missing log exits 1 naming the path; the merge treats a
+  missing, empty or malformed report as an unknown count, never zero.
 - `merge-lcov-shards.ts` — merge per-shard Bun LCOV. Not a concatenation and not
   a union; see `docs/reference/testing.md` for why the naive merge reports a
   coverage regression that did not happen. Order-independent, and it fails

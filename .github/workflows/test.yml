@@ -158,9 +158,17 @@ jobs:
       # run exits 1. Documented in docs/reference/testing.md and only visible in
       # the log, so extract them here, while the log is still local to the shard
       # that produced it.
+      #
+      # Skipped when the test step never started (an earlier step failed): there
+      # is no log by design and that failure is already the job's. Otherwise a
+      # missing log fails this step. The extractor writes to a temp name so a
+      # failed run leaves no `unhandled-errors.json` at all, and the merge job
+      # reports that shard's count as unknown instead of reading zero.
       - name: Extract unhandled errors
-        if: ${{ !cancelled() }}
-        run: bun ./scripts/qa-gate/unhandled-errors.ts coverage-run.log > unhandled-errors.json
+        if: ${{ !cancelled() && steps.coverage.outcome != 'skipped' }}
+        run: |
+          bun ./scripts/qa-gate/unhandled-errors.ts coverage-run.log > unhandled-errors.json.tmp
+          mv unhandled-errors.json.tmp unhandled-errors.json
 
       # Uploaded even when the shard fails so the merge job can report the
       # failing exit code instead of a missing-metrics placeholder.
@@ -250,10 +258,13 @@ jobs:
             -- bun run test --coverage --only=frontend
 
       # Same reason as the shard job: Bun's "# Unhandled error between tests"
-      # block exists only in the log, never in the JUnit report.
+      # block exists only in the log, never in the JUnit report. Same skip and
+      # temp-file rules as the shard job's step.
       - name: Extract unhandled errors
-        if: ${{ !cancelled() }}
-        run: bun ./scripts/qa-gate/unhandled-errors.ts coverage-run.log > unhandled-errors.json
+        if: ${{ !cancelled() && steps.coverage.outcome != 'skipped' }}
+        run: |
+          bun ./scripts/qa-gate/unhandled-errors.ts coverage-run.log > unhandled-errors.json.tmp
+          mv unhandled-errors.json.tmp unhandled-errors.json
 
       # `coverage-run.log.attempt-1` is the watchdog's preserved first attempt
       # after a retry; see the shard job's upload for why it rides along here.
