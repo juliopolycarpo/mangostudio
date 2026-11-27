@@ -2090,6 +2090,30 @@ fails when a lane command stops matching its `cargo-shim.yml` step.
 `bun run clean --rust` removes the cargo target directories, including the
 `mangostudio-runtime` binary the API tests spawn.
 
+### CI tool pins
+
+Every `tool:` that a workflow or composite action hands to `taiki-e/install-action` names an
+exact `<name>@<major>.<minor>.<patch>`, and one tool never appears at two versions. A bare name
+installs the newest release, so a tool release could change a gate's verdict on a commit nobody
+touched. Dependabot does not bump `tool:` strings: raise a pin by hand, in every file that
+names the tool, then in the table below.
+`scripts/tests/workflow-hygiene.unit.test.ts` fails on an unpinned entry or a version split.
+
+| Tool                  | Version   | Where                                                                    |
+| --------------------- | --------- | ------------------------------------------------------------------------ |
+| `cargo-deny`          | `0.22.0`  | `dependency-audit.yml`, `protocol-ci.yml`, `rust-fresh-dependencies.yml` |
+| `cargo-fuzz`          | `0.13.2`  | `protocol-fuzz.yml`                                                      |
+| `cargo-hack`          | `0.6.46`  | `protocol-ci.yml`, `protocol-release.yml`                                |
+| `cargo-llvm-cov`      | `0.9.1`   | `rust-coverage.yml`                                                      |
+| `cargo-nextest`       | `0.9.151` | `cargo-shim.yml`                                                         |
+| `cargo-semver-checks` | `0.51.0`  | `protocol-ci.yml`                                                        |
+| `cargo-shear`         | `1.14.0`  | `cargo-shim.yml`                                                         |
+| `cargo-zigbuild`      | `0.24.1`  | `.github/actions/setup-zigbuild`                                         |
+
+`install-action` has no prebuilt entry for `cargo-fuzz`, so it installs that one through its
+`cargo-binstall` fallback (`cargo-binstall` itself comes from the manifest of the pinned action
+SHA). The `@0.13.2` suffix reaches `cargo binstall cargo-fuzz@0.13.2` unchanged.
+
 ### Unused dependencies
 
 `cargo shear --deny-warnings --locked` fails on a dependency, dev-dependency or
