@@ -35,6 +35,17 @@ export interface NativeWatchApi {
 
 const PAGE_SIZE = 100;
 const MAX_PAGES = 10;
+
+/**
+ * Per-attempt timeout. The gate and report jobs have 9 minutes, of which Bun
+ * setup may take four, and a failed attempt costs its whole timeout. With the
+ * standard policy (60 s of waiting, 5 s at the least per retry) a run makes at
+ * most 12 retried attempts plus one final one, so every request chain ends in
+ * 13 * 10 s + 60 s = 190 s: inside the 5 minutes left, with room for checkout.
+ * The longest chain, a failing report (open issues, jobs, comments, one
+ * comment POST), is four requests; a POST is never retried after a timeout.
+ */
+export const NATIVE_WATCH_REQUEST_TIMEOUT_MS = 10_000;
 // Close is a PATCH to a fixed state, so repeating it is safe; creating an issue
 // or a comment is not, and is only retried when GitHub rejected it for a rate limit.
 const REPEATABLE_METHODS = new Set(['GET', 'PATCH']);
@@ -46,8 +57,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * REST implementation for one repository, authenticated with the workflow's token.
  * Reads and the close PATCH retry transient failures under the standard policy
- * (waits total at most 60 s, so the gate and report steps stay far inside their
- * 9-minute jobs); a malformed listing throws instead of reading as empty.
+ * (waits total at most 60 s and each attempt times out after 10 s, so a run
+ * ends within 190 s even if every attempt fails); a malformed listing throws
+ * instead of reading as empty.
  * @example const api = new GithubNativeWatchApi('owner/repo', process.env.GITHUB_TOKEN ?? '');
  */
 export class GithubNativeWatchApi implements NativeWatchApi {
@@ -78,7 +90,7 @@ export class GithubNativeWatchApi implements NativeWatchApi {
       init: () => ({
         method,
         redirect: 'error',
-        signal: AbortSignal.timeout(30_000),
+        signal: AbortSignal.timeout(NATIVE_WATCH_REQUEST_TIMEOUT_MS),
         headers: {
           accept: 'application/vnd.github+json',
           authorization: `Bearer ${this.token}`,

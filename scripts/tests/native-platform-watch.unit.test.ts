@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { parseWatchArguments } from '../ci/native-platform-watch';
-import { GithubNativeWatchApi } from '../ci/native-watch/api';
+import { GithubNativeWatchApi, NATIVE_WATCH_REQUEST_TIMEOUT_MS } from '../ci/native-watch/api';
 import {
   parseNativeVerdict,
   reportNativeResult,
@@ -356,6 +356,73 @@ describe('GithubNativeWatchApi', () => {
       await api.commentOnIssue(5, 'again');
       expect(http.calls).toHaveLength(2);
       expect(environment.waits).toEqual([8_000]);
+    });
+  });
+
+  describe('duration inside the 9-minute jobs', () => {
+    // 9 minutes, less 4 for a Bun setup that retries, less 1 for checkout and step start.
+    const SCRIPT_ALLOWANCE_MS = (9 - 4 - 1) * 60_000;
+
+    test('a failing report whose reads each time out twice stays inside the allowance', async () => {
+      const timedOut = { networkError: 'The operation timed out' } as const;
+      const { api, http, environment } = fixture([
+        // open issues, then jobs, then comments: each fails twice and then answers
+        timedOut,
+        timedOut,
+        {
+          status: 200,
+          body: [
+            {
+              number: 3,
+              body: trackingMarker(MAIN),
+              user: { login: 'github-actions[bot]' },
+            },
+          ],
+        },
+        timedOut,
+        timedOut,
+        { status: 200, body: { jobs: [{ name: 'Native candidate', conclusion: 'failure' }] } },
+        timedOut,
+        timedOut,
+        { status: 200, body: [] },
+        { status: 201, body: {} },
+      ]);
+      await reportNativeResult({
+        api,
+        ref: MAIN,
+        sha: SHA_B,
+        runId: 7,
+        runUrl: RUN_URL,
+        verdict: 'failure',
+        event: 'schedule',
+        dryRun: false,
+        log: () => undefined,
+      });
+      // Four requests made ten attempts; charge each, answered or not, a full timeout.
+      const timeouts = http.calls.length * NATIVE_WATCH_REQUEST_TIMEOUT_MS;
+      const waited = environment.waits.reduce((sum, wait) => sum + wait, 0);
+      expect(http.calls.map(({ init }) => init.method)).toEqual([
+        ...Array<string>(9).fill('GET'),
+        'POST',
+      ]);
+      expect(
+        timeouts + waited,
+        `worst-case ${(timeouts + waited) / 1000} s; expected at most ${SCRIPT_ALLOWANCE_MS / 1000} s`
+      ).toBeLessThanOrEqual(SCRIPT_ALLOWANCE_MS);
+    });
+
+    test('even when every attempt fails the standard policy bounds the run', () => {
+      // A retried attempt waits at least the shortest backoff, so the budget allows
+      // this many retries, and the failure that ends the run is one more attempt.
+      const retried = Math.floor(
+        STANDARD_RETRY_POLICY.maxTotalWaitMs / Math.min(...STANDARD_RETRY_POLICY.backoffMs)
+      );
+      const worstCaseMs =
+        (retried + 1) * NATIVE_WATCH_REQUEST_TIMEOUT_MS + STANDARD_RETRY_POLICY.maxTotalWaitMs;
+      expect(
+        worstCaseMs,
+        `worst-case ${worstCaseMs / 1000} s; expected at most ${SCRIPT_ALLOWANCE_MS / 1000} s`
+      ).toBeLessThanOrEqual(SCRIPT_ALLOWANCE_MS);
     });
   });
 
