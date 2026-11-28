@@ -60,11 +60,20 @@ export const ARTIFACT_DOWNLOAD_RETRY_POLICY: RetryPolicy = {
 export interface RetryEnvironment {
   readonly sleep: (milliseconds: number) => Promise<void>;
   readonly now: () => number;
+  /**
+   * Blocking wait for `ghCommandSync`, whose callers are synchronous APIs. Absent
+   * in an environment that only serves the asynchronous methods.
+   */
+  readonly sleepSync?: (milliseconds: number) => void;
 }
 
 const SYSTEM_RETRY_ENVIRONMENT: RetryEnvironment = {
   sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
   now: () => Date.now(),
+  // Atomics.wait on a private cell that nothing notifies: a portable blocking sleep.
+  sleepSync: (milliseconds) => {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+  },
 };
 
 /** A listing whose entry count disagrees with its reported total: GitHub was mid-update. */
@@ -207,6 +216,31 @@ export class GitHubRetry {
     return this.policy.maxTotalWaitMs - this.remainingWaitMs;
   }
 
+  /**
+   * The wait before attempt `number + 1`, charged to the budget, or why there is
+   * none. Both the async and the blocking driver schedule through here so their
+   * limits cannot drift.
+   */
+  private nextWait(
+    number: number,
+    decision: Extract<RetryDecision, { readonly retry: true }>
+  ): { readonly waitMs: number } | { readonly stoppedBy: string } {
+    const scheduled = this.policy.backoffMs[number - 1];
+    if (scheduled === undefined) return { stoppedBy: 'attempt schedule spent' };
+    const asked = decision.serverWaitMs ?? 0;
+    if (asked > this.policy.maxServerWaitMs) {
+      return {
+        stoppedBy: `server asked for ${Math.ceil(asked / 1000)} s, over the ${this.policy.maxServerWaitMs / 1000} s cap`,
+      };
+    }
+    const wait = Math.max(scheduled, asked);
+    if (wait > this.remainingWaitMs) {
+      return { stoppedBy: `${this.policy.maxTotalWaitMs / 1000} s wait budget spent` };
+    }
+    this.remainingWaitMs -= wait;
+    return { waitMs: wait };
+  }
+
   private async drive<T>(
     attempt: (number: number) => Promise<Attempted<T>>,
     signal?: AbortSignal
@@ -215,28 +249,11 @@ export class GitHubRetry {
       const attempted = await attempt(number);
       if ('value' in attempted || !attempted.decision.retry) return { attempted, attempts: number };
       if (signal?.aborted) return { attempted, attempts: number };
-      const scheduled = this.policy.backoffMs[number - 1];
-      if (scheduled === undefined) {
-        return { attempted, attempts: number, stoppedBy: 'attempt schedule spent' };
+      const next = this.nextWait(number, attempted.decision);
+      if ('stoppedBy' in next) {
+        return { attempted, attempts: number, stoppedBy: next.stoppedBy };
       }
-      const asked = attempted.decision.serverWaitMs ?? 0;
-      if (asked > this.policy.maxServerWaitMs) {
-        return {
-          attempted,
-          attempts: number,
-          stoppedBy: `server asked for ${Math.ceil(asked / 1000)} s, over the ${this.policy.maxServerWaitMs / 1000} s cap`,
-        };
-      }
-      const wait = Math.max(scheduled, asked);
-      if (wait > this.remainingWaitMs) {
-        return {
-          attempted,
-          attempts: number,
-          stoppedBy: `${this.policy.maxTotalWaitMs / 1000} s wait budget spent`,
-        };
-      }
-      this.remainingWaitMs -= wait;
-      await this.environment.sleep(wait);
+      await this.environment.sleep(next.waitMs);
     }
   }
 
@@ -311,6 +328,33 @@ export class GitHubRetry {
       (result) => (result.exitCode === 0 ? undefined : failureFromGhStderr(result.stderr)),
       options.idempotent ?? true
     );
+  }
+
+  /**
+   * `ghCommand` for a synchronous caller: the same classification, policy and
+   * budget, but the waits block the thread. It returns the last result, so the
+   * caller keeps its own error message. Needs an environment with `sleepSync`.
+   * @example const result = retry.ghCommandSync(() => runner.run(['api', path]));
+   */
+  ghCommandSync<R extends { readonly exitCode: number; readonly stderr: string }>(
+    run: () => R,
+    options: { readonly idempotent?: boolean } = {}
+  ): R {
+    const { sleepSync } = this.environment;
+    if (sleepSync === undefined) {
+      throw new Error('GitHubRetry.ghCommandSync: expected a retry environment with sleepSync');
+    }
+    const idempotent = options.idempotent ?? true;
+    for (let number = 1; ; number++) {
+      const result = run();
+      const failure = result.exitCode === 0 ? undefined : failureFromGhStderr(result.stderr);
+      if (failure === undefined) return result;
+      const decision = judgeRequestFailure(failure, idempotent, this.environment.now());
+      if (!decision.retry) return result;
+      const next = this.nextWait(number, decision);
+      if ('stoppedBy' in next) return result;
+      sleepSync(next.waitMs);
+    }
   }
 
   /**

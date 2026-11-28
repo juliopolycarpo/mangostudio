@@ -1,14 +1,19 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { qualifyCanarySourceToFiles } from '../ci/qualify-canary-source';
+import { createCanaryGhApi } from '../lib/canary-gh-api';
 import {
   type CanaryValidationApi,
   type CanaryValidationSource,
   qualifyCanarySource,
 } from '../lib/canary-validation';
+import { GitHubRetry, STANDARD_RETRY_POLICY } from '../lib/github-retry';
 import { fakeCliEnvironment, installFakeCli, removeFakeCliDirectory } from './support/fake-cli';
+import { ghFailure, ghServing, ScriptedGhRunner } from './support/scripted-gh-runner';
+import { RecordedRetryEnvironment } from './support/scripted-github-http';
 import { extractJobBlock } from './support/workflow-blocks';
 
 const source: CanaryValidationSource = {
@@ -921,4 +926,105 @@ test('qualifies the frozen successful attempt while a later rerun changes mutabl
   expect(qualifyCanarySource(source, api).source.runAttempt).toBe(2);
   expect(api.requests).toContain('repos/owner/repo/actions/runs/100/attempts/2');
   expect(api.requests).not.toContain('repos/owner/repo/actions/runs/100');
+});
+
+describe('qualifyCanarySourceToFiles over the shared retry client', () => {
+  const BASE = 'repos/owner/repo/';
+  const BAD_GATEWAY = 'gh: Bad Gateway (HTTP 502)';
+  const workflowRead = (name: string) => [
+    'api',
+    `${BASE}contents/.github/workflows/${name}?ref=${source.sourceSha}`,
+  ];
+
+  function setup() {
+    const directory = mkdtempSync(join(tmpdir(), 'fix-canary-qualify-retry-'));
+    const files = {
+      receiptPath: join(directory, 'receipt.json'),
+      githubOutputPath: join(directory, 'out'),
+    };
+    const environment = new RecordedRetryEnvironment();
+    const runner = new ScriptedGhRunner(
+      ghServing(new FakeQualificationApi().values, {
+        prefix: BASE,
+        collectionKey: (path) => (path.includes('/jobs?') ? 'jobs' : 'workflow_runs'),
+      })
+    );
+    const api = createCanaryGhApi(runner, new GitHubRetry(STANDARD_RETRY_POLICY, environment));
+    return { directory, files, environment, runner, api };
+  }
+
+  test('a 502 on the first read is retried and the receipt and outputs are written', () => {
+    const { directory, files, environment, runner, api } = setup();
+    try {
+      runner.script(workflowRead('ci.yml'), ghFailure(BAD_GATEWAY));
+      const receipt = qualifyCanarySourceToFiles(source, files, api);
+      expect(receipt).toEqual(qualifyCanarySource(source, new FakeQualificationApi()));
+      expect(JSON.parse(readFileSync(files.receiptPath, 'utf8')).source).toEqual(source);
+      expect(readFileSync(files.githubOutputPath, 'utf8')).toBe(
+        'builder_attempt=1\nqualified=true\n'
+      );
+      expect(runner.callsOf(workflowRead('ci.yml'))).toBe(2);
+      expect(environment.waits).toEqual([5_000]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('a persistent 502 on the CI jobs listing names the request and writes nothing', () => {
+    const { directory, files, environment, runner, api } = setup();
+    try {
+      const jobsRead = [
+        'api',
+        '--paginate',
+        '--slurp',
+        `${BASE}actions/runs/100/jobs?filter=all&per_page=100`,
+      ];
+      runner.always(jobsRead, ghFailure(BAD_GATEWAY));
+      expect(() => qualifyCanarySourceToFiles(source, files, api)).toThrow(
+        `GitHub API GET ${BASE}actions/runs/100/jobs?filter=all&per_page=100 (all pages): expected successful gh exit 0 | received: exit 1 | stderr: ${BAD_GATEWAY}`
+      );
+      expect(runner.callsOf(jobsRead)).toBe(3);
+      expect(environment.waits).toEqual([5_000, 10_000]);
+      expect(existsSync(files.receiptPath)).toBe(false);
+      expect(existsSync(files.githubOutputPath)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('a 404 is not retried', () => {
+    const { directory, files, environment, runner, api } = setup();
+    try {
+      runner.always(workflowRead('ci.yml'), ghFailure('gh: Not Found (HTTP 404)'));
+      expect(() => qualifyCanarySourceToFiles(source, files, api)).toThrow(
+        'expected successful gh exit 0 | received: exit 1 | stderr: gh: Not Found (HTTP 404)'
+      );
+      expect(runner.calls).toHaveLength(1);
+      expect(environment.waits).toEqual([]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('the dozens of reads share one 60 s wait budget instead of 60 s each', () => {
+    const { directory, files, environment, runner, api } = setup();
+    try {
+      const names = ['ci.yml', 'distribution-build.yml', 'smoke-binary.yml', 'smoke-container.yml'];
+      // Four reads each fail twice and then succeed: 4 * (5 s + 10 s) spends the budget.
+      for (const name of names) {
+        runner.script(workflowRead(name), ghFailure(BAD_GATEWAY), ghFailure(BAD_GATEWAY));
+      }
+      // The fifth read finds no wait left, so its first 502 is final.
+      runner.always(workflowRead('cargo-shim.yml'), ghFailure(BAD_GATEWAY));
+      expect(() => qualifyCanarySourceToFiles(source, files, api)).toThrow(
+        `GitHub API GET ${BASE}contents/.github/workflows/cargo-shim.yml?ref=${source.sourceSha}: expected successful gh exit 0`
+      );
+      expect(environment.waits).toEqual([
+        5_000, 10_000, 5_000, 10_000, 5_000, 10_000, 5_000, 10_000,
+      ]);
+      expect(runner.callsOf(workflowRead('cargo-shim.yml'))).toBe(1);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { RegistryClient, RegistryResponse } from '../lib/canary-publication';
 import type { CanaryTagAncestry, CanaryTagRunner } from '../lib/canary-tags';
 import { CanaryVisibilityWindow } from '../lib/canary-visibility';
+import { GitHubRetry, STANDARD_RETRY_POLICY } from '../lib/github-retry';
 import { NPM_PLATFORMS } from '../lib/npm-pack';
 import type { NpmCommandResult } from '../lib/npm-publish';
 import {
@@ -16,6 +17,7 @@ import {
   IsolatedCanaryTagRunner,
   runPromoteCanaryTagsCli,
 } from '../release/promote-canary-tags';
+import { RecordedRetryEnvironment } from './support/scripted-github-http';
 
 const SOURCE = 'a'.repeat(40);
 const OLD = 'b'.repeat(40);
@@ -57,6 +59,18 @@ class FakeGitHubCommands implements CanaryTagRunner {
       stdout: JSON.stringify(body),
       stderr: '',
     });
+  }
+}
+
+/** Answers each gh call with the next queued result and repeats the last one. */
+class SequencedGitHubCommands implements CanaryTagRunner {
+  readonly calls: string[] = [];
+  constructor(private readonly results: readonly NpmCommandResult[]) {}
+  run(command: readonly string[]): Promise<NpmCommandResult> {
+    this.calls.push(command.join(' '));
+    const result = this.results[Math.min(this.calls.length, this.results.length) - 1];
+    if (!result) throw new Error('SequencedGitHubCommands: expected at least one queued result');
+    return Promise.resolve(result);
   }
 }
 
@@ -355,6 +369,49 @@ describe('GitHub canary ancestry adapter', () => {
     expect(() => new GitHubCanaryTagAncestry(repository, new FakeGitHubCommands())).toThrow(
       'expected owner/repository'
     );
+  });
+  describe('transient GitHub failures', () => {
+    const command = 'gh api repos/owner/repo/commits/bbbbbbb';
+    const badGateway = { exitCode: 1, stdout: '', stderr: 'gh: Bad Gateway (HTTP 502)' };
+    const resolved = { exitCode: 0, stdout: JSON.stringify({ sha: OLD }), stderr: '' };
+
+    function adapter(...results: NpmCommandResult[]) {
+      const environment = new RecordedRetryEnvironment();
+      const runner = new SequencedGitHubCommands(results);
+      const ancestry = new GitHubCanaryTagAncestry(
+        'owner/repo',
+        runner,
+        new GitHubRetry(STANDARD_RETRY_POLICY, environment)
+      );
+      return { environment, runner, ancestry };
+    }
+
+    test('reads again after a 502 and resolves the owner', async () => {
+      const { environment, runner, ancestry } = adapter(badGateway, resolved);
+      expect(await ancestry.resolveCommit('bbbbbbb')).toBe(OLD);
+      expect(runner.calls).toEqual([command, command]);
+      expect(environment.waits).toEqual([5_000]);
+    });
+
+    test('a persistent 502 names the request and the status after three reads', async () => {
+      const { environment, runner, ancestry } = adapter(badGateway);
+      await expect(ancestry.resolveCommit('bbbbbbb')).rejects.toThrow(
+        'GitHub canary ancestry repos/owner/repo/commits/bbbbbbb: expected exit0; received 1 (HTTP 502)'
+      );
+      expect(runner.calls).toHaveLength(3);
+      expect(environment.waits).toEqual([5_000, 10_000]);
+    });
+
+    test('a 404 is not read again', async () => {
+      const { environment, runner, ancestry } = adapter({
+        exitCode: 1,
+        stdout: '',
+        stderr: 'gh: Not Found (HTTP 404)',
+      });
+      await expect(ancestry.resolveCommit('bbbbbbb')).rejects.toThrow('received 1 (HTTP 404)');
+      expect(runner.calls).toHaveLength(1);
+      expect(environment.waits).toEqual([]);
+    });
   });
   test('failed GitHub auth and malformed data cannot establish ancestry', async () => {
     const runner = new FakeGitHubCommands();

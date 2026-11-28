@@ -12,4 +12,9 @@ else if (endpoint.endsWith('/artifacts/99')) file = 'artifact.json';
 else if (endpoint.endsWith('/runs/42/attempts/2')) file = 'run.json';
 else if (endpoint.endsWith('/runs/42/attempts/1/jobs?per_page=100')) file = 'jobs.json';
 else throw new Error(`Unexpected fake GitHub endpoint: ${endpoint}`);
+// `gh api --include` (the shared CanaryGitHub client) prints the HTTP status line
+// and headers before the body; the paginated jobs read and the ZIP fetch do not.
+if (process.argv.includes('--include')) {
+  process.stdout.write('HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n\r\n');
+}
 process.stdout.write(readFileSync(join(directory, file)));

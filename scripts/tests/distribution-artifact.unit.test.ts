@@ -4,7 +4,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+import { readApprovedEvidence } from '../ci/download-approved-distribution';
 import { zipCreationCommand } from '../lib/archive-creation';
+import { CanaryGitHub } from '../lib/canary-github';
 import {
   type ApprovedArtifact,
   type ArtifactEvidence,
@@ -13,6 +15,8 @@ import {
 } from '../lib/distribution-artifact';
 import { fakeCliEnvironment, installFakeCli, removeFakeCliDirectory } from './support/fake-cli';
 import { zipCreationUnavailable } from './support/host-tools';
+import { ghFailure, ghHttp, ghPages, ScriptedGhRunner } from './support/scripted-gh-runner';
+import { RecordedRetryEnvironment } from './support/scripted-github-http';
 
 // Skipped on a developer machine without `zip`; CI throws instead (see host-tools.ts).
 const ZIP_UNAVAILABLE = zipCreationUnavailable();
@@ -330,7 +334,11 @@ describe('cross-run artifact download CLI', () => {
       try {
         const current = evidence();
         writeFileSync(join(directory, 'run.json'), JSON.stringify(current.run));
-        writeFileSync(join(directory, 'jobs.json'), JSON.stringify([{ jobs: current.jobs }]));
+        // `gh api --paginate --slurp` output: one page that carries the collection total.
+        writeFileSync(
+          join(directory, 'jobs.json'),
+          JSON.stringify([{ total_count: current.jobs.length, jobs: current.jobs }])
+        );
         const staging = join(directory, 'bundle');
         const archive = join(directory, 'artifact.zip');
         mkdirSync(staging);
@@ -399,3 +407,69 @@ test.each(['npm.tar.gz\n \n', ' \nnpm.tar.gz\n', 'npm.tar.gz \n', 'npm.tar.gz\n\
     expect(() => distributionBundleMember(listing)).toThrow('expected one flat');
   }
 );
+
+describe('readApprovedEvidence over the shared retry client', () => {
+  const BASE = 'repos/owner/repo/actions';
+  const RUN = `${BASE}/runs/42/attempts/2`;
+  const ARTIFACT = `${BASE}/artifacts/99`;
+  const JOBS = `${BASE}/runs/42/attempts/1/jobs?per_page=100`;
+  const READ = (path: string) => ['api', '--include', path];
+  const PAGES = ['api', '--paginate', '--slurp', JOBS];
+
+  function setup() {
+    const current = evidence();
+    const environment = new RecordedRetryEnvironment();
+    const runner = new ScriptedGhRunner()
+      .always(READ(RUN), ghHttp(200, current.run))
+      .always(READ(ARTIFACT), ghHttp(200, current.artifact))
+      .always(PAGES, ghPages([{ total_count: current.jobs.length, jobs: current.jobs }]));
+    const github = new CanaryGitHub('owner/repo', runner, environment.sleep);
+    return { current, environment, runner, github };
+  }
+
+  test('returns the run, artifact and jobs that validateArtifactEvidence accepts', async () => {
+    const { current, github } = setup();
+    const read = await readApprovedEvidence(approval, github);
+    expect(read).toEqual(current);
+    expect(() => validateArtifactEvidence(approval, read)).not.toThrow();
+  });
+
+  test('a 502 on the run metadata is retried and the later answer is used', async () => {
+    const { current, environment, runner, github } = setup();
+    runner.script(READ(RUN), ghHttp(502, { message: 'Bad Gateway' }), ghHttp(200, current.run));
+    expect((await readApprovedEvidence(approval, github)).run).toEqual(current.run);
+    expect(runner.callsOf(READ(RUN))).toBe(2);
+    expect(environment.waits).toEqual([5_000]);
+  });
+
+  test('a 502 on the jobs listing is retried', async () => {
+    const { current, environment, runner, github } = setup();
+    runner.script(
+      PAGES,
+      ghFailure('gh: Bad Gateway (HTTP 502)'),
+      ghPages([{ total_count: current.jobs.length, jobs: current.jobs }])
+    );
+    expect((await readApprovedEvidence(approval, github)).jobs).toEqual(current.jobs);
+    expect(environment.waits).toEqual([5_000]);
+  });
+
+  test('a persistent 502 on the artifact metadata names the request and the status received', async () => {
+    const { environment, runner, github } = setup();
+    runner.always(READ(ARTIFACT), ghHttp(502, { message: 'Bad Gateway' }));
+    await expect(readApprovedEvidence(approval, github)).rejects.toThrow(
+      `Invalid GET ${ARTIFACT}; expected HTTP 200 for approved artifact metadata | received HTTP 502 {"message":"Bad Gateway"}`
+    );
+    expect(runner.callsOf(READ(ARTIFACT))).toBe(3);
+    expect(environment.waits).toEqual([5_000, 10_000]);
+  });
+
+  test('a 404 is not retried and fails naming the request and the status received', async () => {
+    const { environment, runner, github } = setup();
+    runner.always(READ(RUN), ghHttp(404, { message: 'Not Found' }));
+    await expect(readApprovedEvidence(approval, github)).rejects.toThrow(
+      `Invalid GET ${RUN}; expected HTTP 200 for approved run metadata | received HTTP 404 {"message":"Not Found"}`
+    );
+    expect(runner.callsOf(READ(RUN))).toBe(1);
+    expect(environment.waits).toEqual([]);
+  });
+});

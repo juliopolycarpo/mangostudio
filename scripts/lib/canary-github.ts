@@ -27,7 +27,8 @@ interface GitHubResponse<T> {
   readonly body: T;
 }
 
-const ghRunner: GhCommandRunner = {
+/** The real `gh` CLI behind `GhCommandRunner`; tests inject a named fake instead. */
+export const ghRunner: GhCommandRunner = {
   run(args) {
     const result = Bun.spawnSync({
       cmd: ['gh', ...args],
