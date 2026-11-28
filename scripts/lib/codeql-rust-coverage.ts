@@ -53,16 +53,19 @@ export function codeScanningAnalysesPath(repository: string, page: number): stri
   return `repos/${repository}/code-scanning/analyses?ref=refs/heads/main&tool_name=CodeQL&per_page=${ANALYSES_PAGE_SIZE}&page=${page}`;
 }
 
+interface ValidRustAnalysis {
+  readonly sha: string;
+  readonly category: string;
+  readonly time: number;
+}
+
 /**
- * Commits on main with a complete analysis in every Rust category, newest first.
- * An entry that is malformed, has an upload error, comes from another tool or
- * workflow job, or targets another ref is ignored: ignoring only removes a
- * candidate, so it can never widen coverage.
- * @example
- * rustAnalyzedCommits(page); // ['<newest sha>', '<older sha>']
+ * The entries that count as a Rust analysis on main. One that is malformed, has
+ * an upload error, comes from another tool or workflow job, or targets another
+ * ref is ignored: ignoring only removes evidence, so it never widens coverage.
  */
-export function rustAnalyzedCommits(analyses: readonly unknown[]): string[] {
-  const seen = new Map<string, { categories: Set<string>; newest: number }>();
+function validRustAnalyses(analyses: readonly unknown[]): ValidRustAnalysis[] {
+  const valid: ValidRustAnalysis[] = [];
   for (const entry of analyses) {
     if (!isRecord(entry) || !isRecord(entry.tool)) continue;
     const { commit_sha: sha, category, created_at: createdAt } = entry;
@@ -79,9 +82,22 @@ export function rustAnalyzedCommits(analyses: readonly unknown[]): string[] {
       Number.isNaN(Date.parse(createdAt))
     )
       continue;
+    valid.push({ sha, category, time: Date.parse(createdAt) });
+  }
+  return valid;
+}
+
+/**
+ * Commits on main with a complete analysis in every Rust category, newest first.
+ * @example
+ * rustAnalyzedCommits(page); // ['<newest sha>', '<older sha>']
+ */
+export function rustAnalyzedCommits(analyses: readonly unknown[]): string[] {
+  const seen = new Map<string, { categories: Set<string>; newest: number }>();
+  for (const { sha, category, time } of validRustAnalyses(analyses)) {
     const commit = seen.get(sha) ?? { categories: new Set<string>(), newest: 0 };
     commit.categories.add(category);
-    commit.newest = Math.max(commit.newest, Date.parse(createdAt));
+    commit.newest = Math.max(commit.newest, time);
     seen.set(sha, commit);
   }
   return [...seen.entries()]
@@ -93,16 +109,35 @@ export function rustAnalyzedCommits(analyses: readonly unknown[]): string[] {
 }
 
 /**
+ * The commit that code scanning currently treats as main's Rust baseline: the
+ * newest analysis of each Rust category must sit on one commit. Undefined when
+ * a category has no analysis, the newest analyses disagree, or two analyses of
+ * a category tie for newest on different commits.
+ * @example
+ * currentRustAnalysisCommit(page); // '<sha>'
+ */
+export function currentRustAnalysisCommit(analyses: readonly unknown[]): string | undefined {
+  const valid = validRustAnalyses(analyses);
+  const heads = CODEQL_RUST_CATEGORIES.map((category) => {
+    const inCategory = valid.filter((analysis) => analysis.category === category);
+    const newest = Math.max(...inCategory.map((analysis) => analysis.time));
+    return new Set(
+      inCategory.filter((analysis) => analysis.time === newest).map((analysis) => analysis.sha)
+    );
+  });
+  // Each category needs exactly one newest commit, and the categories must agree.
+  const agreed = new Set(heads.flatMap((shas) => [...shas]));
+  return heads.every((shas) => shas.size === 1) && agreed.size === 1 ? [...agreed][0] : undefined;
+}
+
+/**
  * Read main's analyses newest first until enough covering candidates are known
  * or the bounded lookback ends. A failed or malformed page throws, so callers
  * choose their fail-safe direction.
  * @example
- * const commits = readRustAnalyzedCommits('owner/repo', (path) => gh(path));
+ * const analyses = readRustAnalyses('owner/repo', (path) => gh(path));
  */
-export function readRustAnalyzedCommits(
-  repository: string,
-  fetchPage: FetchAnalysesPage
-): string[] {
+function readRustAnalyses(repository: string, fetchPage: FetchAnalysesPage): unknown[] {
   const analyses: unknown[] = [];
   for (let page = 1; page <= ANALYSES_MAX_PAGES; page++) {
     const path = codeScanningAnalysesPath(repository, page);
@@ -119,7 +154,59 @@ export function readRustAnalyzedCommits(
     )
       break;
   }
-  return rustAnalyzedCommits(analyses);
+  return analyses;
+}
+
+/**
+ * Candidate commits for a coverage decision, newest first.
+ * @example
+ * const commits = readRustAnalyzedCommits('owner/repo', (path) => gh(path));
+ */
+export function readRustAnalyzedCommits(
+  repository: string,
+  fetchPage: FetchAnalysesPage
+): string[] {
+  return rustAnalyzedCommits(readRustAnalyses(repository, fetchPage));
+}
+
+/** Whether the CodeQL Rust legs must run for a push, with the evidence behind the choice. */
+export interface RustLegDecision {
+  readonly rust: boolean;
+  readonly reason: string;
+}
+
+/**
+ * Decide the Rust legs of a push to main: skip only when the commit that code
+ * scanning currently holds as main's Rust baseline covers the head. Stricter
+ * than Canary's rule on purpose: a revert of an analyzed Rust change matches an
+ * older analysis, but skipping would leave the Security tab and pull request
+ * comparisons on the newer analysis, so the revert is analyzed instead. Any
+ * failure while reading or diffing analyzes, so an API outage costs minutes and
+ * never coverage.
+ * @example
+ * decideRustLegsForPush({ head, repository, fetchPage, pathsBetween }); // { rust: false, reason }
+ */
+export function decideRustLegsForPush(input: {
+  readonly head: string;
+  readonly repository: string;
+  readonly fetchPage: FetchAnalysesPage;
+  readonly pathsBetween: PathsBetween;
+}): RustLegDecision {
+  try {
+    const baseline = currentRustAnalysisCommit(readRustAnalyses(input.repository, input.fetchPage));
+    if (baseline === undefined) {
+      return {
+        rust: true,
+        reason:
+          'the newest analyses of the two Rust categories do not sit on one commit, or one is missing',
+      };
+    }
+    const coverage = resolveRustCoverage(input.head, [baseline], input.pathsBetween);
+    return { rust: !coverage.covered, reason: coverage.reason };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { rust: true, reason: `coverage lookup failed, analyzing Rust: ${message}` };
+  }
 }
 
 /**

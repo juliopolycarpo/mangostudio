@@ -23,14 +23,28 @@ jobs:
   changes:
     # Pull requests skip the Rust legs when no Rust source, manifest or CodeQL
     # input changed. The JavaScript leg always runs, so the required code
-    # scanning check always receives an analysis. Pushes to main, the weekly
-    # schedule and manual runs analyze every leg: main's results are the
-    # baseline a pull request is compared with, and Canary qualification
-    # requires all three analyses on the main push run.
+    # scanning check always receives an analysis.
+    #
+    # A push to main skips them only when main's current Rust baseline covers
+    # the commit: the newest analysis of each Rust category sits on one commit,
+    # and that commit differs from the push in no CodeQL-Rust-relevant path.
+    # The comparison is with that commit, never the push's parent, because main
+    # runs are cancelled when superseded and a parent can hold a Rust change
+    # nobody analyzed. Requiring the newest analysis (not any older match) keeps
+    # a revert of an analyzed change from leaving stale alerts. Any lookup
+    # failure analyzes. Canary recomputes a weaker, coverage-only rule from
+    # GitHub's records before it accepts a skipped SHA
+    # (scripts/lib/canary-validation.ts).
+    #
+    # The weekly schedule and manual runs analyze every leg: that bounds how
+    # old the newest Rust analysis on main can get and keeps alerts current.
     name: Detect CodeQL-relevant changes
     runs-on: ubuntu-latest
     # Bun setup can wait four minutes for a republished canary asset.
     timeout-minutes: 9
+    permissions:
+      contents: read # checkout of the full history the coverage diff needs
+      security-events: read # list main's code scanning analyses
     outputs:
       rust: ${{ steps.changed.outputs.rust }}
     steps:
@@ -46,10 +60,20 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_NAME: ${{ github.event_name }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        # Dependency-free script; runs without `bun install`. It refuses an
-        # empty diff instead of skipping a leg.
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REPO: ${{ github.repository }}
+        # Dependency-free scripts; run without `bun install`. The pull request
+        # path refuses an empty diff instead of skipping a leg; the push path
+        # prints rust=true on any failure.
         run: |
+          if [ "$EVENT_NAME" = "push" ]; then
+            if ! bun ./scripts/ci/codeql-rust-coverage.ts push >> "$GITHUB_OUTPUT"; then
+              echo "rust=true" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
           if [ "$EVENT_NAME" != "pull_request" ]; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
             exit 0

@@ -347,8 +347,8 @@ snapshot `source.json` restaurado, são lidos individualmente e não têm janela
 
 O job `approve` qualifica os produtores de validação e reutiliza os três
 artefatos shipping desse CI, sem recompilar. Exige CI Gate, builder, seis smokes
-nativos, container, análises CodeQL no mesmo SHA e Cargo Shim/Protocol quando
-relevantes. O seed de cache continua obrigatório pelo resultado do CI completo.
+nativos, container, análises CodeQL no mesmo SHA (as de Rust podem ser cobertas
+por uma análise anterior da main) e Cargo Shim/Protocol quando relevantes. O seed de cache continua obrigatório pelo resultado do CI completo.
 IDs imutáveis, digest ZIP, tentativa produtora e proveniência vinculam os bytes
 ao manifesto original. Artefatos PR/light, expirados, ausentes ou conflitantes
 falham; não há fallback de rebuild.

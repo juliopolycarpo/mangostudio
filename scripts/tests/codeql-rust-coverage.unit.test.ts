@@ -5,6 +5,8 @@ import {
   CODEQL_RUST_CATEGORIES,
   CODEQL_RUST_MAX_CANDIDATES,
   codeScanningAnalysesPath,
+  currentRustAnalysisCommit,
+  decideRustLegsForPush,
   type PathsBetween,
   readRustAnalyzedCommits,
   resolveRustCoverage,
@@ -194,5 +196,132 @@ describe('resolveRustCoverage', () => {
   test('both sides of a path list are judged by the CodeQL Rust pattern', () => {
     const diff = new FakeTreeDiff({ [sha('1')]: ['docs/old.md', 'crates/x/old.rs'] });
     expect(resolveRustCoverage(HEAD, [sha('1')], diff.pathsBetween).covered).toBe(false);
+  });
+});
+
+describe('decideRustLegsForPush', () => {
+  const analyzedPage = bothLegs(sha('1'), '2026-11-20T10:00:00Z');
+  const input = (diff: FakeTreeDiff, fetchPage: () => unknown = () => analyzedPage) => ({
+    head: HEAD,
+    repository: 'owner/repo',
+    fetchPage,
+    pathsBetween: diff.pathsBetween,
+  });
+
+  test('skips the Rust legs when the head is covered', () => {
+    const decision = decideRustLegsForPush(input(new FakeTreeDiff({ [sha('1')]: ['docs/a.md'] })));
+    expect(decision.rust).toBe(false);
+    expect(decision.reason).toContain(sha('1'));
+  });
+
+  test('runs the Rust legs when a Rust path changed since the last analysis', () => {
+    const decision = decideRustLegsForPush(input(new FakeTreeDiff({ [sha('1')]: ['Cargo.lock'] })));
+    expect(decision.rust).toBe(true);
+  });
+
+  test('runs the Rust legs when no analysis exists yet', () => {
+    expect(decideRustLegsForPush(input(new FakeTreeDiff({}), () => [])).rust).toBe(true);
+  });
+
+  test('runs the Rust legs and names the failure when the analyses read fails', () => {
+    const decision = decideRustLegsForPush(
+      input(new FakeTreeDiff({}), () => {
+        throw new Error('HTTP 502');
+      })
+    );
+    expect(decision).toEqual({
+      rust: true,
+      reason: 'coverage lookup failed, analyzing Rust: HTTP 502',
+    });
+  });
+
+  test('runs the Rust legs when the diff provider throws', () => {
+    const decision = decideRustLegsForPush({
+      ...input(new FakeTreeDiff({})),
+      pathsBetween: () => {
+        throw new Error('changed-paths: invalid repository-relative path: "/etc"');
+      },
+    });
+    expect(decision.rust).toBe(true);
+    expect(decision.reason).toContain('invalid repository-relative path');
+  });
+});
+
+describe('currentRustAnalysisCommit', () => {
+  test('is the commit holding the newest analysis of both categories', () => {
+    const analyses = [
+      ...bothLegs(sha('2'), '2026-11-22T10:00:00Z'),
+      ...bothLegs(sha('1'), '2026-11-20T10:00:00Z'),
+    ];
+    expect(currentRustAnalysisCommit(analyses)).toBe(sha('2'));
+  });
+
+  test('is undefined when a newer single-category analysis sits on another commit', () => {
+    const analyses = [
+      analysis(sha('3'), '/language:rust/windows', '2026-11-23T10:00:00Z'),
+      ...bothLegs(sha('2'), '2026-11-22T10:00:00Z'),
+    ];
+    expect(currentRustAnalysisCommit(analyses)).toBeUndefined();
+  });
+
+  test('is undefined when a category has no analysis', () => {
+    expect(currentRustAnalysisCommit([])).toBeUndefined();
+    expect(
+      currentRustAnalysisCommit([analysis(sha('1'), '/language:rust', '2026-11-20T10:00:00Z')])
+    ).toBeUndefined();
+  });
+
+  test('is undefined when two commits tie for the newest analysis of a category', () => {
+    const analyses = [
+      ...bothLegs(sha('1'), '2026-11-22T10:00:00Z'),
+      analysis(sha('2'), '/language:rust', '2026-11-22T10:00:00Z'),
+    ];
+    expect(currentRustAnalysisCommit(analyses)).toBeUndefined();
+  });
+
+  test('an errored newer analysis does not move the baseline', () => {
+    const analyses = [
+      ...bothLegs(sha('2'), '2026-11-23T10:00:00Z', { error: 'upload failed' }),
+      ...bothLegs(sha('1'), '2026-11-20T10:00:00Z'),
+    ];
+    expect(currentRustAnalysisCommit(analyses)).toBe(sha('1'));
+  });
+});
+
+describe('decideRustLegsForPush keeps alerts current', () => {
+  const pages = (analyses: unknown[]) => () => analyses;
+
+  test('a revert of an analyzed Rust change is analyzed, not matched to the older analysis', () => {
+    // R1 was analyzed, R2 changed Rust and was analyzed, HEAD reverts to R1's Rust state.
+    // The older analysis matches HEAD, but code scanning holds R2's results as main's
+    // state, so skipping would leave R2's alerts on the Security tab until the weekly run.
+    const diff = new FakeTreeDiff({ [sha('1')]: [], [sha('2')]: ['crates/a/src/lib.rs'] });
+    const decision = decideRustLegsForPush({
+      head: HEAD,
+      repository: 'owner/repo',
+      fetchPage: pages([
+        ...bothLegs(sha('2'), '2026-11-22T10:00:00Z'),
+        ...bothLegs(sha('1'), '2026-11-20T10:00:00Z'),
+      ]),
+      pathsBetween: diff.pathsBetween,
+    });
+    expect(decision.rust).toBe(true);
+    expect(diff.asked).toEqual([sha('2')]);
+  });
+
+  test('a newer single-category analysis on another commit forces analysis', () => {
+    const diff = new FakeTreeDiff({ [sha('2')]: ['docs/a.md'] });
+    const decision = decideRustLegsForPush({
+      head: HEAD,
+      repository: 'owner/repo',
+      fetchPage: pages([
+        analysis(sha('3'), '/language:rust/windows', '2026-11-23T10:00:00Z'),
+        ...bothLegs(sha('2'), '2026-11-22T10:00:00Z'),
+      ]),
+      pathsBetween: diff.pathsBetween,
+    });
+    expect(decision.rust).toBe(true);
+    expect(decision.reason).toContain('do not sit on one commit');
+    expect(diff.asked).toEqual([]);
   });
 });

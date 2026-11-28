@@ -105,12 +105,32 @@ describe('security workflows', () => {
     expect(blocks['analyze-rust']).toContain("if: needs.changes.outputs.rust == 'true'");
     expect(blocks['analyze-rust']).not.toContain('language: javascript-typescript');
 
-    // Every event that is not a pull request analyzes all legs: main is the
-    // baseline, and Canary qualification requires the three analyses there.
+    // A push skips the Rust legs only through the coverage rule, which compares
+    // with the last analyzed commit (never the push's parent) and analyzes when it
+    // cannot decide. Canary recomputes the rule before accepting a skipped SHA.
+    expect(blocks.changes).toContain(
+      'if [ "$EVENT_NAME" = "push" ]; then\n            if ! bun ./scripts/ci/codeql-rust-coverage.ts push >> "$GITHUB_OUTPUT"; then\n              echo "rust=true" >> "$GITHUB_OUTPUT"\n            fi\n            exit 0\n          fi'
+    );
+    // The schedule and manual runs analyze every leg: that bounds the age of main's
+    // newest Rust analysis, which is what the push rule and Canary rely on.
     expect(blocks.changes).toContain(
       'if [ "$EVENT_NAME" != "pull_request" ]; then\n            echo "rust=true" >> "$GITHUB_OUTPUT"'
     );
     expect(blocks.changes).toContain('bun ./scripts/ci/changed-paths.ts codeql');
+    // Listing analyses needs this read grant; the job-level block replaces the workflow's.
+    expect(blocks.changes).toMatch(/^ {6}security-events: read #/m);
+    expect(blocks.changes).toMatch(/^ {6}contents: read #/m);
+    expect(blocks.changes).toContain('fetch-depth: 0');
+    expect(blocks.changes).toContain('GH_TOKEN: $' + '{{ github.token }}');
+  });
+
+  test('a push never runs the Rust legs on a bare path filter or against the parent commit', () => {
+    const workflow = readText('.github/workflows/codeql.yml');
+    const triggers = extractOnBlock(workflow);
+    // A paths filter compares the push's own range, so a cancelled Rust run would be lost.
+    expect(triggers).not.toContain('paths');
+    expect(workflow).not.toContain('github.event.before');
+    expect(workflow).not.toContain('HEAD^');
   });
 
   test('dependency review is a PR-only vulnerability gate with no license policy', () => {
