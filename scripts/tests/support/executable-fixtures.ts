@@ -54,6 +54,62 @@ export function fakeMachO(arch: Arch): Uint8Array {
 }
 
 /**
+ * A 64-bit Mach-O with one `LC_CODE_SIGNATURE` command pointing at a code signature whose
+ * `CodeDirectory` names `identifier`, laid out as Apple's tools write it (big-endian blobs after
+ * the load commands). With `unsigned`, the same header without the command.
+ *
+ * @example
+ * fakeSignedMachO('arm64', 'mangostudio_runtime-3f9a1c0d2b7e4a55');
+ */
+export function fakeSignedMachO(
+  arch: Arch,
+  identifier: string,
+  options: { unsigned?: boolean } = {}
+): Uint8Array {
+  const commandOffset = 32;
+  const commandSize = 16;
+  const signatureOffset = 128;
+  const directoryOffset = 12 + 8; // SuperBlob header, then one index entry
+  const identifierOffset = 44;
+  const encoded = new TextEncoder().encode(identifier);
+  const signatureSize = directoryOffset + identifierOffset + encoded.length + 1;
+  const bytes = new Uint8Array(signatureOffset + signatureSize);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, 0xfeed_facf, true);
+  view.setUint32(4, MACHO_CPU[arch], true);
+  if (options.unsigned) return bytes;
+  view.setUint32(16, 1, true);
+  view.setUint32(20, commandSize, true);
+  view.setUint32(commandOffset, 0x1d, true);
+  view.setUint32(commandOffset + 4, commandSize, true);
+  view.setUint32(commandOffset + 8, signatureOffset, true);
+  view.setUint32(commandOffset + 12, signatureSize, true);
+  view.setUint32(signatureOffset, 0xfade_0cc0, false);
+  view.setUint32(signatureOffset + 4, signatureSize, false);
+  view.setUint32(signatureOffset + 8, 1, false);
+  view.setUint32(signatureOffset + 16, directoryOffset, false);
+  const directory = signatureOffset + directoryOffset;
+  view.setUint32(directory, 0xfade_0c02, false);
+  view.setUint32(directory + 20, identifierOffset, false);
+  bytes.set(encoded, directory + identifierOffset);
+  return bytes;
+}
+
+/**
+ * `bytes` followed by `tail`: a fixture binary with extra data (such as a release stamp slot)
+ * after its headers.
+ *
+ * @example
+ * withTail(fakeElf({ arch: 'x64', interpreter: null }), slotBytes);
+ */
+export function withTail(bytes: Uint8Array, tail: Uint8Array): Uint8Array {
+  const joined = new Uint8Array(bytes.length + tail.length);
+  joined.set(bytes, 0);
+  joined.set(tail, bytes.length);
+  return joined;
+}
+
+/**
  * A PE32+ (or, with `pe32`, a 32-bit PE32) header for one CPU. `imports` and
  * `delayImports` become one `.idata`-style section holding the import and
  * delay-import descriptor tables and their DLL names, laid out as a linker
@@ -64,7 +120,13 @@ export function fakeMachO(arch: Arch): Uint8Array {
  */
 export function fakePe(
   arch: Arch,
-  options: { pe32?: boolean; imports?: readonly string[]; delayImports?: readonly string[] } = {}
+  options: {
+    pe32?: boolean;
+    imports?: readonly string[];
+    delayImports?: readonly string[];
+    /** The optional header's `CheckSum`; MSVC writes 0. */
+    checkSum?: number;
+  } = {}
 ): Uint8Array {
   const imports = options.imports ?? [];
   const delayImports = options.delayImports ?? [];
@@ -95,6 +157,7 @@ export function fakePe(
   view.setUint16(peOffset + 6, 1, true);
   view.setUint16(peOffset + 20, optionalSize, true);
   view.setUint16(optionalOffset, options.pe32 ? 0x10b : 0x20b, true);
+  view.setUint32(optionalOffset + 64, options.checkSum ?? 0, true);
   view.setUint32(optionalOffset + 108, 16, true);
   if (imports.length > 0)
     view.setUint32(optionalOffset + 112 + 1 * 8, sectionRva + importTable, true);
