@@ -941,6 +941,35 @@ mod windows_tests {
         include_str!("../../tests/fixtures/windows-service-process-lifetimes.probe.ps1");
     const PROCESS_CHILD_DISCOVERY_PROBE: &str =
         include_str!("../../tests/fixtures/windows-service-child-discovery.probe.ps1");
+    // Failure reports for the fixtures (#2737). Dot-sourced, never inlined: the tree test's
+    // inlined script is within a few hundred characters of the 32,767-character encoded
+    // argv limit, and adding these to it failed with os error 206.
+    const STALL_REPORT_HELPERS: &str =
+        include_str!("../../tests/fixtures/windows-service-stall-report.ps1");
+
+    /// Writes the lifetime helpers and the stall reports to a scratch directory and
+    /// returns the script lines that load them, after the progress preamble. The scratch
+    /// directory is returned too: it is removed when the caller drops it.
+    fn dot_sourced_report_fixtures(label: &str) -> (crate::test_support::ScratchDir, Vec<String>) {
+        let fixture = scratch_dir(label);
+        let helpers = fixture.join("lifetimes.ps1");
+        let reports = fixture.join("stall-report.ps1");
+        std::fs::write(&helpers, PROCESS_LIFETIME_HELPERS)
+            .expect("write the lifetime helper fixture");
+        std::fs::write(&reports, STALL_REPORT_HELPERS).expect("write the stall report fixture");
+        let lines = vec![
+            FIXTURE_SCRIPT_PREAMBLE.to_owned(),
+            format!(
+                ". {}",
+                super::scheduled_task::ps_quote(&helpers.to_string_lossy())
+            ),
+            format!(
+                ". {}",
+                super::scheduled_task::ps_quote(&reports.to_string_lossy())
+            ),
+        ];
+        (fixture, lines)
+    }
 
     /// Hang guard for one real PowerShell fixture script, not a product budget.
     /// Production keeps `MANAGER_TIMEOUT` (30 s) because an operator waits on
@@ -1217,15 +1246,18 @@ mod windows_tests {
         let helpers = fixture.join("lifetimes.ps1");
         let assertions = fixture.join("lifetimes.probe.ps1");
         let probe = fixture.join("children.probe.ps1");
+        let reports = fixture.join("stall-report.ps1");
         std::fs::write(&helpers, PROCESS_LIFETIME_HELPERS)
             .expect("write the lifetime helper fixture");
+        std::fs::write(&reports, STALL_REPORT_HELPERS).expect("write the stall report fixture");
         std::fs::write(&assertions, PROCESS_LIFETIME_PROBE)
             .expect("write the existing fixture assertions");
         std::fs::write(&probe, PROCESS_CHILD_DISCOVERY_PROBE)
             .expect("write the named child discovery fixtures");
         let script = format!(
-            ". {}\n. {}\n. {}\nInvoke-ServiceChildDiscoveryProbe | ConvertTo-Json -Compress -Depth 5",
+            ". {}\n. {}\n. {}\n. {}\nInvoke-ServiceChildDiscoveryProbe | ConvertTo-Json -Compress -Depth 5",
             super::scheduled_task::ps_quote(&helpers.to_string_lossy()),
+            super::scheduled_task::ps_quote(&reports.to_string_lossy()),
             super::scheduled_task::ps_quote(&assertions.to_string_lossy()),
             super::scheduled_task::ps_quote(&probe.to_string_lossy()),
         );
@@ -1254,10 +1286,11 @@ mod windows_tests {
                 "invalid-parent-reference-shape-fails",
                 "duplicate-query-rows-fail",
                 "self-parent-query-row-fails",
+                "stall-report-names-the-wait-and-its-processes",
             ]),
             "expected all named child discovery cases | received: {report}"
         );
-        assert_eq!(report["count"], 12, "received: {report}");
+        assert_eq!(report["count"], 13, "received: {report}");
         assert_eq!(report["native"], false, "received: {report}");
         assert_eq!(
             report["capturedProcessIds"],
@@ -1286,22 +1319,37 @@ mod windows_tests {
         let mut runner = WindowsFixture::spawn(&request).expect("the owned stand-in runner starts");
         let pid = runner.id();
         // One literal per line: `spawn_boundary`'s brace scanner reads line by line.
-        let script = [
-            FIXTURE_SCRIPT_PREAMBLE.to_owned(),
-            PROCESS_LIFETIME_HELPERS.to_owned(),
+        let (_fixture, mut script_lines) = dot_sourced_report_fixtures("win-service-runner-tree");
+        script_lines.extend([
             format!("$runners = @(Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\" -ErrorAction Stop)"),
             format!("if ($runners.Count -ne 1) {{ throw ('expected one owned runner CIM row for PID {pid} | received: ' + $runners.Count) }}"),
             "$deadline = (Get-Date).AddSeconds(20)".to_owned(),
+            // The clock and poll counters let a stall name where its time went (#2737):
+            // 20.8 s on windows-11-arm fit both "the children never appeared" and
+            // "they appeared late and the shared deadline cut the cleanup wait".
+            "$clock = [Diagnostics.Stopwatch]::StartNew(); $polls = 0; $slowestPollMs = 0".to_owned(),
             "$shell = @(); $leaf = @(); $ready = $false".to_owned(),
-            "while ((-not $ready) -and ((Get-Date) -lt $deadline)) { $shell = @(Find-ServiceTestChildren $runners[0]); $leaf = @($shell | ForEach-Object { Find-ServiceTestChildren $_ }); $cmdIds = @($shell | Where-Object { $_.Name -eq 'cmd.exe' } | ForEach-Object { $_.ProcessId }); $ready = @($leaf | Where-Object { ($_.Name -eq 'PING.EXE') -and ($cmdIds -contains $_.ParentProcessId) }).Count -gt 0; Start-Sleep -Milliseconds 100 }".to_owned(),
-            "if (-not $ready) { throw 'the stand-in runner never started cmd.exe and its child' }".to_owned(),
+            "while ((-not $ready) -and ((Get-Date) -lt $deadline)) { $pollStartedMs = $clock.ElapsedMilliseconds; $shell = @(Find-ServiceTestChildren $runners[0]); $leaf = @($shell | ForEach-Object { Find-ServiceTestChildren $_ }); $cmdIds = @($shell | Where-Object { $_.Name -eq 'cmd.exe' } | ForEach-Object { $_.ProcessId }); $ready = @($leaf | Where-Object { ($_.Name -eq 'PING.EXE') -and ($cmdIds -contains $_.ParentProcessId) }).Count -gt 0; $polls++; $slowestPollMs = [Math]::Max($slowestPollMs, $clock.ElapsedMilliseconds - $pollStartedMs); Start-Sleep -Milliseconds 100 }".to_owned(),
+            format!("if (-not $ready) {{ $sample = Get-ServiceTestStallSample {pid}; throw (Format-ServiceTestStall 'expected the stand-in runner to start cmd.exe and its child' $clock.ElapsedMilliseconds $polls $slowestPollMs $sample.CpuLoadPercent $sample.Processes) }}"),
+            "$discoveryMs = $clock.ElapsedMilliseconds".to_owned(),
             "$serviceTestCaptured = @(Capture-ServiceTestIdentities (@($runners) + @($shell) + @($leaf)))".to_owned(),
             format!("Stop-Process -Id {pid} -Force"),
             "Start-Sleep -Milliseconds 300".to_owned(),
+            // The 2026-11-28 failure was "cmd.exe and PING.EXE still running after the task
+            // stopped", raised by the cleanup wait at 20.77 s. Two causes fit it. Discovery
+            // finished late and left that wait the tail of the one 20 s `$deadline` (the
+            // wait breaks as soon as the deadline has passed, so no grace remained). Or the
+            // kill really did not land for 20 s. `terminate_runner_tree` discards
+            // `Stop-Process` errors, so it cannot say which. Give the cleanup its own
+            // deadline, as a verb script does from launch, and on failure report both
+            // phase times plus each survivor's state with a retried kill's error kept.
+            "$deadline = (Get-Date).AddSeconds(20)".to_owned(),
+            "try {".to_owned(),
             super::scheduled_task::terminate_runner_tree().to_owned(),
+            "} catch { throw ($_.Exception.Message + ' | discovery took ' + $discoveryMs + ' ms, cleanup ' + ($clock.ElapsedMilliseconds - $discoveryMs) + ' ms; survivors: ' + (Get-ServiceTestSurvivorReport @($alive))) }".to_owned(),
             "Get-ServiceTestReceipt $serviceTestCaptured | ConvertTo-Json -Compress -Depth 5".to_owned(),
-        ]
-        .join("\n");
+        ]);
+        let script = script_lines.join("\n");
         inspect_then_cleanup(&mut runner, |runner| {
             runner.start()?;
             let (ok, output) = ProcessExec.run(&script, FIXTURE_SCRIPT_TIMEOUT)?;
@@ -1315,6 +1363,94 @@ mod windows_tests {
         .unwrap_or_else(|error| {
             panic!("expected runner {pid} and all captured descendants stopped | received: {error}")
         });
+    }
+
+    /// The sample a stalled poll attaches to its failure (#2737) must see the
+    /// process it was asked about and read the CPU load; otherwise the report
+    /// would say "none" about a runner that is alive.
+    #[test]
+    fn a_stall_sample_names_the_runner_process_and_reads_the_cpu_load() {
+        use super::windows::ProcessExec;
+
+        let (_fixture, mut script_lines) = dot_sourced_report_fixtures("win-service-stall-sample");
+        script_lines.extend([
+            // The script's own PowerShell is the "runner": a process certain to exist.
+            "$sample = Get-ServiceTestStallSample $PID".to_owned(),
+            "[pscustomobject]@{ pid = $PID; sampled = @($sample.Processes | ForEach-Object { $_.ProcessId }); load = $sample.CpuLoadPercent; report = (Format-ServiceTestStall 'expected X' 1 1 1 $sample.CpuLoadPercent $sample.Processes) } | ConvertTo-Json -Compress -Depth 4".to_owned(),
+        ]);
+        let script = script_lines.join("\n");
+        let (ok, output) = ProcessExec
+            .run(&script, FIXTURE_SCRIPT_TIMEOUT)
+            .expect("PowerShell runs the stall sample");
+        assert!(ok, "expected the stall sample to run | received: {output}");
+        let report: Value = serde_json::from_str(&output).unwrap_or_else(|error| {
+            panic!("expected a stall sample JSON report | received: {output:?}: {error}")
+        });
+        let pid = report["pid"].as_u64().expect("the script reports its pid");
+        let sampled = match &report["sampled"] {
+            Value::Array(ids) => ids.iter().filter_map(Value::as_u64).collect::<Vec<_>>(),
+            // ConvertTo-Json unwraps a one-element array into a bare number.
+            single => single.as_u64().into_iter().collect(),
+        };
+        assert!(
+            sampled.contains(&pid),
+            "expected the sample to list the queried process {pid} | received: {report}"
+        );
+        // Some virtualised hosts report no LoadPercentage; the report then prints "unknown".
+        assert!(
+            report["load"].is_number() || report["load"].is_null(),
+            "expected a CPU load percentage or null | received: {report}"
+        );
+        let text = report["report"].as_str().unwrap_or_default();
+        assert!(
+            text.contains(&format!("{pid}<-")),
+            "expected the report to name process {pid} with its parent | received: {text}"
+        );
+    }
+
+    /// The survivor report a failed cleanup attaches (#2737) must name each
+    /// listed process, report what the retried kill said, and print `none`
+    /// for an empty list instead of throwing on the empty pipeline.
+    #[test]
+    fn a_survivor_report_names_each_process_and_its_retried_kill() {
+        use super::windows::ProcessExec;
+
+        let (_fixture, mut script_lines) =
+            dot_sourced_report_fixtures("win-service-survivor-report");
+        script_lines.extend([
+            "$sleeper = Start-Process -FilePath ping.exe -ArgumentList '-n','60','127.0.0.1' -PassThru -WindowStyle Hidden".to_owned(),
+            "$row = Get-CimInstance Win32_Process -Filter \"ProcessId = $($sleeper.Id)\" -ErrorAction Stop".to_owned(),
+            "[pscustomobject]@{ pid = $sleeper.Id; report = (Get-ServiceTestSurvivorReport @($row)); empty = (Get-ServiceTestSurvivorReport @()); gone = (Get-ServiceTestSurvivorReport @($row)) } | ConvertTo-Json -Compress -Depth 4".to_owned(),
+        ]);
+        let script = script_lines.join("\n");
+        let (ok, output) = ProcessExec
+            .run(&script, FIXTURE_SCRIPT_TIMEOUT)
+            .expect("PowerShell runs the survivor report");
+        assert!(
+            ok,
+            "expected the survivor report to run | received: {output}"
+        );
+        let report: Value = serde_json::from_str(&output).unwrap_or_else(|error| {
+            panic!("expected a survivor report JSON | received: {output:?}: {error}")
+        });
+        let pid = report["pid"].as_u64().expect("the script reports its pid");
+        let text = report["report"].as_str().unwrap_or_default();
+        assert!(
+            text.starts_with(&format!("{pid} PING.EXE exited=False"))
+                && text.ends_with("retry=stop accepted"),
+            "expected '{pid} PING.EXE exited=False handles=<n> retry=stop accepted' | received: {text}"
+        );
+        assert_eq!(
+            report["empty"], "none",
+            "expected an empty survivor list to read 'none' | received: {report}"
+        );
+        // The second report runs after the first one's kill: the process is gone, and the
+        // retry must carry Stop-Process's own error instead of raising out of the report.
+        let gone = report["gone"].as_str().unwrap_or_default();
+        assert!(
+            gone.contains(&format!("{pid} PING.EXE")) && gone.contains("retry="),
+            "expected a report line for the already-ended {pid} with its retry result | received: {gone}"
+        );
     }
 
     /// A runtime started by hand through the shim, with no task run behind
