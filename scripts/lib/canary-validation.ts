@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 
-import { rustCoverageFromGitHub } from './canary-codeql-coverage';
+import { rustCoverageFromGitHub, workflowCoverageFromGitHub } from './canary-lane-coverage';
+import type { CoverageRule } from './codeql-rust-coverage';
 import { touchesProtocolSurface } from './protocol';
 import { classifyChangedPaths } from './rust-lanes';
 import { requireJsonRecord, requirePositiveSafeInteger } from './script-guards';
@@ -53,6 +54,22 @@ export interface CanaryValidationReceipt {
     readonly analyzed: boolean;
     readonly reason: string;
   };
+  /**
+   * How Cargo Shim and Protocol CI cover the source. Absent in receipts written
+   * before a skipped lane had to be covered by an earlier main run; those
+   * judged each lane by the source's own push range alone.
+   */
+  readonly laneCoverage?: {
+    readonly cargo: LaneCoverageReceipt;
+    readonly protocol: LaneCoverageReceipt;
+  };
+}
+
+/** Whether a path-filtered lane ran on the source or an earlier main run covers it. */
+interface LaneCoverageReceipt {
+  /** True when the lane's own run on the source SHA succeeded. */
+  readonly ranOnSource: boolean;
+  readonly reason: string;
 }
 
 function validateRun(
@@ -151,8 +168,22 @@ function requireJobs(
 }
 
 const CODEQL_RUST_JOBS = ['Analyze (rust)', 'Analyze (rust, windows)'] as const;
+
+/** The Actions run that proves a lane's jobs ran on a candidate commit. */
+interface EvidenceLane {
+  readonly workflow: string;
+  /** Jobs of the latest attempt that must all have succeeded. */
+  readonly jobs: readonly string[];
+  /** Events whose run may stand in for the lane on a commit. */
+  readonly events: readonly string[];
+}
+
 // A covering analysis may come from any codeql.yml run on main that analyzes every leg.
-const CODEQL_COVERING_EVENTS = ['push', 'schedule', 'workflow_dispatch'];
+const CODEQL_RUST_EVIDENCE: EvidenceLane = {
+  workflow: 'codeql.yml',
+  jobs: CODEQL_RUST_JOBS,
+  events: ['push', 'schedule', 'workflow_dispatch'],
+};
 
 function matchesQualificationBytes(
   api: CanaryValidationApi,
@@ -172,33 +203,45 @@ function matchesQualificationBytes(
   );
 }
 
+/** "A or B", "A, B or C" for an event list; the single event itself otherwise. */
+function listWith(conjunction: 'and' | 'or', names: readonly string[]): string {
+  return names.length < 2
+    ? names.join('')
+    : `${names.slice(0, -1).join(', ')} ${conjunction} ${names[names.length - 1]}`;
+}
+
 /**
- * Actions proof that a candidate commit's CodeQL Rust legs ran: a completed
- * codeql.yml run on main in this repository for that exact SHA whose latest
- * attempt has both Rust jobs successful, from a workflow file with the
- * qualification revision's bytes. Code scanning rows cannot stand in for it,
- * since an uploader picks their ref, commit and category. Returns undefined when
- * the proof holds, else the missing evidence.
+ * Actions proof that a candidate commit's lane ran: a completed run of the lane's
+ * workflow on main in this repository for that exact SHA, from one of the lane's
+ * events, whose latest attempt has every lane job successful, from a workflow
+ * file with the qualification revision's bytes. Nominating rows (code scanning
+ * analyses, run listings) cannot stand in for it: an uploader picks a SARIF's
+ * ref, commit and category, and a listing row says nothing about jobs. Returns
+ * undefined when the proof holds, else the missing evidence.
  */
-function missingRustJobEvidence(
+function missingLaneJobEvidence(
   api: CanaryValidationApi,
   repository: string,
-  candidate: string
+  candidate: string,
+  lane: EvidenceLane
 ): string | undefined {
-  const path = '.github/workflows/codeql.yml';
+  const path = `.github/workflows/${lane.workflow}`;
   if (!matchesQualificationBytes(api, repository, path, candidate)) {
     return `no Actions evidence: ${path} at ${candidate} differs from the qualification revision`;
   }
   const workflowId = requirePositiveSafeInteger(
-    requireJsonRecord(api.get(`repos/${repository}/actions/workflows/codeql.yml`), 'codeql.yml').id,
-    'codeql.yml ID'
+    requireJsonRecord(
+      api.get(`repos/${repository}/actions/workflows/${lane.workflow}`),
+      lane.workflow
+    ).id,
+    `${lane.workflow} ID`
   );
   const runs = api
     .list(
       `repos/${repository}/actions/workflows/${workflowId}/runs?branch=main&head_sha=${candidate}&per_page=100`,
       'workflow_runs'
     )
-    .map((run) => requireJsonRecord(run, 'codeql.yml candidate run'))
+    .map((run) => requireJsonRecord(run, `${lane.workflow} candidate run`))
     .filter(
       (run) =>
         run.workflow_id === workflowId &&
@@ -208,11 +251,11 @@ function missingRustJobEvidence(
           repository &&
         run.head_sha === candidate &&
         run.head_branch === 'main' &&
-        CODEQL_COVERING_EVENTS.includes(String(run.event)) &&
+        lane.events.includes(String(run.event)) &&
         run.status === 'completed'
     );
   if (runs.length === 0) {
-    return `no Actions evidence: expected a completed codeql.yml run on main for ${candidate} (push, schedule or workflow_dispatch); received none`;
+    return `no Actions evidence: expected a completed ${lane.workflow} run on main for ${candidate} (${listWith('or', lane.events)}); received none`;
   }
   const failures: string[] = [];
   for (const run of runs) {
@@ -222,15 +265,62 @@ function missingRustJobEvidence(
         repository,
         requirePositiveSafeInteger(run.id, 'candidate run ID'),
         requirePositiveSafeInteger(run.run_attempt, 'candidate run attempt'),
-        CODEQL_RUST_JOBS
+        lane.jobs
       );
       return undefined;
     } catch (error) {
       failures.push(error instanceof Error ? error.message : String(error));
     }
   }
-  return `no Actions evidence: ${CODEQL_RUST_JOBS.join(' and ')} did not both succeed in a codeql.yml run on main for ${candidate}; received ${failures.join('; ')}`;
+  const quantifier = lane.jobs.length === 1 ? '' : lane.jobs.length === 2 ? 'both ' : 'all ';
+  return `no Actions evidence: ${listWith('and', lane.jobs)} did not ${quantifier}succeed in a ${lane.workflow} run on main for ${candidate}; received ${failures.join('; ')}`;
 }
+
+/**
+ * A path-filtered lane Canary may find skipped. A skip counts only when an
+ * earlier (or later) main commit ran the lane successfully and no
+ * lane-relevant path differs between that commit and the source.
+ */
+interface SkippableLane {
+  readonly receiptKey: 'cargo' | 'protocol';
+  readonly workflow: string;
+  readonly evidence: EvidenceLane;
+  readonly rule: CoverageRule;
+}
+
+// Cargo Shim runs every lane on a push, so its Gate alone shows the workspace ran.
+const CARGO_SHIM_LANE: SkippableLane = {
+  receiptKey: 'cargo',
+  workflow: 'cargo-shim.yml',
+  evidence: { workflow: 'cargo-shim.yml', jobs: ['Cargo Shim Gate'], events: ['push'] },
+  rule: {
+    // The workflow's push path filter is generated from this same predicate.
+    relevant: (paths) => classifyChangedPaths(paths).qualification,
+    subject: 'Cargo Shim',
+    verb: 'validated',
+    noCandidates: 'no main commit has a successful Cargo Shim push run',
+    headCovered: (head) => `${head} has a successful Cargo Shim push run`,
+  },
+};
+
+// Protocol Gate goes green over a skipped compiled matrix when a push touches only
+// prose guides, so the three matrix-free jobs must have run too.
+const PROTOCOL_CI_LANE: SkippableLane = {
+  receiptKey: 'protocol',
+  workflow: 'protocol-ci.yml',
+  evidence: {
+    workflow: 'protocol-ci.yml',
+    jobs: ['Protocol Gate', 'TypeScript', 'cargo-deny', 'Schema equality and round trip'],
+    events: ['push'],
+  },
+  rule: {
+    relevant: touchesProtocolSurface,
+    subject: 'Protocol CI',
+    verb: 'validated',
+    noCandidates: 'no main commit has a successful Protocol CI push run',
+    headCovered: (head) => `${head} has a successful Protocol CI push run`,
+  },
+};
 
 /**
  * Settle the two CodeQL Rust legs of a successful codeql.yml run. Both
@@ -284,7 +374,7 @@ function settleCodeqlRust(
     );
   }
   const coverage = rustCoverageFromGitHub(api, source.repository, source.sourceSha, (candidate) =>
-    missingRustJobEvidence(api, source.repository, candidate)
+    missingLaneJobEvidence(api, source.repository, candidate, CODEQL_RUST_EVIDENCE)
   );
   if (!coverage.covered) {
     throw new Error(
@@ -292,6 +382,34 @@ function settleCodeqlRust(
     );
   }
   return { jobs: [], codeqlRust: { analyzed: false, reason: coverage.reason } };
+}
+
+/**
+ * Settle a path-filtered lane that has no run on the source. Accepted only when
+ * main's records cover the source (canary-lane-coverage.ts); the run listing
+ * nominates candidates and Actions job evidence proves each one. Everything
+ * else, a failed lookup included, rejects the source.
+ */
+function settleSkippedLane(
+  api: CanaryValidationApi,
+  source: CanaryValidationSource,
+  lane: SkippableLane,
+  workflowId: number
+): LaneCoverageReceipt {
+  const coverage = workflowCoverageFromGitHub(api, {
+    repository: source.repository,
+    sourceSha: source.sourceSha,
+    workflowId,
+    rule: lane.rule,
+    evidence: (candidate) =>
+      missingLaneJobEvidence(api, source.repository, candidate, lane.evidence),
+  });
+  if (!coverage.covered) {
+    throw new Error(
+      `${lane.workflow}: expected a covering main push run for ${source.sourceSha}; received ${coverage.reason}. The push path filter skipped the lane for this SHA, which counts only when a main commit with a successful ${listWith('and', lane.evidence.jobs)} push run differs from it in no ${lane.rule.subject}-relevant path. To recover, re-run the cancelled or failed ${lane.workflow} run of the newest ${lane.rule.subject}-relevant commit on main, then run Canary again`
+    );
+  }
+  return { ranOnSource: false, reason: coverage.reason };
 }
 
 const CI_REQUIRED_JOBS = [
@@ -491,9 +609,26 @@ export function qualifyCanarySource(
   const required = relevance(api, source);
   const siblings: CanaryValidationReceipt['siblings'][number][] = [];
   let codeqlRust: CanaryValidationReceipt['codeqlRust'];
-  for (const policy of [
-    { workflow: 'cargo-shim.yml', required: required.cargo, jobs: ['Cargo Shim Gate'] },
-    { workflow: 'protocol-ci.yml', required: required.protocol, jobs: ['Protocol Gate'] },
+  const laneCoverage: Partial<Record<SkippableLane['receiptKey'], LaneCoverageReceipt>> = {};
+  const policies: {
+    workflow: string;
+    required: boolean;
+    jobs: readonly string[];
+    /** Set for lanes whose push path filter may skip them. */
+    lane?: SkippableLane;
+  }[] = [
+    {
+      workflow: 'cargo-shim.yml',
+      required: required.cargo,
+      jobs: ['Cargo Shim Gate'],
+      lane: CARGO_SHIM_LANE,
+    },
+    {
+      workflow: 'protocol-ci.yml',
+      required: required.protocol,
+      jobs: ['Protocol Gate'],
+      lane: PROTOCOL_CI_LANE,
+    },
     {
       workflow: 'codeql.yml',
       required: true,
@@ -501,7 +636,8 @@ export function qualifyCanarySource(
       // earlier analysis (settleCodeqlRust).
       jobs: ['Analyze (javascript-typescript)'],
     },
-  ]) {
+  ];
+  for (const policy of policies) {
     const workflow = requireJsonRecord(
       api.get(`repos/${source.repository}/actions/workflows/${policy.workflow}`),
       policy.workflow
@@ -529,6 +665,18 @@ export function qualifyCanarySource(
         throw new Error(
           `${policy.workflow}: expected same-SHA main push validation; received no run (${required.reason})`
         );
+      // The push path filter judged only this push's range. A skipped lane
+      // counts when a main commit that ran it differs from the source in no
+      // relevant path; otherwise an earlier relevant commit whose own run was
+      // cancelled or failed would reach Canary without any main run of the lane.
+      if (policy.lane) {
+        laneCoverage[policy.lane.receiptKey] = settleSkippedLane(
+          api,
+          source,
+          policy.lane,
+          workflowId
+        );
+      }
       siblings.push({
         workflow: policy.workflow,
         runId: null,
@@ -542,6 +690,12 @@ export function qualifyCanarySource(
     const runId = requirePositiveSafeInteger(run.id, `${policy.workflow} run ID`);
     const attempt = requirePositiveSafeInteger(run.run_attempt, `${policy.workflow} attempt`);
     const jobs = requireJobs(api, source.repository, runId, attempt, policy.jobs);
+    if (policy.lane) {
+      laneCoverage[policy.lane.receiptKey] = {
+        ranOnSource: true,
+        reason: `${policy.lane.rule.subject} ran on ${source.sourceSha}`,
+      };
+    }
     if (policy.workflow === 'codeql.yml') {
       const rust = settleCodeqlRust(api, source, runId, attempt);
       jobs.push(...rust.jobs);
@@ -549,5 +703,19 @@ export function qualifyCanarySource(
     }
     siblings.push({ workflow: policy.workflow, runId, attempt, result: 'success', jobs });
   }
-  return { source, builderAttempt, ciJobs, siblings, relevance: required, codeqlRust };
+  const { cargo, protocol } = laneCoverage;
+  if (!cargo || !protocol) {
+    throw new Error(
+      `Cargo Shim and Protocol CI coverage: expected both lanes settled; received ${JSON.stringify(laneCoverage)}`
+    );
+  }
+  return {
+    source,
+    builderAttempt,
+    ciJobs,
+    siblings,
+    relevance: required,
+    codeqlRust,
+    laneCoverage: { cargo, protocol },
+  };
 }

@@ -5,6 +5,7 @@ import {
   CODEQL_RUST_CATEGORIES,
   CODEQL_RUST_MAX_CANDIDATES,
   codeScanningAnalysesPath,
+  type CoverageRule,
   currentRustAnalysisCommit,
   decideRustLegsForPush,
   type PathsBetween,
@@ -364,5 +365,44 @@ describe('resolveRustCoverage evidence hook', () => {
       return undefined;
     });
     expect(asked).toEqual([]);
+  });
+});
+
+describe('resolveRustCoverage with another lane rule', () => {
+  const lane: CoverageRule = {
+    relevant: (paths) => paths.some((path) => path.startsWith('lane/')),
+    subject: 'Lane',
+    verb: 'validated',
+    noCandidates: 'no commit ran the lane',
+    headCovered: (head) => `${head} ran the lane`,
+  };
+
+  test('the rule decides relevance, so a path CodeQL ignores can force a rerun', () => {
+    // lane/x.ts matches no CodeQL Rust pattern, so only the lane's own rule makes it relevant.
+    const diff = new FakeTreeDiff({ [sha('1')]: ['lane/x.ts'] });
+    expect(resolveRustCoverage(HEAD, [sha('1')], diff.pathsBetween)).toMatchObject({
+      covered: true,
+    });
+    expect(resolveRustCoverage(HEAD, [sha('1')], diff.pathsBetween, undefined, lane)).toEqual({
+      covered: false,
+      reason: `no candidate covers ${HEAD}: ${sha('1')} (Lane-relevant change)`,
+    });
+  });
+
+  test('reasons use the rule wording', () => {
+    const diff = new FakeTreeDiff({ [sha('1')]: ['docs/a.md'] });
+    expect(resolveRustCoverage(HEAD, [], diff.pathsBetween, undefined, lane)).toEqual({
+      covered: false,
+      reason: 'no commit ran the lane',
+    });
+    expect(resolveRustCoverage(HEAD, [sha('1')], diff.pathsBetween, undefined, lane)).toEqual({
+      covered: true,
+      base: sha('1'),
+      reason: `no Lane-relevant path differs between validated ${sha('1')} and ${HEAD}`,
+    });
+    expect(resolveRustCoverage(HEAD, [HEAD], diff.pathsBetween, undefined, lane)).toMatchObject({
+      covered: true,
+      reason: `${HEAD} ran the lane`,
+    });
   });
 });

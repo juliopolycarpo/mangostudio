@@ -1,6 +1,7 @@
 // Decides whether an earlier CodeQL Rust analysis on main still covers a commit.
 // codeql.yml uses it to skip the Rust legs on a push, and the Canary qualifier
-// uses the same rule to accept a SHA whose Rust legs were skipped.
+// uses the same rule to accept a SHA whose Rust legs were skipped. Canary also
+// reuses the procedure for Cargo Shim and Protocol CI through a CoverageRule.
 //
 // The rule works on trees, not on the push's parent. Main runs are cancelled
 // when superseded, so a parent can have no Rust analysis even though it holds
@@ -220,6 +221,33 @@ export function decideRustLegsForPush(input: {
 export type CandidateEvidence = (candidate: string) => string | undefined;
 
 /**
+ * What a lane counts as a change worth rerunning, and how its coverage reasons
+ * read. The decision procedure is shared; each lane brings its own predicate.
+ * Canary uses the same rule for Cargo Shim and Protocol CI (canary-validation.ts).
+ */
+export interface CoverageRule {
+  /** Whether a non-empty list of changed paths can change the lane's verdict. */
+  readonly relevant: (paths: readonly string[]) => boolean;
+  /** Names the lane in "<subject>-relevant change". */
+  readonly subject: string;
+  /** Past participle of what a candidate did: "analyzed" or "validated". */
+  readonly verb: string;
+  /** Reason given when the candidate list is empty. */
+  readonly noCandidates: string;
+  /** Reason given when the head is itself a candidate. */
+  readonly headCovered: (head: string) => string;
+}
+
+/** The CodeQL Rust legs' rule: `codeql.yml` and Canary both decide with it. */
+export const CODEQL_RUST_RULE: CoverageRule = {
+  relevant: codeqlRustRelevant,
+  subject: 'Rust',
+  verb: 'analyzed',
+  noCandidates: 'no main commit has an error-free analysis in both Rust categories',
+  headCovered: (head) => `${head} has both Rust analyses`,
+};
+
+/**
  * Apply the coverage rule to `head` against newest-first candidate commits.
  * With `evidence`, a candidate that passes the path check still counts only if
  * the evidence holds for it; the rows that nominated it are never the proof.
@@ -230,13 +258,11 @@ export function resolveRustCoverage(
   head: string,
   candidates: readonly string[],
   pathsBetween: PathsBetween,
-  evidence?: CandidateEvidence
+  evidence?: CandidateEvidence,
+  rule: CoverageRule = CODEQL_RUST_RULE
 ): RustCoverage {
   if (candidates.length === 0) {
-    return {
-      covered: false,
-      reason: 'no main commit has an error-free analysis in both Rust categories',
-    };
+    return { covered: false, reason: rule.noCandidates };
   }
   const tried: string[] = [];
   for (const base of candidates.slice(0, CODEQL_RUST_MAX_CANDIDATES)) {
@@ -245,8 +271,8 @@ export function resolveRustCoverage(
       tried.push(`${base} (difference unproven)`);
       continue;
     }
-    if (paths.length > 0 && codeqlRustRelevant(paths)) {
-      tried.push(`${base} (Rust-relevant change)`);
+    if (paths.length > 0 && rule.relevant(paths)) {
+      tried.push(`${base} (${rule.subject}-relevant change)`);
       continue;
     }
     // The path check passed; the candidate still needs independent proof.
@@ -260,8 +286,8 @@ export function resolveRustCoverage(
       base,
       reason:
         base === head
-          ? `${head} has both Rust analyses`
-          : `no Rust-relevant path differs between analyzed ${base} and ${head}`,
+          ? rule.headCovered(head)
+          : `no ${rule.subject}-relevant path differs between ${rule.verb} ${base} and ${head}`,
     };
   }
   return { covered: false, reason: `no candidate covers ${head}: ${tried.join(', ')}` };
