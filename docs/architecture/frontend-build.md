@@ -209,7 +209,10 @@ Use `bun run build` or `bun run build:turbo` for cached builds. Both run the sou
 guard before Turbo lookup and park the previous frontend outputs before restoring a cacheable build.
 `build:turbo` uses Turbo's dry-run task plan to detect whether the frontend is selected and forwards
 the original build arguments. Explicit inputs cover ignored/untracked sources and repository ignore
-controls. A normal checkout with hashable controls remains cacheable. A linked-worktree `.git`
+controls. The `.git` directory itself is not a Turbo input: Turbo hashes every file under a
+directory input, so the index, refs and logs would change the task hash on every `git status` or
+`git fetch`. `.git/info/exclude` stays an input, and the marker's kind decides cacheability as
+described next. A normal checkout with hashable controls remains cacheable. A linked-worktree `.git`
 pointer, absent repository marker or present inherited ignore control outside the repository
 disables both cache providers for the invocation and marks the stamp non-reusable. Such a dev
 checkout rebuilds on every API boot. Outside-control absence is recorded, so creating one also

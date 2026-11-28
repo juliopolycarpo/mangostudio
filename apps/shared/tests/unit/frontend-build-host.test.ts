@@ -324,6 +324,30 @@ describe('frontend Turbo prelookup policy', () => {
     expect(frontendBuildCacheArguments(repository)).toEqual([]);
     expect(tailwindInputsAreCurrent(repository, uncacheable)).toBe(false);
   });
+  test('keeps the .git directory out of the Turbo inputs but requires its exclude file', () => {
+    const f = fixture();
+    const inputs = turboInputs(f.project);
+    expect(
+      inputs.filter(
+        (input) => input === '$TURBO_ROOT$/.git' || input.startsWith('$TURBO_ROOT$/.git/')
+      ),
+      'expected only the .git exclude file among the build inputs: a directory input hashes the index, refs and logs'
+    ).toEqual(['$TURBO_ROOT$/.git/info/exclude']);
+    expect(frontendBuildCacheArguments(f.repository)).toEqual([]);
+    writeFileSync(
+      join(f.project, 'turbo.json'),
+      JSON.stringify({
+        tasks: {
+          build: {
+            inputs: inputs.filter((input) => input !== '$TURBO_ROOT$/.git/info/exclude'),
+          },
+        },
+      })
+    );
+    expect(() => frontendBuildCacheArguments(f.repository)).toThrow(
+      'expected Turbo build input $TURBO_ROOT$/.git/info/exclude declared in turbo.json'
+    );
+  });
   test('names missing root/config/control input coverage before any cache lookup', () => {
     const f = fixture();
     const inputs = turboInputs(f.project);

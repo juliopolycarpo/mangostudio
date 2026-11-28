@@ -15,7 +15,6 @@
         "$TURBO_ROOT$/apps/shared/src/frontend-build/host.ts",
         "$TURBO_ROOT$/apps/frontend/src/**",
         "$TURBO_ROOT$/apps/frontend/index.html",
-        "$TURBO_ROOT$/.git",
         "$TURBO_ROOT$/.git/info/exclude",
         "$TURBO_ROOT$/.ignore",
         "$TURBO_ROOT$/.gitignore",
