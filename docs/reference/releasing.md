@@ -402,7 +402,8 @@ stay the same. Rust toolchains remain:
   (`scripts/lib/runtime-input-digest.ts`): the tracked files of the five crates
   the runtime links (not their `tests/`, `examples/` or `benches/`),
   `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo/config.toml`, the
-  generated runtime-contract JSON and `login.json` the crates embed, the
+  root `.gitattributes` (its eol rules decide the bytes a Windows runner
+  checks out), the generated runtime-contract JSON and `login.json` the crates embed, the
   setup-zigbuild action, the cargo command, the profile, the build-related
   environment, and the `rustc`, zig and cargo-zigbuild versions the job
   observes. It uploads cargo's own output, which stamping never touches, as
@@ -410,8 +411,15 @@ stay the same. Rust toolchains remain:
   and prints the digest beside the binary's SHA-256 in the step summary, so a
   maintainer can check that two runs with one digest built one binary. Nothing
   reads the artifact yet and a failure in these steps only warns. The runner
-  image, Xcode and MSVC versions are in the receipt but not in the digest:
-  they change about weekly and the job cannot pin them.
+  image, Xcode, MSVC and C compiler versions are in the receipt but not in the
+  digest: they change about weekly and the job cannot pin them. Artifact names
+  are forgeable: anyone can compute the digest, and a pull request run, a fork's
+  included, stores artifacts in this repository under its own workflow file, so
+  the main-only `if` and the receipt's self-reported producer prove nothing. A
+  consumer must find the artifact by listing runs of this workflow's caller
+  with event push, branch main and a head repository equal to the base
+  repository, and verify that run through the Actions API, never by artifact
+  name alone.
   `runtime-input-digest-policy.unit.test.ts` fails when a crate starts reading a
   file or variable the digest does not cover. Locally, `bun
 ./scripts/ci/runtime-input-digest.ts digest --platform linux-x64-musl

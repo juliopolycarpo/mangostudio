@@ -265,8 +265,9 @@ arquivos e o layout de dois binários permanecem iguais. Os toolchains Rust são
   calcula um hash de tudo que determina o binário sem carimbo
   (`scripts/lib/runtime-input-digest.ts`): os arquivos versionados dos cinco
   crates que o runtime linka (sem `tests/`, `examples/` e `benches/`),
-  `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo/config.toml`, os
-  JSON gerados do contrato do runtime e o `login.json` que os crates embutem, a
+  `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo/config.toml`, o
+  `.gitattributes` da raiz (suas regras de fim de linha definem os bytes que um
+  runner Windows baixa), os JSON gerados do contrato do runtime e o `login.json` que os crates embutem, a
   action setup-zigbuild, o comando do cargo, o perfil, o ambiente que afeta a
   compilação e as versões de `rustc`, zig e cargo-zigbuild que o job observa. Ele
   envia a saída do próprio cargo, que o carimbo nunca toca, como
@@ -274,8 +275,15 @@ arquivos e o layout de dois binários permanecem iguais. Os toolchains Rust são
   imprime o digest ao lado do SHA-256 do binário no resumo do step, para que um
   mantenedor confira que duas execuções com o mesmo digest geraram o mesmo
   binário. Nada lê o artefato ainda e uma falha nesses steps só emite um aviso. A
-  imagem do runner, o Xcode e o MSVC ficam no recibo, não no digest: mudam quase
-  toda semana e o job não consegue fixá-los.
+  imagem do runner, o Xcode, o MSVC e o compilador C ficam no recibo, não no
+  digest: mudam quase toda semana e o job não consegue fixá-los. Nomes de
+  artefato são forjáveis: qualquer um calcula o digest, e uma execução de pull
+  request, inclusive de um fork, guarda artefatos neste repositório sob o seu
+  próprio arquivo de workflow, então o `if` só da main e o produtor
+  autodeclarado no recibo não provam nada. Quem consumir deve localizar o
+  artefato listando as execuções do chamador deste workflow com evento push,
+  branch main e repositório de origem igual ao repositório base, e verificar
+  essa execução pela API do Actions, nunca só pelo nome do artefato.
   `runtime-input-digest-policy.unit.test.ts` falha quando um crate passa a ler um
   arquivo ou variável que o digest não cobre. Localmente, `bun
 ./scripts/ci/runtime-input-digest.ts digest --platform linux-x64-musl
