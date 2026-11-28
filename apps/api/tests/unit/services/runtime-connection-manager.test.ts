@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock, setSystemTime } from 'bun:test';
+import { afterEach, describe, expect, it, jest, mock, setSystemTime } from 'bun:test';
 import * as realChildProcess from 'node:child_process';
 import { EventEmitter } from 'node:events';
 
@@ -41,6 +41,7 @@ import {
 } from '../../../src/services/runtime-client/runtime-connection-manager';
 import { RuntimeDiscoveryCache } from '../../../src/services/runtime-client/runtime-discovery-cache';
 import { insertTestChat, insertTestUser } from '../../support/factories';
+import { advanceFakeClock } from '../../support/fake-clock';
 import { useLocalConnectDeadlines } from '../../support/local-connect-deadlines';
 import { LocalRuntimeLossWatch } from '../../support/local-runtime-loss-watch';
 import { moduleMockerFor } from '../../support/mocks/module-mocks';
@@ -2690,14 +2691,26 @@ describe('RuntimeConnectionManager', () => {
       const probe = healthProbe(TEST_MANIFEST, silentHealthPeer(received));
       const manager = managerOver(probe.client, { manifestRefreshTimeoutMs: 20 });
       await manager.connect('user-1', 'devbox');
+      // Fake timers move `Date.now` with the timers, so one clock covers the staleness window
+      // and the peer's 20 ms deadline. The finally restores real timers even when an assertion fails.
+      jest.useFakeTimers();
       try {
-        setSystemTime(new Date(Date.now() + 60_000));
+        await advanceFakeClock(60_000);
         manager.refreshManifestIfStale('user-1', 'devbox');
-        await new Promise((resolve) => setTimeout(resolve, 80));
-        setSystemTime(new Date(Date.now() + 60_000));
+        // One tick before the deadline the silent read still holds the slot: no second ask.
+        await advanceFakeClock(19);
+        manager.refreshManifestIfStale('user-1', 'devbox');
+        expect(
+          received,
+          'expected no second read while the first is inside its 20ms deadline'
+        ).toEqual([20]);
+        // At the deadline the read fails and frees the slot; the failure's own backoff then has
+        // to lapse before the next stale check may ask again.
+        await advanceFakeClock(1);
+        await advanceFakeClock(60_000);
         manager.refreshManifestIfStale('user-1', 'devbox');
       } finally {
-        setSystemTime();
+        jest.useRealTimers();
       }
 
       expect(
