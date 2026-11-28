@@ -19,6 +19,27 @@ describe('rustIncludeTargets', () => {
     ).toEqual(['crates/a/data/b.bin']);
   });
 
+  test('returns POSIX repo paths for backslash inputs and CRLF text, as on a Windows checkout', () => {
+    const source = [
+      'const X: &str = include_str!(concat!(',
+      '    env!("CARGO_MANIFEST_DIR"),',
+      '    "/../../spec/a.json"',
+      '));',
+      'const Y: &[u8] = include_bytes!("../data/b.bin");',
+    ].join('\r\n');
+    expect(rustIncludeTargets('crates\\a\\src\\x.rs', 'crates\\a', source)).toEqual([
+      'spec/a.json',
+      'crates/a/data/b.bin',
+    ]);
+    expect(
+      rustIncludeTargets(
+        'crates\\a\\build.rs',
+        'crates\\a',
+        'let p = manifest.join("../../spec/c.json");\r\n'
+      )
+    ).toEqual(['spec/c.json']);
+  });
+
   test('skips generated OUT_DIR files', () => {
     const source = 'include_str!(concat!(env!("OUT_DIR"), "/catalog.json"))';
     expect(rustIncludeTargets('crates/a/src/x.rs', 'crates/a', source)).toEqual([]);

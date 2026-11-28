@@ -1,5 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname, join, normalize } from 'node:path';
+import { join, posix } from 'node:path';
+
+const toPosix = (path: string): string => path.replaceAll('\\', '/');
 
 /** Text between the parenthesis opening at `open` and its match, or undefined if unbalanced. */
 function balancedArgument(source: string, open: number): string | undefined {
@@ -21,7 +23,16 @@ function balancedArgument(source: string, open: number): string | undefined {
  * rustIncludeTargets('crates/a/src/x.rs', 'crates/a', 'include_str!("../data.json")');
  * // ['crates/a/data.json']
  */
-export function rustIncludeTargets(file: string, crateRoot: string, source: string): string[] {
+export function rustIncludeTargets(
+  nativeFile: string,
+  nativeCrateRoot: string,
+  nativeSource: string
+): string[] {
+  // Repo-relative paths are POSIX everywhere (CODEQL_RUST_PATTERN matches `/`), and a
+  // Windows checkout can hand over backslash paths and CRLF text.
+  const file = toPosix(nativeFile);
+  const crateRoot = toPosix(nativeCrateRoot);
+  const source = nativeSource.replaceAll('\r\n', '\n');
   const targets: string[] = [];
   const literals = (argument: string) =>
     [...argument.replace(/env!\("[A-Z_]+"\)/g, '').matchAll(/"([^"]*)"/g)]
@@ -30,13 +41,13 @@ export function rustIncludeTargets(file: string, crateRoot: string, source: stri
   for (const match of source.matchAll(/include_(?:str|bytes)!\(/g)) {
     const argument = balancedArgument(source, match.index + match[0].length - 1);
     if (argument === undefined || argument.includes('OUT_DIR')) continue;
-    const base = argument.includes('CARGO_MANIFEST_DIR') ? crateRoot : dirname(file);
-    targets.push(normalize(join(base, literals(argument))));
+    const base = argument.includes('CARGO_MANIFEST_DIR') ? crateRoot : posix.dirname(file);
+    targets.push(posix.normalize(posix.join(base, literals(argument))));
   }
   if (file.endsWith('/build.rs')) {
     // Only joins that leave the crate are inputs; the rest name generated outputs.
     for (const match of source.matchAll(/\.join\(\s*"(\.\.\/[^"]+)"\s*\)/g)) {
-      targets.push(normalize(join(crateRoot, match[1] as string)));
+      targets.push(posix.normalize(posix.join(crateRoot, match[1] as string)));
     }
   }
   return targets;
@@ -51,17 +62,18 @@ export function collectRustIncludeTargets(root: string): Map<string, string> {
   const found = new Map<string, string>();
   const crateRootOf = (directory: string): string => {
     let current = directory;
-    while (!existsSync(join(root, current, 'Cargo.toml'))) current = dirname(current);
+    while (!existsSync(join(root, current, 'Cargo.toml'))) current = posix.dirname(current);
     return current;
   };
+  // `directory` and `path` stay POSIX repo-relative; only the filesystem calls go native.
   const walk = (directory: string): void => {
     for (const entry of readdirSync(join(root, directory), { withFileTypes: true })) {
-      const path = join(directory, entry.name);
+      const path = posix.join(directory, entry.name);
       if (entry.isDirectory()) {
         if (entry.name !== 'target' && entry.name !== 'node_modules') walk(path);
       } else if (entry.name.endsWith('.rs')) {
         const source = readFileSync(join(root, path), 'utf8');
-        for (const target of rustIncludeTargets(path, crateRootOf(dirname(path)), source)) {
+        for (const target of rustIncludeTargets(path, crateRootOf(posix.dirname(path)), source)) {
           found.set(target, path);
         }
       }
