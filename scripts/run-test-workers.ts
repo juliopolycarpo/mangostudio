@@ -36,6 +36,7 @@ import { ROOT_DIR } from './lib/config';
 import { error, info, log } from './lib/log';
 import { GuardianLink, launchGuardian } from './lib/runner-guardian';
 import { runWithTestHome } from './lib/test-home';
+import type { HostFacts } from './lib/test-lane-weights';
 import { laneById, type TestLaneId, workerReportPath } from './lib/test-lanes';
 import {
   guardWorkerSpawn,
@@ -76,6 +77,8 @@ export interface RunnerDeps {
   readonly rootDir?: string;
   /** What starts each worker's `bun test`; the temporary-HOME launcher by default. */
   readonly launcher?: readonly string[];
+  /** What the machine has that weights a file (`powershell.exe`); detected on the real host by default. */
+  readonly host?: HostFacts;
 }
 
 /**
@@ -168,7 +171,7 @@ export async function main(
 ): Promise<number> {
   const { laneId, command } = parseArguments(argv);
   const lane = laneById(laneId as TestLaneId);
-  const spec = laneSpec(lane, command, deps.launcher, deps.platform);
+  const spec = laneSpec(lane, command, deps.launcher, deps.platform, deps.host);
   const mergedPath = deps.mergedPath ?? join(deps.rootDir ?? ROOT_DIR, workerReportPath(lane));
 
   const { extra } = splitLaneCommand(command, spec.testDir);

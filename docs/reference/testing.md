@@ -1039,6 +1039,17 @@ stale table: `test-lane-weights.unit.test.ts` pins only that listed paths exist,
 and `weighted-shard.unit.test.ts` pins the balance the table gives the current file
 set. A file added since the last refresh weighs 1 until someone lists it.
 
+One weight is conditional and a refresh from CI JUnit must not erase it:
+`POWERSHELL_HOST_WEIGHTS` in `test-lane-weights.ts` weighs
+`install-ps1-layout.unit.test.ts` (75) in the root lane, and only on a POSIX host
+with `powershell.exe` on PATH, the condition the file itself skips on. That file
+drives a real Windows PowerShell through WSL interop (70 to 98 s locally) and skips in
+milliseconds on CI, so a CI report cannot say what it costs and the CI tables do not
+list it. `laneSpec` detects the host once (`detectHostFacts`) and hands it to
+`laneWeights`; without PowerShell the root spec's weights are the CI table itself, so
+CI's plan is unchanged (`test-workers.unit.test.ts` pins it). Refresh that entry from
+a run on a WSL host, in the same units as the table.
+
 Measured on a 28-CPU host shared with other work (load average 4 to 25 at the
 start of a run), median of three runs, each lane run directly:
 `bun ./scripts/run-test-workers.ts --lane=root -- bun test --timeout 15000

@@ -8,7 +8,13 @@ import { describe, expect, it } from 'bun:test';
 import { dirname, join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
-import { LANE_WEIGHTS, laneWeights, WINDOWS_LANE_WEIGHTS } from '../lib/test-lane-weights';
+import {
+  LANE_WEIGHTS,
+  laneWeights,
+  NO_HOST_FACTS,
+  POWERSHELL_HOST_WEIGHTS,
+  WINDOWS_LANE_WEIGHTS,
+} from '../lib/test-lane-weights';
 import { TEST_LANES } from '../lib/test-lanes';
 import {
   DEFAULT_FILE_WEIGHT,
@@ -59,6 +65,48 @@ it('gives only lanes that split by weight a Windows table, and the root lane one
     laneWeights('api-unit', 'win32'),
     '(worker weights): expected api-unit on --shard'
   ).toBeUndefined();
+});
+
+describe('the weights that apply only on a host with PowerShell', () => {
+  const entries = Object.entries(POWERSHELL_HOST_WEIGHTS).flatMap(([laneId, weights]) =>
+    Object.entries(weights ?? {}).map(([path, weight]) => ({ laneId, path, weight }))
+  );
+
+  it('weighs the install layout suite and nothing else', () => {
+    expect(entries.map(({ path }) => path)).toEqual([
+      'scripts/tests/install-ps1-layout.unit.test.ts',
+    ]);
+  });
+
+  it('lists only files the lane owns, none of them in the CI table, with whole-second weights', () => {
+    for (const { laneId, path, weight } of entries) {
+      const lane = TEST_LANES.find((candidate) => candidate.id === laneId);
+      expect(
+        lane && ownedFiles(lane).includes(path),
+        `(worker weights): expected a ${laneId} lane test file | received: ${path}`
+      ).toBe(true);
+      expect(
+        LANE_WEIGHTS[laneId as keyof typeof LANE_WEIGHTS]?.[path],
+        `(worker weights): expected ${path} absent from the CI table so a CI refresh cannot lose or double it | received: listed`
+      ).toBeUndefined();
+      expect(
+        Number.isInteger(weight) && weight > DEFAULT_FILE_WEIGHT,
+        `(worker weights): expected an integer above ${DEFAULT_FILE_WEIGHT} for ${path} | received: ${weight}`
+      ).toBe(true);
+    }
+  });
+
+  it('is added on POSIX with PowerShell and nowhere else', () => {
+    const path = 'scripts/tests/install-ps1-layout.unit.test.ts';
+
+    expect(laneWeights('root', 'linux', { powershell: true })?.[path]).toBe(
+      POWERSHELL_HOST_WEIGHTS.root?.[path]
+    );
+    expect(laneWeights('root', 'linux', NO_HOST_FACTS)).toBe(LANE_WEIGHTS.root);
+    expect(laneWeights('root', 'linux')).toBe(LANE_WEIGHTS.root);
+    expect(laneWeights('root', 'win32', { powershell: true })).toBe(WINDOWS_LANE_WEIGHTS.root);
+    expect(laneWeights('api-unit', 'linux', { powershell: true })).toBeUndefined();
+  });
 });
 
 describe.each([...WEIGHTED_LANES, ...WINDOWS_WEIGHTED_LANES])(
