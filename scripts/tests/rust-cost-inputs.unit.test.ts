@@ -248,6 +248,11 @@ describe('Rust cost Cargo configuration admission and seal', () => {
     const trackedRepositoryConfig = await readFile(join(ROOT_DIR, '.cargo/config.toml'), 'utf8');
     expect(trackedRepositoryConfig).toContain('global-min-publish-age = "3 days"');
     expect(trackedRepositoryConfig).toContain('target-feature=+crt-static');
+    // Both flags sit in one MSVC table: without `/Brepro` link.exe stamps the
+    // clock into the image and equal inputs stop giving equal bytes.
+    expect(trackedRepositoryConfig).toContain(
+      'rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/Brepro"]'
+    );
     const files = await fixture();
     await files.write(join(files.root, '.cargo/config.toml'), trackedRepositoryConfig);
     const result = await files.inspect();

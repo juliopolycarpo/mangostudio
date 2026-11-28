@@ -6,8 +6,14 @@
 # dependency. `scripts/lib/runtime-build.ts` rejects a staged Windows runtime
 # that imports a Redistributable DLL, so a build that loses this flag (for
 # example, a RUSTFLAGS override, which replaces it) fails packaging instead.
+#
+# `/Brepro` makes link.exe derive the PE timestamp and the debug-directory
+# stamps from the image's content instead of the clock. Without it two builds
+# of the same inputs differed in 24 bytes (COFF TimeDateStamp and the debug
+# directory entries), so an unstamped Windows runtime could not be compared
+# byte for byte with another build of the same input digest.
 [target.'cfg(all(windows, target_env = "msvc"))']
-rustflags = ["-C", "target-feature=+crt-static"]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/Brepro"]
 
 # Skip crate versions published less than three days ago whenever Cargo
 # resolves or updates a lockfile (`cargo update`, a new dependency, a loosened
