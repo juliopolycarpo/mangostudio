@@ -321,9 +321,16 @@ executable digest. When a producer cross-links a runtime, a separate job on
 the matching host runs that runtime's `--version` and records the result
 against the same digest. The distribution build calls `runtime-build.yml` once
 per cross-linked host plus twice for the rest (Linux, then macOS and Windows),
-and each host's probe
-(`runtime-probe.yml`) needs only its own call, so it starts when its targets are built instead of after the
-slowest of the eight.
+and the darwin-x64 and windows-arm64 probes
+(`runtime-probe.yml`) each need only their own call, so they start when their targets are built instead of after the
+slowest of the eight. The linux-arm64 probe has no job of its own: the `linux-arm64` `hub` entry
+already waits for that call on the same ARM64 runner type, so it runs the same
+three steps (download, verify gnu and musl, upload the receipts) after its hub build and before its
+upload. A wrong version fails that hub, which gates the aggregation job, and the receipt artifact
+keeps its name. The hub copy matches `runtime-probe.yml` line for line in the verify loop, and the
+workflow tests compare the two.
+The two other probes stay separate because folding them into their hubs would make every hub wait
+for the macOS and Windows runtimes.
 
 The aggregation job downloads both artifact sets, verifies the complete
 target inventory and both receipts for each pair, and checks the executable
