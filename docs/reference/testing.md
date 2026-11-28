@@ -2602,7 +2602,8 @@ and [dependency caching limits and billing budgets](https://docs.github.com/en/a
 
 Rust build caches share the repository's configured Actions cache storage
 allowance with the shorter lanes. `rust-cache-cleanup.yml` runs trusted `main` tooling after a main
-cache writer completes, after rust-cache's post-job save, and grants
+cache writer completes, after rust-cache's post-job save (see "Cleanup triggers" below for which
+writers start it), and grants
 `actions: write` only to its cleanup job. `scripts/ci/rust-cache-cleanup.ts`
 deletes older committed generations by exact ID only when a newer replacement
 is listed under `refs/heads/main`. The explicit family registry preserves the
@@ -2623,6 +2624,46 @@ responses. Preview a captured listing without
 network or deletion with `bun ./scripts/ci/rust-cache-cleanup.ts --fixture
 <listing.json>`. Verify the total and older-base fallback after the first
 post-merge lockfile change before adding more Rust cache consumers.
+
+#### Cleanup triggers
+
+The workflow starts on the completion of `CI`, `Rust fresh dependencies`,
+`Randomized Order Nightly`, `Smoke — Browser`, `Smoke — Binary`, `Release` and
+`Release Dry Run` on `main`. `Cargo Shim` and `Protocol CI` are registered writers
+(the audit still defers while either runs) but not triggers. Each main push starts
+all three of CI, Cargo Shim and Protocol CI, and a completion per producer was 57
+cleanup runs on 2026-11-20 (about 39 s each, all successful); this keeps one per push.
+
+Why fewer runs cannot strand more than a day of stale entries:
+
+- A cleanup run is global. `selectRustCacheDeletions` groups every listed entry by
+  family, OS, architecture, environment hash and archive version and keeps the newest
+  of each group, whichever producer started the run. The producer only has to be a
+  completed main writer (`isMainCacheWriter`).
+- An entry becomes stale only when a writer saves a newer generation of its group, and
+  the key rotates only with the root manifest or dependency hash. The 60 days to
+  2026-11-27 had at most four commits a day touching `Cargo.toml` or `Cargo.lock`.
+- A run that finds an active writer defers and deletes nothing; the next trigger
+  retries the whole sweep. So a dropped trigger only matters when its producer outlasts
+  CI on the same push. That is uncommon but not excluded: in 17 sampled main pushes
+  where both runs completed, Cargo Shim finished before CI every time (median 558 s
+  against 991 s over 40 runs), yet its slowest run took 3218 s, and slow runs are
+  likely cold-cache runs, which a manifest rotation causes. So the push that creates
+  stale generations is the one most likely to defer, and correctness rests on the
+  bound below, not on the order. The sweep then waits for the next CI completion on
+  `main` or the daily `Randomized Order Nightly`, whichever is first (its slot slips
+  when the scheduler or a diagnostics queue delays it).
+- Budget: the active caches held 22.9 GB of the 100 GB limit on 2026-11-27, and one
+  superseded Rust generation is about 7.5 GB (two held 14.7 GB). A whole day without
+  a successful sweep adds at most four rotations, about 30 GB, so the worst case is near
+  53 GB, under the limit. GitHub also evicts the least recently used entries past the limit,
+  and the superseded ones are the least used.
+
+`cache-policy.unit.test.ts` pins the trigger list, that both companions run on `push`,
+that CI is a trigger, and that a daily scheduled writer is a trigger. A `schedule` or
+`workflow_dispatch` trigger on the workflow itself is not possible today: the entry
+script accepts only a `workflow_run` event and the cleanup requires a completed
+trigger run, so it would need a change under `scripts/ci/rust-cache/`.
 
 ### Cargo incremental compilation
 
