@@ -142,6 +142,9 @@ jobs:
     name: Runtime
     needs: [changes]
     if: needs.changes.outputs.release == 'true' && !inputs.reuse_distribution
+    permissions:
+      contents: read
+      actions: read # the called job requests it for reuse, which this caller never asks for
     uses: $/.github/workflows/runtime-build.yml
     with:
       version: ${{ needs.changes.outputs.dry_run_version }}

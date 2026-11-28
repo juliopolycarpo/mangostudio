@@ -131,6 +131,21 @@ change. The receipt records the outcome in `laneCoverage` (`cargo` and
 the rule. A lane whose run on the SHA ran every evidence job needs no earlier
 run.
 
+Every one of the source run's eight `Distribution / Runtime / Runtime <platform>`
+jobs must be visible and successful. A job that ran the `Use reused runtime base`
+step reused an unstamped base (see the releasing guide). Canary then requires
+exactly one `runtime-reuse-<platform>-<run>-<digest>-<sha256>` artifact of that
+run, unexpired and created inside the window of that job's latest attempt (a
+record an earlier attempt left under another producer's name is not counted),
+and requires its producing run, read as attempt 1, to be a `ci.yml` push to
+`main` of this repository, an ancestor of the source, with a successful build
+job for that platform in that attempt and no change to a runtime input path
+between the two. A later re-run of the producer does not affect this. A missing, duplicate or
+malformed record, or a producer that fails any check, rejects the source. The
+receipt records the outcome in `runtimeReuse` (`reused` with digest, binary
+SHA-256, producing run and commit, and `built`); the publication evidence
+re-checks it, and receipts without it predate the rule.
+
 Authentication failures, failed API calls, malformed pages and missing mandatory
 results fail closed. The receipt records source identity, job IDs and attempts,
 sibling run IDs, and the relevance reason for the publication summary.

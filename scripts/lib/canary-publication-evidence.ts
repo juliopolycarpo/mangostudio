@@ -5,6 +5,7 @@ import type { CanaryValidationReceipt } from './canary-validation';
 import type { ApprovedArtifact } from './distribution-artifact';
 import { type DistributionManifest, parseDistributionManifest } from './distribution-manifest';
 import { createReleaseAssetPlan, selectCanaryAssets } from './release-assets';
+import { ALL_BINARY_TARGETS } from './release-targets';
 import { isValidSemver, normalizeVersion } from './release-version';
 import { requireJsonRecord, requirePositiveSafeInteger, sha256OfBytes } from './script-guards';
 
@@ -269,6 +270,8 @@ export function parseCanaryPromotionReceipt(
         );
     }
   }
+  // Absent in receipts written before runtime reuse existed.
+  if (qualification.runtimeReuse !== undefined) assertRuntimeReuse(qualification.runtimeReuse);
   if (!Array.isArray(qualification.siblings))
     throw new Error('Invalid qualification siblings: expected receipt array');
   const workflows = new Set<string>();
@@ -347,6 +350,56 @@ export function sameApprovedArtifact(
   ].every(
     (key) => original[key as keyof ApprovedArtifact] === candidate[key as keyof ApprovedArtifact]
   );
+}
+
+/**
+ * Strictly parse the runtime reuse section of a qualification receipt: each
+ * release platform appears exactly once, either built or reused, and a reuse
+ * carries the digest, binary hash, producing run and commit that name it.
+ */
+function assertRuntimeReuse(value: unknown): void {
+  const reuse = requireJsonRecord(value, 'qualification runtimeReuse');
+  const platforms = ALL_BINARY_TARGETS.map((target) => target.arch as string);
+  const seen = new Set<string>();
+  const claim = (platform: unknown): void => {
+    if (typeof platform !== 'string' || !platforms.includes(platform) || seen.has(platform)) {
+      throw new Error(
+        `Invalid qualification runtimeReuse platform: expected each of ${platforms.join(', ')} once; received ${JSON.stringify(platform)}`
+      );
+    }
+    seen.add(platform);
+  };
+  if (!Array.isArray(reuse.reused) || !Array.isArray(reuse.built)) {
+    throw new Error(
+      `Invalid qualification runtimeReuse: expected reused and built arrays; received ${JSON.stringify(reuse)}`
+    );
+  }
+  for (const platform of reuse.built) claim(platform);
+  for (const entry of reuse.reused) {
+    const reused = requireJsonRecord(entry, 'qualification runtimeReuse reused');
+    claim(reused.platform);
+    const hex = (field: string, length: number): void => {
+      const text = reused[field];
+      if (typeof text !== 'string' || !new RegExp(`^[a-f0-9]{${length}}$`).test(text)) {
+        throw new Error(
+          `Invalid qualification runtimeReuse ${String(reused.platform)} ${field}: expected ${length} lowercase hex characters; received ${JSON.stringify(text)}`
+        );
+      }
+    };
+    hex('digest', 64);
+    hex('binarySha256', 64);
+    hex('producerSha', 40);
+    requirePositiveSafeInteger(reused.producerRunId, `${String(reused.platform)} producer run ID`);
+    requirePositiveSafeInteger(
+      reused.recordArtifactId,
+      `${String(reused.platform)} record artifact ID`
+    );
+  }
+  if (seen.size !== platforms.length) {
+    throw new Error(
+      `Invalid qualification runtimeReuse: expected every platform built or reused; received missing ${platforms.filter((platform) => !seen.has(platform)).join(', ')}`
+    );
+  }
 }
 
 function assertJobReceipts(value: unknown, maxAttempt: number): void {

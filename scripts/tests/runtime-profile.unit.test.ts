@@ -543,13 +543,15 @@ describe('runtime profile callers and cache isolation', () => {
   test('the seed has no artifact route and skips its build on an exact cache hit', () => {
     const runtime = extractJobBlock(readText(RUNTIME_WORKFLOW), 'runtime');
     const steps = extractStepBlocks(runtime);
-    // The runtime artifact, then the unstamped base, which only exists behind the digest step.
+    // The reuse record, the runtime artifact, then the unstamped base; the first and last exist
+    // only behind the digest step.
     const uploads = steps.filter((step) => step.includes('actions/upload-artifact@'));
-    expect(uploads).toHaveLength(2);
-    expect(uploads[0]).toContain("if: inputs.mode == 'artifact'");
-    expect(uploads[1]).toContain("if: steps.unstamped.outcome == 'success'");
+    expect(uploads).toHaveLength(3);
+    expect(uploads[0]).toContain("steps.reuse.outcome == 'success'");
+    expect(uploads[1]).toContain("if: inputs.mode == 'artifact'");
+    expect(uploads[2]).toContain("if: steps.unstamped.outcome == 'success'");
     expect(runtime).not.toMatch(/actions\/cache\/save|gh release|npm publish/);
-    expect(readText(RUNTIME_WORKFLOW).match(/upload-artifact@/g)).toHaveLength(2);
+    expect(readText(RUNTIME_WORKFLOW).match(/upload-artifact@/g)).toHaveLength(3);
     const cache = cacheStep();
     expect(cache).toMatch(/^ {8}id: rust-cache$/m);
     const build = steps.find((step) => step.includes('name: Build runtime'));
@@ -649,8 +651,9 @@ describe('runtime profile callers and cache isolation', () => {
     }
     expect(seed).not.toContain('artifact_prefix');
     expect(seed).not.toContain('platforms:');
-    // Read-only token and no id-token or attestations, unlike the distribution caller.
-    expect(seed).toMatch(/permissions:\n {6}contents: read\n(?! {6})/);
+    // Read-only token and no id-token or attestations, unlike the distribution caller. The
+    // called job asks for `actions: read` (its reuse steps), which a caller must at least grant.
+    expect(seed).toMatch(/permissions:\n {6}contents: read\n {6}actions: read #[^\n]*\n(?! {6})/);
     expect(seed).toMatch(
       /concurrency:\n {6}group: light-runtime-cache-seed\n {6}cancel-in-progress: false/
     );
@@ -713,7 +716,10 @@ describe('unstamped runtime base', () => {
   });
 
   test('every later step hangs off the digest, so no other context publishes', () => {
-    expect(stepNamed('Stage unstamped runtime')).toContain("if: steps.digest.outcome == 'success'");
+    // A reused base has no cargo output to stage; the run that built it published it.
+    expect(stepNamed('Stage unstamped runtime')).toContain(
+      "if: steps.digest.outcome == 'success' && steps.reuse.outcome != 'success'"
+    );
     expect(stepNamed('Upload unstamped runtime')).toContain(
       "if: steps.unstamped.outcome == 'success'"
     );

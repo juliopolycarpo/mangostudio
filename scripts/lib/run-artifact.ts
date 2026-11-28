@@ -244,6 +244,26 @@ export async function findRunArtifact(options: {
   return selectRunArtifact(listing as RunArtifactListing, options.name, options.runId);
 }
 
+/**
+ * The run a download reads from: `ARTIFACT_RUN_ID` when the caller names another run
+ * (a reused runtime base lives in an earlier run), otherwise the current one. A set but
+ * malformed `ARTIFACT_RUN_ID` is an error and never falls back to the current run, so a
+ * typo cannot quietly download a different artifact of the same name.
+ *
+ * @example
+ * downloadSourceRunId({ ARTIFACT_RUN_ID: '46128211509', GITHUB_RUN_ID: '9' }); // → 46128211509
+ */
+export function downloadSourceRunId(env: Readonly<Record<string, string | undefined>>): number {
+  const explicit = env.ARTIFACT_RUN_ID ?? '';
+  const [variable, raw] =
+    explicit === '' ? ['GITHUB_RUN_ID', env.GITHUB_RUN_ID] : ['ARTIFACT_RUN_ID', explicit];
+  // `Number('')` is 0 and `Number('1e3')` is 1000: only plain digits name a run.
+  if (raw === undefined || !/^[1-9]\d*$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+    throw new Error(`${variable}: expected a positive integer | received ${raw}`);
+  }
+  return Number(raw);
+}
+
 export interface DownloadRunArtifactOptions {
   readonly repository: string;
   readonly runId: number;

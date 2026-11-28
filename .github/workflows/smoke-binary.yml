@@ -50,6 +50,9 @@ jobs:
     # glibc and could not produce the musl runtimes the Alpine legs need.
     name: Runtime
     if: ${{ inputs.rebuild }}
+    permissions:
+      contents: read
+      actions: read # the called job requests it for reuse, which this caller never asks for
     uses: $/.github/workflows/runtime-build.yml
     with:
       version: ${{ inputs.version || '' }}

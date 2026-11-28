@@ -43,6 +43,13 @@ on:
         description: Runtime artifact profile; light is accepted only on pull_request.
         type: string
         default: shipping
+      reuse:
+        description: >-
+          Let each runtime build reuse an earlier main run's unstamped runtime
+          when the repository variable RUNTIME_REUSE is `true`; see
+          runtime-build.yml. Only CI's main push sets it, and release builds never do.
+        type: boolean
+        default: false
       aot_order_platforms:
         description: >-
           Platform ids, space separated, or "all", whose hub is compiled with a function order
@@ -95,6 +102,9 @@ jobs:
   # here, and `runtime-hosts` for the slower macOS and Windows legs.
   runtime:
     name: Runtime
+    permissions:
+      contents: read
+      actions: read # runtime-build.yml's reuse lists runs and downloads a base with gh
     uses: $/.github/workflows/runtime-build.yml
     with:
       version: ${{ inputs.version }}
@@ -104,9 +114,13 @@ jobs:
       profile: ${{ inputs.runtime_profile }}
       record_receipts: true
       cache: ${{ inputs.cache }}
+      reuse: ${{ inputs.reuse }}
 
   runtime-hosts:
     name: Runtime
+    permissions:
+      contents: read
+      actions: read # runtime-build.yml's reuse lists runs and downloads a base with gh
     uses: $/.github/workflows/runtime-build.yml
     with:
       version: ${{ inputs.version }}
@@ -116,9 +130,13 @@ jobs:
       profile: ${{ inputs.runtime_profile }}
       record_receipts: true
       cache: ${{ inputs.cache }}
+      reuse: ${{ inputs.reuse }}
 
   runtime-linux-arm64:
     name: Runtime
+    permissions:
+      contents: read
+      actions: read # runtime-build.yml's reuse lists runs and downloads a base with gh
     uses: $/.github/workflows/runtime-build.yml
     with:
       version: ${{ inputs.version }}
@@ -128,9 +146,13 @@ jobs:
       profile: ${{ inputs.runtime_profile }}
       record_receipts: true
       cache: ${{ inputs.cache }}
+      reuse: ${{ inputs.reuse }}
 
   runtime-darwin-x64:
     name: Runtime
+    permissions:
+      contents: read
+      actions: read # runtime-build.yml's reuse lists runs and downloads a base with gh
     uses: $/.github/workflows/runtime-build.yml
     with:
       version: ${{ inputs.version }}
@@ -140,6 +162,7 @@ jobs:
       profile: ${{ inputs.runtime_profile }}
       record_receipts: true
       cache: ${{ inputs.cache }}
+      reuse: ${{ inputs.reuse }}
 
   runtime-version-darwin-x64:
     name: Verify runtime version darwin-x64
@@ -155,6 +178,9 @@ jobs:
 
   runtime-windows-arm64:
     name: Runtime
+    permissions:
+      contents: read
+      actions: read # runtime-build.yml's reuse lists runs and downloads a base with gh
     uses: $/.github/workflows/runtime-build.yml
     with:
       version: ${{ inputs.version }}
@@ -164,6 +190,7 @@ jobs:
       profile: ${{ inputs.runtime_profile }}
       record_receipts: true
       cache: ${{ inputs.cache }}
+      reuse: ${{ inputs.reuse }}
 
   runtime-version-windows-arm64:
     name: Verify runtime version windows-arm64

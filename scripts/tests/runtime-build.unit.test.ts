@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { readExecutableHeader } from '../lib/executable-header';
 import { ALL_BINARY_TARGETS, type ReleasePlatformId } from '../lib/release-targets';
 import {
+  assertUnstampedRuntime,
   buildPathNeedles,
   canRunOnHost,
   cargoRuntimeBuildCommand,
@@ -25,6 +26,7 @@ import {
   selectRuntimeTargets,
   verifyRuntimeBinary,
 } from '../lib/runtime-build';
+import { readReleaseStamp } from '../lib/runtime-stamp';
 import {
   fakeElf,
   fakeMachO,
@@ -485,7 +487,155 @@ describe('runtime version check', () => {
   });
 });
 
+describe('assertUnstampedRuntime', () => {
+  function writeRuntime(bytes: Uint8Array): { dir: string; path: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'runtime-unstamped-'));
+    const path = join(dir, 'mangostudio-runtime');
+    writeFileSync(path, bytes);
+    return { dir, path };
+  }
+
+  test('accepts a binary whose slot is empty', () => {
+    const { dir, path } = writeRuntime(
+      withTail(fakeElf({ arch: 'x64', interpreter: null }), releaseStampSlot())
+    );
+    try {
+      expect(() => assertUnstampedRuntime(path)).not.toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses a binary that already carries a version, naming it', () => {
+    const { dir, path } = writeRuntime(
+      withTail(fakeElf({ arch: 'x64', interpreter: null }), releaseStampSlot('0.1.1'))
+    );
+    try {
+      expect(() => assertUnstampedRuntime(path)).toThrow(
+        `expected an unstamped runtime at ${path} | received release stamp: 0.1.1`
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses a binary with no stamp slot', () => {
+    const { dir, path } = writeRuntime(fakeElf({ arch: 'x64', interpreter: null }));
+    try {
+      expect(() => assertUnstampedRuntime(path)).toThrow('exactly 1 release stamp slot');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('build-runtime --prebuilt-unstamped', () => {
+  // A platform this machine cannot run, so verification reads headers and never executes the fixture.
+  const foreign = hostPlatformId() === 'linux-arm64' ? 'linux-x64' : 'linux-arm64';
+  const loader =
+    foreign === 'linux-arm64' ? '/lib/ld-linux-aarch64.so.1' : '/lib64/ld-linux-x86-64.so.2';
+
+  function runBuild(prebuilt: Uint8Array, extra: readonly string[] = []) {
+    const dir = mkdtempSync(join(tmpdir(), 'runtime-prebuilt-'));
+    const input = join(dir, 'base');
+    writeFileSync(input, prebuilt);
+    const out = join(dir, 'out');
+    const child = Bun.spawnSync({
+      cmd: [
+        process.execPath,
+        '--no-install',
+        'scripts/build-runtime.ts',
+        '--platform',
+        foreign,
+        '--out',
+        out,
+        '--prebuilt-unstamped',
+        input,
+        '--dev',
+        ...extra,
+      ],
+      cwd: join(import.meta.dir, '..', '..'),
+      // No cargo, rustup or zig on PATH: reaching any of them would be a loud failure.
+      env: { PATH: dir, HOME: dir },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    return {
+      dir,
+      out,
+      exitCode: child.exitCode,
+      output: `${child.stdout.toString()}${child.stderr.toString()}`,
+    };
+  }
+
+  test('stages, stamps and verifies the base without running cargo', () => {
+    const run = runBuild(
+      withTail(
+        fakeElf({ arch: foreign === 'linux-arm64' ? 'arm64' : 'x64', interpreter: loader }),
+        releaseStampSlot()
+      )
+    );
+    try {
+      expect(run.output).toContain('prebuilt unstamped base');
+      expect(run.exitCode).toBe(0);
+      const staged = readFileSync(join(run.out, foreign, 'mangostudio-runtime'));
+      expect(readReleaseStamp(staged).version).toBe('dev');
+    } finally {
+      rmSync(run.dir, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses an already stamped base before staging anything', () => {
+    const run = runBuild(
+      withTail(
+        fakeElf({ arch: foreign === 'linux-arm64' ? 'arm64' : 'x64', interpreter: loader }),
+        releaseStampSlot('0.1.1')
+      )
+    );
+    try {
+      expect(run.exitCode).not.toBe(0);
+      expect(run.output).toContain('expected an unstamped runtime');
+      expect(run.output).toContain('received release stamp: 0.1.1');
+      expect(existsSync(join(run.out, foreign))).toBe(false);
+    } finally {
+      rmSync(run.dir, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses a base for a binary of the wrong CPU, as cargo output would be', () => {
+    const run = runBuild(
+      withTail(
+        fakeElf({ arch: foreign === 'linux-arm64' ? 'x64' : 'arm64', interpreter: loader }),
+        releaseStampSlot()
+      )
+    );
+    try {
+      expect(run.exitCode).not.toBe(0);
+      expect(run.output).toContain('failed verification');
+    } finally {
+      rmSync(run.dir, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses more than one platform', () => {
+    const run = runBuild(
+      withTail(fakeElf({ arch: 'x64', interpreter: loader }), releaseStampSlot()),
+      ['--platform', 'linux-x64,linux-arm64']
+    );
+    try {
+      expect(run.exitCode).not.toBe(0);
+      expect(run.output).toContain('expected --prebuilt-unstamped with exactly one platform');
+    } finally {
+      rmSync(run.dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('runtime build wiring', () => {
+  test('help documents the prebuilt flag', () => {
+    expect(readText('scripts/build-runtime.ts')).toContain('--prebuilt-unstamped <path>');
+  });
+
   test('build-runtime.ts stays dependency-free so CI can run it with --no-install', () => {
     const walk = walkRuntimeImports('scripts/build-runtime.ts');
     expect([...walk.externalSpecifiers.keys()].filter((spec) => !spec.startsWith('node:'))).toEqual(
