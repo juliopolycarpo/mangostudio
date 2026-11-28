@@ -4,7 +4,7 @@
  * Defaults to printing the frozen schedule. Execution needs a clean tree and an exclusive host.
  * Example: bun scripts/bench/rust-costs.ts --execute --out /tmp/rust-cost-receipts
  */
-import { mkdir, readFile, rm } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
 import { arch, cpus, platform, release, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Writable } from 'node:stream';
@@ -22,6 +22,7 @@ import {
   type ProcessResourceSummary,
   ProcessResourceTracker,
 } from '../lib/process-resource-sample';
+import { stampRuntimeFile } from '../lib/runtime-stamp';
 import {
   attributeRustArtifact,
   identifyRustArtifactVersion,
@@ -271,6 +272,7 @@ async function main(): Promise<void> {
   };
   const measured = new Map<string, RustArtifactReceipt>();
   let priorRuntimeHash: string | undefined;
+  let priorUnstampedRuntimeHash: string | undefined;
   try {
     await save(null);
     for (const [label, command] of [
@@ -335,7 +337,6 @@ async function main(): Promise<void> {
         ...process.env,
         CARGO_TARGET_DIR: targetDir,
         CARGO_BUILD_JOBS: String(JOBS),
-        MANGOSTUDIO_RELEASE_VERSION: workload.stamp,
       };
       const resourceState: { tracker?: ProcessResourceTracker } = {};
       const clock = performance.now();
@@ -449,7 +450,17 @@ async function main(): Promise<void> {
         'release',
         workload.package === 'mangostudio' ? 'mangostudio' : 'mangostudio-runtime'
       );
-      const kept = await preserveRustArtifact(binary, join(attemptOut, 'artifact'));
+      // The release version is not a compile input, so cargo's output is unstamped whatever
+      // `workload.stamp` is. The runtime is stamped on a copy, the way the build scripts stamp
+      // their staged copy; cargo's own output stays unstamped for the next attempt.
+      const unstampedSha256 = await sha256OfFile(binary);
+      let measuredBinary = binary;
+      if (workload.package === 'mangostudio-runtime') {
+        measuredBinary = join(attemptOut, 'stamped-runtime');
+        await copyFile(binary, measuredBinary);
+        stampRuntimeFile(measuredBinary, workload.stamp);
+      }
+      const kept = await preserveRustArtifact(measuredBinary, join(attemptOut, 'artifact'));
       const artifact = await inspectRustArtifact(
         kept.path,
         join(attemptOut, 'sections'),
@@ -501,7 +512,13 @@ async function main(): Promise<void> {
           kept.sha256,
           compiled.length
         );
-      if (workload.package === 'mangostudio-runtime') priorRuntimeHash = kept.sha256;
+      // A new release version must leave the compiled bytes alone: only the stamped copy differs.
+      if (workload.label.startsWith('runtime-noop') || workload.label.startsWith('runtime-restamp'))
+        valid &&= priorUnstampedRuntimeHash === unstampedSha256;
+      if (workload.package === 'mangostudio-runtime') {
+        priorRuntimeHash = kept.sha256;
+        priorUnstampedRuntimeHash = unstampedSha256;
+      }
       attempt.valid = valid;
       measured.set(workload.package, artifact);
       await save(valid ? null : `${workload.label}: workload invariant failed`);
@@ -520,7 +537,6 @@ async function main(): Promise<void> {
         ...process.env,
         CARGO_TARGET_DIR: targetDir,
         CARGO_BUILD_JOBS: String(JOBS),
-        MANGOSTUDIO_RELEASE_VERSION: `${version}-bench.10`,
         CARGO_PROFILE_RELEASE_STRIP: 'none',
       };
       // cargo-bloat 0.12 accepts one --config, so use one explicit profile file.

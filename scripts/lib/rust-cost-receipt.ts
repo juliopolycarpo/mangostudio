@@ -161,7 +161,11 @@ export function shippingRustProfile(manifest: string) {
   };
 }
 
-/** Qualifies unchanged and stamp-only rebuilds as distinct workloads. Example: qualifiesRustIncremental('restamp', before, after, 1). */
+/**
+ * Qualifies unchanged and stamp-only rebuilds as distinct workloads. The release version is
+ * written into the linked binary after cargo ran, so a restamp compiles nothing and only the
+ * stamped artifact's identity changes. Example: qualifiesRustIncremental('restamp', before, after, 0).
+ */
 export function qualifiesRustIncremental(
   kind: 'noop' | 'restamp',
   before: string | undefined,
@@ -173,5 +177,5 @@ export function qualifiesRustIncremental(
     throw new Error('Incremental artifact identity: expected lowercase SHA-256 hashes');
   return kind === 'noop'
     ? before === after && compiledUnits === 0
-    : before !== after && compiledUnits === 1;
+    : before !== after && compiledUnits === 0;
 }

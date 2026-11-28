@@ -14,12 +14,13 @@ describe('Rust cost receipt contracts', () => {
   const manifest =
     '[profile.release]\nopt-level=3\nlto="fat"\ncodegen-units=1\nstrip=true\npanic="unwind"';
 
-  it('rejects a restamp without changed artifact identity and keeps no-op invariants distinct', () => {
+  it('rejects a restamp that recompiled or left the stamped identity alone, and keeps no-op invariants distinct', () => {
     const before = 'a'.repeat(64),
       after = 'b'.repeat(64);
-    expect(qualifiesRustIncremental('restamp', before, after, 1)).toBe(true);
-    expect(qualifiesRustIncremental('restamp', before, before, 1)).toBe(false);
-    expect(qualifiesRustIncremental('restamp', before, after, 0)).toBe(false);
+    // The release version is stamped after the link, so a restamp compiles zero units.
+    expect(qualifiesRustIncremental('restamp', before, after, 0)).toBe(true);
+    expect(qualifiesRustIncremental('restamp', before, before, 0)).toBe(false);
+    expect(qualifiesRustIncremental('restamp', before, after, 1)).toBe(false);
     expect(qualifiesRustIncremental('noop', before, before, 0)).toBe(true);
     expect(qualifiesRustIncremental('noop', before, after, 0)).toBe(false);
     expect(qualifiesRustIncremental('noop', before, before, 1)).toBe(false);
