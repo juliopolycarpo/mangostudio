@@ -383,6 +383,100 @@ describe('GitHubRetry gh transport', () => {
   });
 });
 
+describe('GitHubRetry.ghCommandSync', () => {
+  const failed = (stderr: string) => ({ exitCode: 1, stderr });
+  const ok = { exitCode: 0, stderr: '' };
+
+  /** Replays `queue` in order and repeats its last entry. */
+  function results(...queue: Array<{ exitCode: number; stderr: string }>) {
+    let calls = 0;
+    return {
+      run: () => queue[Math.min(calls++, queue.length - 1)] as { exitCode: number; stderr: string },
+      calls: () => calls,
+    };
+  }
+
+  test.each([
+    'gh: Bad Gateway (HTTP 502)',
+    'gh: rate limit (HTTP 429)',
+    'Get "<url>": unexpected EOF',
+    'gh: You have exceeded a secondary rate limit (HTTP 403)',
+  ])('reads again after transient stderr %j', (stderr) => {
+    const { retry, environment } = fixture();
+    const script = results(failed(stderr), ok);
+    expect(retry.ghCommandSync(script.run)).toEqual(ok);
+    expect(script.calls()).toBe(2);
+    expect(environment.waits).toEqual([5_000]);
+  });
+
+  test.each([
+    'gh: Resource not accessible by integration (HTTP 403)',
+    'gh: Not Found (HTTP 404)',
+    'gh: Unprocessable Entity (HTTP 422)',
+    '',
+  ])('does not read again after %j', (stderr) => {
+    const { retry, environment } = fixture();
+    const script = results(failed(stderr), ok);
+    expect(retry.ghCommandSync(script.run)).toEqual(failed(stderr));
+    expect(script.calls()).toBe(1);
+    expect(environment.waits).toEqual([]);
+  });
+
+  test('a persistent failure returns the last result after three reads and 15 s of waiting', () => {
+    const { retry, environment } = fixture();
+    const script = results(failed('gh: Gateway Timeout (HTTP 504)'));
+    expect(retry.ghCommandSync(script.run)).toEqual(failed('gh: Gateway Timeout (HTTP 504)'));
+    expect(script.calls()).toBe(3);
+    expect(environment.waits).toEqual([5_000, 10_000]);
+    expect(retry.waitedMs).toBe(15_000);
+  });
+
+  test('a write is not read again after a 502 but is after a rate limit', () => {
+    const { retry } = fixture();
+    const bad = results(failed('gh: Bad Gateway (HTTP 502)'), ok);
+    retry.ghCommandSync(bad.run, { idempotent: false });
+    expect(bad.calls()).toBe(1);
+    const limited = results(failed('gh: rate limit (HTTP 429)'), ok);
+    expect(retry.ghCommandSync(limited.run, { idempotent: false })).toEqual(ok);
+    expect(limited.calls()).toBe(2);
+  });
+
+  test('spends the same budget as the asynchronous methods', async () => {
+    const { retry, environment } = fixture();
+    retry.ghCommandSync(results(failed('gh: Bad Gateway (HTTP 502)'), ok).run);
+    await retry.ghCommand(results(failed('gh: Bad Gateway (HTTP 502)'), ok).run);
+    expect(environment.waits).toEqual([5_000, 5_000]);
+    expect(retry.waitedMs).toBe(10_000);
+  });
+
+  test('waits exactly like ghCommand for the same script', async () => {
+    const blocking = fixture();
+    const awaited = fixture();
+    const stderr = 'gh: Bad Gateway (HTTP 502)';
+    blocking.retry.ghCommandSync(results(failed(stderr)).run);
+    await awaited.retry.ghCommand(results(failed(stderr)).run);
+    expect(blocking.environment.waits).toEqual(awaited.environment.waits);
+  });
+
+  test('refuses an environment that cannot block, naming the missing sleepSync', () => {
+    const retry = new GitHubRetry(STANDARD_RETRY_POLICY, {
+      sleep: () => Promise.resolve(),
+      now: () => 0,
+    });
+    expect(() => retry.ghCommandSync(() => ok)).toThrow(
+      'GitHubRetry.ghCommandSync: expected a retry environment with sleepSync'
+    );
+  });
+
+  test('the system environment blocks for the scheduled wait', () => {
+    const retry = new GitHubRetry({ backoffMs: [30], maxServerWaitMs: 30, maxTotalWaitMs: 30 });
+    const script = results(failed('gh: Bad Gateway (HTTP 502)'), ok);
+    const started = performance.now();
+    expect(retry.ghCommandSync(script.run)).toEqual(ok);
+    expect(performance.now() - started).toBeGreaterThanOrEqual(25);
+  });
+});
+
 describe('GitHubRetry.anyFailure', () => {
   test('retries any failure once after the policy wait and logs each failure', async () => {
     const environment = new RecordedRetryEnvironment();

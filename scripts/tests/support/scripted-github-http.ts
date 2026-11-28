@@ -43,5 +43,11 @@ export class RecordedRetryEnvironment implements RetryEnvironment {
     return Promise.resolve();
   };
 
+  /** The blocking wait of `ghCommandSync`: recorded in the same list, so a test sees one timeline. */
+  readonly sleepSync = (milliseconds: number): void => {
+    this.waits.push(milliseconds);
+    this.clockMs += milliseconds;
+  };
+
   readonly now = (): number => this.clockMs;
 }
