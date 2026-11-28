@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
 import { ALL_BINARY_TARGETS } from '../lib/release-targets';
+import { unstampedArtifactName } from '../lib/runtime-input-digest';
 import { runCompositeStep } from './support/cache-scoped-steps';
 import { readText } from './support/read-text';
 import {
@@ -542,11 +543,13 @@ describe('runtime profile callers and cache isolation', () => {
   test('the seed has no artifact route and skips its build on an exact cache hit', () => {
     const runtime = extractJobBlock(readText(RUNTIME_WORKFLOW), 'runtime');
     const steps = extractStepBlocks(runtime);
+    // The runtime artifact, then the unstamped base, which only exists behind the digest step.
     const uploads = steps.filter((step) => step.includes('actions/upload-artifact@'));
-    expect(uploads).toHaveLength(1);
+    expect(uploads).toHaveLength(2);
     expect(uploads[0]).toContain("if: inputs.mode == 'artifact'");
+    expect(uploads[1]).toContain("if: steps.unstamped.outcome == 'success'");
     expect(runtime).not.toMatch(/actions\/cache\/save|gh release|npm publish/);
-    expect(readText(RUNTIME_WORKFLOW).match(/upload-artifact@/g)).toHaveLength(1);
+    expect(readText(RUNTIME_WORKFLOW).match(/upload-artifact@/g)).toHaveLength(2);
     const cache = cacheStep();
     expect(cache).toMatch(/^ {8}id: rust-cache$/m);
     const build = steps.find((step) => step.includes('name: Build runtime'));
@@ -683,5 +686,106 @@ describe('runtime profile callers and cache isolation', () => {
     const cargo = readText('Cargo.toml');
     expect(cargo).toContain('lto = "fat"\ncodegen-units = 1');
     expect(cargo).toContain('panic = "unwind"');
+  });
+});
+
+// Stage 2 of #2698: the unstamped binary is published under its input digest, and nothing
+// reads it yet. These pin that it cannot fail the build, cannot appear on a pull request, and
+// cannot be picked up by a packaging download.
+describe('unstamped runtime base', () => {
+  const runtimeSteps = () =>
+    extractStepBlocks(extractJobBlock(readText(RUNTIME_WORKFLOW), 'runtime'));
+  const stepNamed = (name: string) => {
+    const step = runtimeSteps().find((block) => block.includes(`name: ${name}`));
+    if (!step) throw new Error(`expected runtime-build.yml step ${name} | received: absent`);
+    return step;
+  };
+  const BASE_STEPS = [
+    'Compute runtime input digest',
+    'Stage unstamped runtime',
+    'Upload unstamped runtime',
+  ];
+
+  test('the digest runs only for a shipping artifact build on a main push', () => {
+    expect(stepNamed('Compute runtime input digest')).toContain(
+      "if: inputs.mode == 'artifact' && inputs.profile == 'shipping' && github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    );
+  });
+
+  test('every later step hangs off the digest, so no other context publishes', () => {
+    expect(stepNamed('Stage unstamped runtime')).toContain("if: steps.digest.outcome == 'success'");
+    expect(stepNamed('Upload unstamped runtime')).toContain(
+      "if: steps.unstamped.outcome == 'success'"
+    );
+  });
+
+  test('no step of the base can fail the build, and a failure leaves an annotation', () => {
+    for (const name of BASE_STEPS) {
+      expect(stepNamed(name), name).toMatch(/^ {8}continue-on-error: true$/m);
+    }
+    const warning = stepNamed('Warn that the unstamped runtime was not published');
+    for (const id of ['digest', 'unstamped', 'unstamped-upload']) {
+      expect(warning).toContain(`steps.${id}.outcome == 'failure'`);
+    }
+    expect(warning).toContain('::warning');
+  });
+
+  test('the digest is computed before the build and the binary is staged after it', () => {
+    const names = runtimeSteps().map((step) => /name: (.+)/.exec(step)?.[1]);
+    const index = (name: string) => names.indexOf(name);
+    expect(index('Compute runtime input digest')).toBeLessThan(index('Build runtime'));
+    expect(index('Build runtime')).toBeLessThan(index('Stage unstamped runtime'));
+    expect(index('Stage unstamped runtime')).toBeLessThan(index('Upload unstamped runtime'));
+  });
+
+  test('the upload keeps seven days, uses the runtime upload pin and names the digest', () => {
+    const upload = stepNamed('Upload unstamped runtime');
+    const pin = (step: string) => /uses: (actions\/upload-artifact@\S+)/.exec(step)?.[1];
+    expect(pin(upload)).toBeDefined();
+    expect(pin(upload)).toBe(pin(stepNamed('Upload runtime')));
+    expect(upload).toContain('retention-days: 7');
+    expect(upload).toContain('if-no-files-found: error');
+    expect(upload).toContain(`name: ${EXPR} steps.unstamped.outputs.name }}`);
+    expect(stepNamed('Stage unstamped runtime')).toContain(
+      `DIGEST: ${EXPR} steps.digest.outputs.digest }}`
+    );
+  });
+
+  test('it adds no job', () => {
+    expect(extractJobBlocks(readText(RUNTIME_WORKFLOW)).map(({ job }) => job)).toEqual(['runtime']);
+  });
+
+  test('its artifact name matches no download pattern or name in any workflow or action', () => {
+    const published = unstampedArtifactName('linux-x64', 'a'.repeat(64));
+    const sha = 'b'.repeat(40);
+    const texts = [
+      ...workflowFiles(),
+      ...readdirSync(join(ROOT_DIR, '.github', 'actions')).map(
+        (dir) => `.github/actions/${dir}/action.yml`
+      ),
+    ]
+      .filter((path) => existsSync(join(ROOT_DIR, path)))
+      .map(readText);
+    const requested: string[] = [];
+    for (const text of texts) {
+      for (const match of text.matchAll(/^\s+(?:pattern|name): (\S.*)$/gm)) {
+        // Expressions stand for a commit, a platform or a prefix; any value must still miss.
+        requested.push(
+          (match[1] as string)
+            .replace(/#.*$/, '')
+            .trim()
+            .replaceAll(/\$\{\{[^}]*source_sha[^}]*\}\}/g, sha)
+            .replaceAll(/\$\{\{[^}]*\}\}/g, 'x')
+        );
+      }
+    }
+    expect(requested.length, 'expected to read download patterns | received: none').toBeGreaterThan(
+      5
+    );
+    const hits = requested.filter((pattern) => new Bun.Glob(pattern).match(published));
+    expect(
+      hits,
+      `expected no download pattern to match ${published} | received: ${hits.join(', ')}`
+    ).toEqual([]);
   });
 });
