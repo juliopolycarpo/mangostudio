@@ -346,7 +346,6 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(workspaceBlock).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
     for (const command of [
       'cargo build --workspace --locked',
-      'cargo check -p mangostudio --all-targets --locked',
       'cargo clippy --workspace --all-targets --all-features --locked -- -D warnings',
     ]) {
       const step = extractStepBlocks(workspaceBlock).find((entry) =>
@@ -355,6 +354,28 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
       expect(step, `native workspace checks must retain ${command}`).toBeDefined();
       expect(step, `every native OS must run ${command}`).toContain(`if: ${EXPR} !cancelled() }}`);
     }
+  });
+
+  test('the launcher check runs only where launcher Clippy does not', () => {
+    // Ubuntu's launcher Clippy compiles the same package, targets and default
+    // features as the plain check, and fails on every error it would. macOS and
+    // Windows run no launcher Clippy, so the check is their only launcher
+    // compile.
+    const steps = extractStepBlocks(extractJobBlock(workflow, 'workspace'));
+    const check = steps.find((entry) =>
+      entry.includes('run: cargo check -p mangostudio --all-targets --locked\n')
+    );
+    const clippy = steps.find((entry) =>
+      entry.includes('run: cargo clippy -p mangostudio --all-targets --locked -- -D warnings\n')
+    );
+    expect(check, 'expected a launcher check step | received none').toBeDefined();
+    expect(clippy, 'expected a launcher Clippy step | received none').toBeDefined();
+    expect(check, 'expected the launcher check to skip Ubuntu and run elsewhere').toContain(
+      `if: ${EXPR} !cancelled() && matrix.os != 'ubuntu-latest' }}`
+    );
+    expect(clippy, 'expected launcher Clippy on Ubuntu only').toContain(
+      `if: ${EXPR} !cancelled() && matrix.os == 'ubuntu-latest' }}`
+    );
   });
 
   test('native compilation is covered by build and Clippy without duplicate checks', () => {

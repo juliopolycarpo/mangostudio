@@ -176,8 +176,11 @@ jobs:
       # below cover both graphs without repeating cargo check first.
       # Package selection prevents other members from enabling dependency
       # features that could hide a launcher-only compilation or lint failure.
+      # Ubuntu skips the plain check: its launcher Clippy below takes the same
+      # package, targets and default features and fails on every error the
+      # check would. macOS and Windows run no launcher Clippy, so they keep it.
       - run: cargo check -p mangostudio --all-targets --locked
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && matrix.os != 'ubuntu-latest' }}
 
       - name: Check launcher lints
         if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
