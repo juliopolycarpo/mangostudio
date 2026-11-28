@@ -18,7 +18,16 @@ For per-task file maps, use `docs/reference/agent-playbooks.md`.
 
 - Route plugins define their own `.group('/path', ...)` paths without the `/api` prefix.
 - Keep request and response schemas explicit, and reuse shared contracts for public shapes.
-- Prefer Kysely builder in application code. Use `kysely/sql` only when a migration or SQLite edge requires it.
+- A body schema closed with `additionalProperties: false` answers an unknown field with 422. Elysia
+  rc.5 strips it by default, so `src/plugins/closed-bodies.ts` (mounted first in `app.ts` and in
+  `createApiTestApp`; a route registered before it is not covered) compiles every route's body with
+  `additionalProperties: Type.Never()` instead, through `rejectUnknownBodyFields`. Declare body schemas
+  as before; the shared schema is not changed. Do not set `normalize: false` to get the rejection back:
+  it is global and also closes open schemas, rejects query extras and turns response extras into a 500.
+  `tests/integration/routes/strict-body-contract.integration.test.ts` walks every body route; a
+  route with an open root schema is listed, with a reason, in `tests/support/fixtures/strict-body-routes.ts`.
+  `createApiTestApp` also fails a response with an undeclared key (`tests/support/harness/closed-responses.ts`);
+  production strips it.- Prefer Kysely builder in application code. Use `kysely/sql` only when a migration or SQLite edge requires it.
 - Reuse config, secret-store, and provider abstractions before adding new env parsing or credential logic.
 - Keep auth, connector, and provider errors explicit and logged with context.
 

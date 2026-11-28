@@ -13,7 +13,10 @@ import { describe, expect, it } from 'bun:test';
 
 import { PROBLEM_JSON_MEDIA_TYPE } from '@mangostudio/shared/errors';
 
-import { withProblemDetailsMedia } from '../../../src/server/openapi-problem-details';
+import {
+  withClosedRequestBodies,
+  withProblemDetailsMedia,
+} from '../../../src/server/openapi-problem-details';
 
 const PROBLEM_REF = { $ref: '#/components/schemas/ProblemDetails' };
 
@@ -165,5 +168,96 @@ describe('withProblemDetailsMedia', () => {
     expect(withProblemDetailsMedia(null)).toBeNull();
     expect(withProblemDetailsMedia(undefined)).toBeUndefined();
     expect(() => withProblemDetailsMedia({ paths: { '/x': { parameters: [] } } })).not.toThrow();
+  });
+});
+
+const NEVER = { not: {} };
+
+function documentWithOperation(operation: Record<string, unknown>) {
+  return {
+    openapi: '3.1.0',
+    info: { title: 'MangoStudio API', version: '1.0.0' },
+    paths: { '/api/thing': { post: operation } },
+  };
+}
+
+function requestSchema(contentType: string, schema: unknown) {
+  return { requestBody: { required: true, content: { [contentType]: { schema } } } };
+}
+
+describe('withClosedRequestBodies', () => {
+  it('documents a Never-closed request body as additionalProperties: false, in every media type', () => {
+    const closed = { type: 'object', properties: {}, additionalProperties: NEVER };
+    const operation = {
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': { schema: closed },
+          'application/x-www-form-urlencoded': { schema: closed },
+          'multipart/form-data': { schema: closed },
+        },
+      },
+    };
+    const text = JSON.stringify(withClosedRequestBodies(documentWithOperation(operation)));
+
+    expect(text.match(/"additionalProperties":false/g)).toHaveLength(3);
+    expect(text).not.toContain('"not"');
+  });
+
+  it('reaches objects nested in properties, items and unions', () => {
+    const nested = {
+      type: 'object',
+      additionalProperties: NEVER,
+      properties: {
+        inner: { type: 'object', additionalProperties: NEVER },
+        rows: { type: 'array', items: { type: 'object', additionalProperties: NEVER } },
+        pick: { anyOf: [{ type: 'object', additionalProperties: NEVER }, { type: 'null' }] },
+      },
+    };
+    const amended = withClosedRequestBodies(
+      documentWithOperation(requestSchema('application/json', nested))
+    );
+
+    expect(JSON.stringify(amended)).not.toContain('"not"');
+    expect(JSON.stringify(amended).match(/"additionalProperties":false/g)).toHaveLength(4);
+  });
+
+  it('leaves a response schema that uses the Never spelling alone', () => {
+    const document = documentWithOperation({
+      responses: {
+        200: jsonResponse({ type: 'object', additionalProperties: NEVER }),
+      },
+    });
+
+    expect(withClosedRequestBodies(document)).toEqual(document);
+  });
+
+  it('leaves an open request body and a typed additionalProperties alone', () => {
+    const document = documentWithOperation(
+      requestSchema('application/json', {
+        type: 'object',
+        properties: { bag: { type: 'object', additionalProperties: { type: 'string' } } },
+      })
+    );
+
+    expect(withClosedRequestBodies(document)).toEqual(document);
+  });
+
+  it('does not mutate the document it was handed, and is idempotent', () => {
+    const original = documentWithOperation(
+      requestSchema('application/json', { type: 'object', additionalProperties: NEVER })
+    );
+    const snapshot = structuredClone(original);
+
+    const once = withClosedRequestBodies(original);
+
+    expect(original).toEqual(snapshot);
+    expect(withClosedRequestBodies(once)).toEqual(once);
+  });
+
+  it('survives a document with nothing to amend', () => {
+    expect(() => withClosedRequestBodies({})).not.toThrow();
+    expect(withClosedRequestBodies(null)).toBeNull();
+    expect(() => withClosedRequestBodies({ paths: { '/x': { parameters: [] } } })).not.toThrow();
   });
 });
