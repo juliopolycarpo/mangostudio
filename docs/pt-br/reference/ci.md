@@ -374,25 +374,44 @@ de merge de pull requests fechados.
 ou sem:
 
 - **O que é apagado.** Todo cache cuja ref é exatamente `refs/pull/<N>/merge` do
-  pull request fechado, por ID. O script lista com o filtro `ref` da API e confere
-  a ref de novo em cada entrada, então nenhuma outra ref é tocada: nem `main`,
-  nem outro pull request, nem `refs/pull/<N>/head`. Um 404 no delete conta como
-  já removido. O script lê antes o estado do pull request: um que foi reaberto
-  antes da execução começar, ou um número que o GitHub não conhece, mantém os
-  caches.
+  pull request fechado. O job do fechamento roda o `gh` do próprio runner:
+  `gh cache delete --all --ref refs/pull/<N>/merge --succeed-on-no-caches`.
+  O `gh` lista com o filtro `ref` da API (que casa a ref exatamente) e apaga cada
+  entrada por ID, então nenhuma outra ref é tocada: nem `main`, nem outro pull
+  request, nem `refs/pull/<N>/head`. O passo lê antes o estado do pull request
+  (`gh api repos/<repo>/pulls/<N> --jq .state`): um que foi reaberto antes da
+  execução começar mantém os caches, e um estado diferente de `open` ou `closed`
+  falha o job antes de apagar qualquer coisa.
 - **Gatilho.** `pull_request_target` com `types: [closed]`. Um pull request de
   fork recebe token somente leitura em `pull_request`, que não apaga caches.
   `pull_request_target` roda o arquivo da branch base com token de escrita, o que
-  só é seguro porque nenhum código do pull request roda: o job faz checkout de
-  `main` com `persist-credentials: false`, não instala nada e não baixa
-  artefatos. O número do pull request chega ao script por `env` e precisa ser um
-  inteiro positivo. As permissões são `actions: write`, `contents: read` e
-  `pull-requests: read`, com
-  grupo de concorrência por número de pull request e timeout de 10 minutos. Um
-  pull request para uma branch sem o workflow não é limpo ao fechar; use a
-  varredura abaixo.
+  só é seguro porque nenhum código do pull request roda: o job não tem checkout,
+  action, download do Bun nem artefato, só `gh` e shell. (Antes fazia checkout de
+  `main` e instalava um build canary do Bun, e uma execução prendeu um runner por
+  dois minutos num 504 desse download.) O número do pull request chega ao passo
+  por `env`, precisa ser um inteiro positivo (só dígitos, sem zero à esquerda) e é
+  validado antes da primeira chamada ao `gh`. As permissões são `actions: write` e
+  `pull-requests: read`, com grupo de concorrência por número de pull request e
+  timeout de 10 minutos. O passo repete a leitura do estado, a contagem e o delete
+  até três tentativas, com 5 s e 10 s de intervalo, o orçamento de
+  `scripts/lib/github-retry.ts`, e cada nova tentativa lista de novo.
+- **O que o `gh` não faz.** O script que rodava antes conferia a ref de novo em
+  cada entrada, lia todas as páginas contra `total_count`, tratava 404 no delete
+  como já removido e informava o progresso ao parar. O `gh` para no primeiro delete
+  que falha (um 404 de uma varredura concorrente incluído, que a nova tentativa
+  absorve ao listar de novo) e não imprime nada fora de um TTY. Por isso o passo
+  lista a ref com `gh cache list` antes, grava a contagem no resumo do job e para
+  antes de apagar se alguma entrada listada estiver em outra ref. Essa checagem só
+  detecta: `gh cache delete --all` lista de novo e confia no mesmo filtro `ref` da
+  API. Uma execução do fechamento que ainda falha depois das tentativas deixa os
+  caches até a remoção de 7 dias do GitHub ou a próxima varredura.
+- **Flags.** `gh cache delete --all`, `--ref` e `--succeed-on-no-caches` existem
+  no `gh` 2.105.0, a versão que as imagens de runner Ubuntu 24.04 e 26.04 listam.
+  O passo imprime `gh --version` para que a primeira execução registre a versão.
 - **Varredura do backlog.** Rode o workflow manualmente (`workflow_dispatch`,
-  só em `main`). Ele lista todos os caches, pergunta à API de pulls quais pull
+  só em `main`). Ele ainda roda `scripts/ci/pr-cache-cleanup.ts` a partir de um
+  checkout de `main` e cobre um pull request para uma branch sem o workflow e uma
+  execução de fechamento que falhou. Ele lista todos os caches, pergunta à API de pulls quais pull
   requests estão fechados e apaga só os caches de merge deles. Pull requests
   abertos e números que o GitHub não conhece mantêm os seus. Outros jobs salvam e
   apagam caches durante a leitura, então uma listagem que muda entre páginas é
@@ -407,8 +426,9 @@ Para rodar o script localmente, defina `GITHUB_REPOSITORY` e `GITHUB_TOKEN`:
 `bun ./scripts/ci/pr-cache-cleanup.ts --pr <N>` ou `--all-closed`. Os dois apenas
 simulam por padrão e imprimem contagens e bytes por pull request; `--delete`
 apaga de fato. `scripts/tests/pr-cache-cleanup.unit.test.ts` fixa a seleção por
-ref exata, a validação do número e as regras de gatilho, checkout e `env` do
-workflow.
+ref exata, a validação do número, as regras de gatilho, checkout e `env` do
+workflow, e roda o passo do fechamento contra um `gh` falso (reaberto, chamadas
+que falham e que são repetidas).
 
 ## Proteção de branch / checks obrigatórios
 

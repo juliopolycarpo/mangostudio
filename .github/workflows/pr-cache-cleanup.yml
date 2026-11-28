@@ -7,13 +7,16 @@ name: Pull Request Cache Cleanup
 # pull_request_target, not pull_request: a fork pull request gets a read-only
 # GITHUB_TOKEN on pull_request, which cannot delete caches. pull_request_target
 # runs this file from the base branch with a write token, which is safe only
-# because no pull request code runs here. The job checks out main, never the PR
-# head, runs no install and downloads no artifact. The one value the pull request
-# controls is its number: it travels through env, never through shell
-# interpolation, and the script accepts nothing but a positive integer.
+# because no pull request code runs here. The close-time job checks out nothing,
+# installs nothing and downloads no artifact: it runs the gh CLI the runner image
+# ships. (It used to check out main and download a Bun canary build, and one run
+# held a runner for two minutes on a 504 from that download.) The one value the
+# pull request controls is its number: it travels through env, never through
+# shell interpolation, and the step accepts nothing but a positive integer.
 #
-# A pull request into a branch that lacks this file is not cleaned on close; the
-# manual backlog sweep covers it.
+# The manual backlog sweep still runs scripts/ci/pr-cache-cleanup.ts from a
+# checkout of main. It covers what the close-time job cannot: a pull request into
+# a branch that lacks this file, and a close-time run that failed after its retries.
 on:
   pull_request_target:
     types: [closed]
@@ -41,23 +44,70 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read # check out trusted main cleanup tooling
       actions: write # delete caches saved on this pull request's merge ref
       pull-requests: read # skip a pull request that was reopened before this ran
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: main
-          persist-credentials: false
-
-      - uses: $/.github/actions/setup-bun
-
-      # No install, PR code or artifact download runs with this token.
+      # Only the runner's own gh runs: no checkout, no Bun download, no PR code,
+      # no artifact. gh has no repository to infer, so GH_REPO names it.
       - name: Delete the pull request's caches
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: bun ./scripts/ci/pr-cache-cleanup.ts --pr "$PR_NUMBER" --delete
+        run: |
+          set -euo pipefail
+
+          # The number becomes part of a ref and a URL path: digits only, no leading zero.
+          case "$PR_NUMBER" in
+            '' | *[!0-9]* | 0*)
+              echo "::error::Invalid pull request number '${PR_NUMBER}'; expected a positive integer such as 2222"
+              exit 1
+              ;;
+          esac
+          ref="refs/pull/${PR_NUMBER}/merge"
+
+          # Same budget as scripts/lib/github-retry.ts: three attempts, 5 s then 10 s apart.
+          # gh does not retry a 5xx. Every command below is a read or an idempotent delete.
+          retry() {
+            local delay
+            for delay in 5 10; do
+              "$@" && return 0
+              # stderr: the caller may be capturing this function's stdout.
+              echo "::warning::'$1 $2 $3' failed; retrying in ${delay}s" >&2
+              sleep "$delay"
+            done
+            "$@"
+          }
+
+          gh --version
+
+          # A pull request reopened before this ran keeps its caches. The assignment
+          # stands alone so a failed read stops the step instead of reading as empty.
+          state="$(retry gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}" --jq .state)"
+          case "$state" in
+            closed) ;;
+            open)
+              echo "Pull request #${PR_NUMBER} is open again; its caches stay."
+              exit 0
+              ;;
+            *)
+              echo "::error::Invalid state '${state}' for pull request #${PR_NUMBER}; expected open or closed"
+              exit 1
+              ;;
+          esac
+
+          # gh prints nothing in a non-TTY step, so count first for the summary. The
+          # same listing guards the delete below, which trusts the API's ref filter: a
+          # listed entry on any other ref (main, another pull request) stops the step.
+          counts="$(retry gh cache list --ref "$ref" --limit 1000 --json ref,sizeInBytes --jq '[length, (map(.sizeInBytes) | add // 0), (map(.ref) | unique | join(","))] | @tsv')"
+          read -r count bytes refs <<<"$counts"
+          if [ "$count" -gt 0 ] && [ "$refs" != "$ref" ]; then
+            echo "::error::Listing for ${ref} returned refs '${refs}'; expected only ${ref}, so nothing was deleted"
+            exit 1
+          fi
+          retry gh cache delete --all --ref "$ref" --succeed-on-no-caches
+          echo "Deleted ${count} caches (${bytes} bytes) on ${ref}."
+          echo "- ${ref}: ${count} caches, ${bytes} bytes" >> "$GITHUB_STEP_SUMMARY"
 
   closed-backlog:
     name: Sweep caches of closed pull requests

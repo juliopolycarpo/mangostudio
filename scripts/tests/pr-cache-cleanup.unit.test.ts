@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import type { ActionsCacheEntry } from '../ci/actions-api/client';
 import { parsePullRequestCacheArguments } from '../ci/pr-cache-cleanup';
@@ -28,6 +31,7 @@ import { RecordedRetryEnvironment, ScriptedGitHubHttp } from './support/scripted
 import {
   extractJobBlock,
   extractJobBlocks,
+  extractStepBlock,
   extractStepBlocks,
   runScriptLines,
 } from './support/workflow-blocks';
@@ -660,25 +664,43 @@ describe('pr-cache-cleanup workflow policy', () => {
   });
 
   test('never checks out or runs pull request code', () => {
-    expect(code).not.toMatch(/github\.event\.pull_request\.head/);
-    expect(code).not.toMatch(/github\.head_ref|refs\/pull\/|github\.event\.workflow_run/);
-    expect(code).not.toMatch(/\brepository:/);
-    for (const { job, block } of jobs) {
-      const steps = extractStepBlocks(block);
-      const checkouts = steps.filter((step) => /uses:\s*actions\/checkout@/.test(step));
-      expect(checkouts, `${job}: expected one checkout`).toHaveLength(1);
-      expect(checkouts[0], job).toMatch(/^\s+ref: main$/m);
-      expect(checkouts[0], job).toMatch(/^\s+persist-credentials: false$/m);
-      // Only the trusted checkout, the repo's Bun composite and the script run.
-      for (const step of steps) {
-        const uses = /uses:\s*(\S+)/.exec(step)?.[1];
-        if (uses)
-          expect(uses, job).toMatch(
-            /^(actions\/checkout@[0-9a-f]{40}|[.$]\/\.github\/actions\/setup-bun)$/
-          );
-      }
-      expect(block, job).not.toMatch(/bun (install|run)\b|download-artifact|actions\/cache/);
+    // The close-time step names the merge ref it deletes from; nothing else may mention a pull ref.
+    const refLine = `          ref="refs/pull/${'$'}{PR_NUMBER}/merge"`;
+    expect(code, 'expected the close-time step to build its merge ref').toContain(refLine);
+    const elsewhere = code.replace(refLine, '');
+    expect(elsewhere).not.toMatch(/github\.event\.pull_request\.head/);
+    expect(elsewhere).not.toMatch(/github\.head_ref|refs\/pull\/|github\.event\.workflow_run/);
+    expect(elsewhere).not.toMatch(/\brepository:/);
+
+    // The close-time job holds the write token and runs on a bare runner: no checkout, no
+    // third-party or local action, no Bun, no artifact. Its steps are gh and shell only.
+    const closedSteps = extractStepBlocks(closedJob);
+    expect(closedSteps, 'closed-pull-request: expected the one delete step').toHaveLength(1);
+    const closedCode = closedJob
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('#'))
+      .join('\n');
+    expect(closedCode, 'closed-pull-request: expected no action, checkout or Bun').not.toMatch(
+      /\buses:|\bbun\b|download-artifact|actions\/cache|\bcheckout\b/i
+    );
+
+    // The sweep still runs the script from a trusted checkout of main.
+    const backlog = extractJobBlock(workflow, 'closed-backlog');
+    const steps = extractStepBlocks(backlog);
+    const checkouts = steps.filter((step) => /uses:\s*actions\/checkout@/.test(step));
+    expect(checkouts, 'closed-backlog: expected one checkout').toHaveLength(1);
+    expect(checkouts[0]).toMatch(/^\s+ref: main$/m);
+    expect(checkouts[0]).toMatch(/^\s+persist-credentials: false$/m);
+    // Only the trusted checkout, the repo's Bun composite and the script run.
+    for (const step of steps) {
+      const uses = /uses:\s*(\S+)/.exec(step)?.[1];
+      if (uses)
+        expect(uses, 'closed-backlog').toMatch(
+          /^(actions\/checkout@[0-9a-f]{40}|[.$]\/\.github\/actions\/setup-bun)$/
+        );
     }
+    expect(backlog).not.toMatch(/bun (install|run)\b|download-artifact|actions\/cache/);
+    expect(jobs.map(({ job }) => job).sort()).toEqual(['closed-backlog', 'closed-pull-request']);
   });
 
   test('passes the pull request number through env and never interpolates a shell', () => {
@@ -688,7 +710,9 @@ describe('pr-cache-cleanup workflow policy', () => {
         'm'
       )
     );
-    expect(closedJob).toContain('bun ./scripts/ci/pr-cache-cleanup.ts --pr "$PR_NUMBER" --delete');
+    expect(closedJob).toMatch(/^ {10}GH_REPO: \$\{\{ github\.repository \}\}$/m);
+    expect(closedJob).toMatch(/^ {10}GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}$/m);
+    expect(closedJob).toContain('gh cache delete --all --ref "$ref" --succeed-on-no-caches');
     const scripts = runScriptLines(workflow);
     expect(scripts.length, 'expected run scripts in the workflow').toBeGreaterThan(0);
     for (const { line, text } of scripts)
@@ -696,8 +720,10 @@ describe('pr-cache-cleanup workflow policy', () => {
   });
 
   test('grants least permissions, a timeout and a per-pull-request concurrency group', () => {
-    expect(closedJob).toMatch(/^ {6}contents: read\b/m);
+    // Nothing is checked out, so the job needs no contents grant.
+    expect(closedJob).not.toMatch(/^ {6}contents:/m);
     expect(closedJob).toMatch(/^ {6}actions: write\b/m);
+    expect(closedJob).toMatch(/^ {6}pull-requests: read\b/m);
     expect(closedJob).not.toMatch(/(pull-requests|issues|packages|id-token|checks): write/);
     expect(closedJob).toMatch(/^ {4}timeout-minutes: \d+/m);
     expect(workflow).toContain(
@@ -717,4 +743,185 @@ describe('pr-cache-cleanup workflow policy', () => {
     expect(backlog).toContain(`bun ./scripts/ci/pr-cache-cleanup.ts "${'$'}{args[@]}"`);
     expect(backlog).toContain('args=(--all-closed)');
   });
+});
+
+// The close-time job is shell, so its guarantees are proved by running the step's own
+// script against a fake `gh` and a fake `sleep` that record what they were asked.
+describe.skipIf(process.platform === 'win32')('close-time step behavior (fake gh)', () => {
+  const STEP_NAME = "Delete the pull request's caches";
+  const MERGE_REF = 'refs/pull/7/merge';
+
+  /** The step's `run:` script, dedented from the workflow text so a copy cannot drift. */
+  function closeStepScript(): string {
+    const step = extractStepBlock(
+      extractJobBlock(readText(WORKFLOW), 'closed-pull-request'),
+      STEP_NAME
+    );
+    const body = /\n\s+run: \|\n([\s\S]*)$/.exec(step)?.[1];
+    expect(body, `${WORKFLOW}: step "${STEP_NAME}" expected a \`run: |\` script`).toBeDefined();
+    const lines = (body as string).split('\n');
+    const indent = lines.find((line) => line.trim() !== '')?.search(/\S/) ?? 0;
+    return lines.map((line) => line.slice(indent)).join('\n');
+  }
+
+  // FakeGh: logs argv (one line per call, `|` between arguments). `fails-<subcommand>` files
+  // name how many leading calls of that subcommand answer like a 504.
+  const FAKE_GH = `#!/usr/bin/env bash
+(IFS='|'; printf '%s\\n' "$*" >> "$ARGV_LOG")
+key="\${1#--}\${2:+-$2}"
+case "$1" in api) key=api ;; esac
+counter="$FAKE_DIR/count-$key"
+calls=$(( $(cat "$counter" 2>/dev/null || echo 0) + 1 ))
+echo "$calls" > "$counter"
+fails=$(cat "$FAKE_DIR/fails-$key" 2>/dev/null || echo 0)
+if [ "$calls" -le "$fails" ]; then echo "fake gh $key: HTTP 504" >&2; exit 1; fi
+case "$key" in
+  version) echo "gh version 0.0.0 (fake)" ;;
+  api) printf '%s\\n' "$FAKE_PR_STATE" ;;
+  cache-list) printf '3\\t3000\\t%s\\n' "\${FAKE_LIST_REF:-$4}" ;;
+esac
+`;
+  // FakeSleep: records the requested wait and returns at once.
+  const FAKE_SLEEP = `#!/usr/bin/env bash
+echo "$1" >> "$SLEEP_LOG"
+`;
+
+  interface CloseRun {
+    readonly exitCode: number;
+    readonly output: string;
+    readonly argv: string[];
+    readonly sleeps: string[];
+    readonly summary: string;
+  }
+
+  function runCloseStep(options: {
+    prNumber: string;
+    state?: string;
+    fails?: Record<string, number>;
+    /** Refs the fake `gh cache list` reports; defaults to the one it was asked for. */
+    listedRefs?: string;
+  }): CloseRun {
+    const dir = mkdtempSync(join(tmpdir(), 'pr-cache-close-'));
+    try {
+      const binDir = join(dir, 'bin');
+      mkdirSync(binDir);
+      writeFileSync(join(binDir, 'gh'), FAKE_GH, { mode: 0o755 });
+      writeFileSync(join(binDir, 'sleep'), FAKE_SLEEP, { mode: 0o755 });
+      for (const [key, count] of Object.entries(options.fails ?? {}))
+        writeFileSync(join(dir, `fails-${key}`), String(count));
+      const argvLog = join(dir, 'argv.log');
+      const sleepLog = join(dir, 'sleep.log');
+      const summaryPath = join(dir, 'summary.md');
+      const proc = Bun.spawnSync({
+        // `bash -e {0}` is what an Actions `run:` without `shell:` gets on Linux.
+        cmd: ['bash', '--noprofile', '--norc', '-e', '-c', closeStepScript()],
+        cwd: dir,
+        env: {
+          PATH: `${binDir}:${process.env.PATH ?? ''}`,
+          ARGV_LOG: argvLog,
+          SLEEP_LOG: sleepLog,
+          FAKE_DIR: dir,
+          FAKE_PR_STATE: options.state ?? 'closed',
+          ...(options.listedRefs ? { FAKE_LIST_REF: options.listedRefs } : {}),
+          GH_REPO: REPOSITORY,
+          GH_TOKEN: 'fake-token',
+          GITHUB_STEP_SUMMARY: summaryPath,
+          PR_NUMBER: options.prNumber,
+        },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const lines = (path: string): string[] =>
+        existsSync(path) ? readFileSync(path, 'utf8').split('\n').filter(Boolean) : [];
+      return {
+        exitCode: proc.exitCode,
+        output: proc.stdout.toString() + proc.stderr.toString(),
+        argv: lines(argvLog),
+        sleeps: lines(sleepLog),
+        summary: existsSync(summaryPath) ? readFileSync(summaryPath, 'utf8') : '',
+      };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  const deleteCalls = (run: CloseRun): string[] =>
+    run.argv.filter((line) => line.startsWith('cache|delete|'));
+
+  test('deletes exactly the closed pull request merge ref and reports the count', () => {
+    const run = runCloseStep({ prNumber: '7' });
+    expect(run.exitCode, run.output).toBe(0);
+    expect(run.argv[0]).toBe('--version');
+    expect(run.argv[1]).toBe(`api|repos/${REPOSITORY}/pulls/7|--jq|.state`);
+    expect(deleteCalls(run)).toEqual([
+      `cache|delete|--all|--ref|${MERGE_REF}|--succeed-on-no-caches`,
+    ]);
+    expect(run.argv.filter((line) => line.startsWith('cache|list|'))[0]).toContain(
+      `|--ref|${MERGE_REF}|`
+    );
+    expect(run.summary).toContain(`${MERGE_REF}: 3 caches, 3000 bytes`);
+  });
+
+  test('keeps the caches of a pull request that was reopened', () => {
+    const run = runCloseStep({ prNumber: '7', state: 'open' });
+    expect(run.exitCode, run.output).toBe(0);
+    expect(deleteCalls(run), 'expected no delete for an open pull request').toEqual([]);
+    expect(run.output).toContain('Pull request #7 is open again');
+  });
+
+  test('refuses a state that is neither open nor closed before touching any cache', () => {
+    const run = runCloseStep({ prNumber: '7', state: 'draft' });
+    expect(run.exitCode).not.toBe(0);
+    expect(run.output).toContain(
+      "Invalid state 'draft' for pull request #7; expected open or closed"
+    );
+    expect(run.argv.filter((line) => line.startsWith('cache|'))).toEqual([]);
+  });
+
+  test('stops without deleting when the state read keeps failing, after three attempts', () => {
+    const run = runCloseStep({ prNumber: '7', fails: { api: 99 } });
+    expect(run.exitCode).not.toBe(0);
+    expect(run.argv.filter((line) => line.startsWith('api|'))).toHaveLength(3);
+    expect(run.sleeps).toEqual(['5', '10']);
+    expect(run.argv.filter((line) => line.startsWith('cache|'))).toEqual([]);
+  });
+
+  test('retries a transient failure of the state read and of the delete', () => {
+    const run = runCloseStep({ prNumber: '7', fails: { api: 1, 'cache-delete': 2 } });
+    expect(run.exitCode, run.output).toBe(0);
+    expect(run.argv.filter((line) => line.startsWith('api|'))).toHaveLength(2);
+    expect(deleteCalls(run)).toHaveLength(3);
+    expect(run.sleeps).toEqual(['5', '5', '10']);
+  });
+
+  test.each(['refs/heads/main', 'refs/pull/70/merge', `${MERGE_REF},refs/heads/main`])(
+    'deletes nothing when the listing for the merge ref also returns %p',
+    (listedRefs) => {
+      const run = runCloseStep({ prNumber: '7', listedRefs });
+      expect(run.exitCode).not.toBe(0);
+      expect(deleteCalls(run), 'expected no delete after a foreign ref in the listing').toEqual([]);
+      expect(run.output).toContain(
+        `Listing for ${MERGE_REF} returned refs '${listedRefs}'; expected only ${MERGE_REF}`
+      );
+    }
+  );
+
+  test('fails the job when the delete never succeeds', () => {
+    const run = runCloseStep({ prNumber: '7', fails: { 'cache-delete': 99 } });
+    expect(run.exitCode).not.toBe(0);
+    expect(deleteCalls(run)).toHaveLength(3);
+    expect(run.summary).toBe('');
+  });
+
+  test.each(['', '0', '07', '-1', '7 8', '7;id', '$(id)', 'refs/pull/7/merge', '1e3'])(
+    'rejects the pull request number %p before any gh call',
+    (prNumber) => {
+      const run = runCloseStep({ prNumber });
+      expect(run.exitCode).not.toBe(0);
+      expect(run.argv, `PR_NUMBER=${JSON.stringify(prNumber)}: expected no gh call`).toEqual([]);
+      expect(run.output).toContain(
+        `Invalid pull request number '${prNumber}'; expected a positive integer`
+      );
+    }
+  );
 });
