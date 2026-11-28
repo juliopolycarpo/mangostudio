@@ -42,16 +42,26 @@ export const MAIN_WRITER_EVENTS = ['push', 'schedule', 'workflow_dispatch'] as c
 
 // Grammar from Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0:
 // prefix + shared-key (or key + job) + os.type() + os.arch() + 8-hex
-// Rust/environment hash + 8-hex dependency hash. The manifest hash is 64-hex.
+// Rust/environment hash + 8-hex dependency hash.
 // https://github.com/Swatinem/rust-cache/blob/d1527c8f67ef9af357290475d4af4b0fab8f12e0/src/config.ts
+//
+// The prefix has had two shapes, both 64-hex, told apart by a literal:
+//   `v0-rust-<sha256 of Cargo.toml>`            the manifest generation, retired. Every dependency
+//                                               bump rotated it, so no restore key ever matched.
+//   `v0-rust-profile-<sha256 of profile text>`  the profile generation, written by
+//                                               .github/actions/rust-cache.
 // Match the entire key so hyphenated families are never guessed.
 const KEY_GRAMMAR =
-  /^v0-rust-([a-f0-9]{64})-([a-z0-9-]+)-(Linux|Darwin|Windows_NT)-(x64|arm64)-([a-f0-9]{8})-([a-f0-9]{8})$/;
+  /^v0-rust-(profile-)?([a-f0-9]{64})-([a-z0-9-]+)-(Linux|Darwin|Windows_NT)-(x64|arm64)-([a-f0-9]{8})-([a-f0-9]{8})$/;
 const KNOWN_FAMILIES = new Set<string>(RUST_CACHE_FAMILIES);
+
+/** `manifest` is the retired `hashFiles('Cargo.toml')` prefix; `profile` the current one. */
+export type RustCacheGeneration = 'manifest' | 'profile';
 
 /** Read a known Rust cache key, independently of its ref and archive version. */
 export function parseRustCacheKey(key: string):
   | {
+      readonly generation: RustCacheGeneration;
       readonly family: string;
       readonly os: string;
       readonly arch: string;
@@ -59,7 +69,7 @@ export function parseRustCacheKey(key: string):
     }
   | undefined {
   const match = KEY_GRAMMAR.exec(key);
-  if (!match || !KNOWN_FAMILIES.has(match[2])) return;
-  const [, , family, os, arch, environment] = match;
-  return { family, os, arch, environment };
+  if (!match || !KNOWN_FAMILIES.has(match[3])) return;
+  const [, profile, , family, os, arch, environment] = match;
+  return { generation: profile ? 'profile' : 'manifest', family, os, arch, environment };
 }

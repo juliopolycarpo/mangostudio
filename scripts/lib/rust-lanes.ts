@@ -55,6 +55,8 @@ export const RUST_WORKSPACE_PATHS = [
   '.github/workflows/cargo-shim.yml',
   '.github/workflows/rust-coverage.yml',
   '.github/actions/setup-zigbuild/**',
+  // Every Rust job restores its cargo cache through this composite.
+  '.github/actions/rust-cache/**',
   // The nextest parity step in the workspace job runs this script.
   'scripts/bench/rust-test-inventory.ts',
   // Changes to detection itself must exercise the lanes it selects.

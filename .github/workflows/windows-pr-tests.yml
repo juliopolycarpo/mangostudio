@@ -27,6 +27,7 @@ on:
       - crates/**
       - .github/actions/setup-mango/**
       - .github/actions/local-runtime/**
+      - .github/actions/rust-cache/**
       - .github/workflows/windows-pr-tests.yml
 
 permissions:

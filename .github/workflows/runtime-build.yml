@@ -165,11 +165,10 @@ jobs:
       - name: Check light runtime cache
         id: seed-cache
         if: inputs.mode == 'cache-seed'
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
-          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
           shared-key: runtime-build-${{ matrix.platform }}
-          save-if: false
+          read-only: true
           lookup-only: true
 
       - uses: ./.github/actions/setup-bun # zizmor: ignore[self-repository] load the action from the selected source checkout
@@ -187,16 +186,14 @@ jobs:
       # entry is written by cache-seed mode through this same step, so its
       # key is the one a PR light build restores. The read-only lookup uses
       # the same toolchain, profile environment, and key inputs.
-      # prefix-key hashes the root manifest because rust-cache's own key
-      # ignores [profile.*].
+      # The action keys the generation on the root `[profile.*]` tables and
+      # saves only from main.
       - name: Restore the cargo cache
         id: rust-cache
         if: inputs.cache && steps.seed-cache.outputs.cache-hit != 'true'
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
-          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
           shared-key: runtime-build-${{ matrix.platform }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
           lookup-only: ${{ github.ref == 'refs/heads/main' }}
 
       # A seed has nothing to do on an exact hit: the entry it would save

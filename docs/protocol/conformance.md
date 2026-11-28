@@ -305,8 +305,10 @@ toolchain (`nightly-YYYY-MM-DD`), and the install step and every `cargo +"$FUZZ_
 it, so the pin lives in one place. Swatinem/rust-cache hashes `rustc -vV` of every installed
 toolchain into its key; a moving `nightly` changed that key daily, so no run restored a cache and
 each of the six jobs rebuilt tokio, jsonschema and regex under sanitizer instrumentation. With the
-pin, the six jobs share one cache that stays valid until the pin, the fuzz `Cargo.lock` or the
-runner image's preinstalled toolchain changes. `scripts/tests/protocol-lanes.unit.test.ts` fails on
+pin, the six jobs share one cache that stays valid until the pin, the fuzz `Cargo.lock`, the fuzz
+manifest's `[profile.*]` tables or the root `rust-toolchain.toml` pin changes. The workflow calls
+`.github/actions/rust-cache`, which uninstalls the runner image's own preinstalled toolchain
+before the cache step and keeps the pinned nightly, so an image update no longer moves the key. `scripts/tests/protocol-lanes.unit.test.ts` fails on
 a bare `nightly` or any other toolchain the workflow selects. To reproduce a CI finding locally,
 use the pinned toolchain instead of `+nightly`.
 
@@ -317,9 +319,9 @@ that `rustup toolchain install nightly-<date> --profile minimal` succeeds and th
 dependency needs a newer compiler, or about once a quarter so the fuzzer keeps tracking current
 sanitizer and codegen fixes. The first run on `main` after a bump builds cold and saves a new
 generation; the old one is never restored again and GitHub removes it seven days after its last
-use. `scripts/ci/rust-cache-cleanup.ts` does not own the `fuzz` family: its key has no
-root-manifest segment, and its identity includes the compiler hash, so it would not pair the old
-generation with the new one after a bump anyway.
+use. `scripts/ci/rust-cache-cleanup.ts` does not own the `fuzz` family: it is not in the family
+registry, and its identity includes the compiler hash, so it would not pair the old generation
+with the new one after a bump anyway.
 
 A bug either layer finds becomes an `n_` or `i_` case under `spec/fixtures/1/` (see "The fixture
 corpus" above for the naming convention and which files are generated) plus the fix, with a

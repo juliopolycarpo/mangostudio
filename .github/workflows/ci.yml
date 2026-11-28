@@ -410,7 +410,7 @@ jobs:
     # refuses anything but a main push with the cache on. It needs the gate so
     # it neither gates nor delays a mandatory lane and only runs for a green
     # commit; it is excluded from the gate's own `needs` because it needs it.
-    # A seed re-runs only on an entry miss (a Cargo.lock, Cargo.toml or
+    # A seed re-runs only on an entry miss (a Cargo.lock, root profile or
     # toolchain change); on a hit each platform exits after the lookup.
     name: Runtime light cache seed
     needs: [gate-unique, changes]

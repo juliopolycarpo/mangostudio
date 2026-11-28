@@ -60,11 +60,9 @@ jobs:
 
       # Instrumented builds land in `target/llvm-cov-target`, so this is its
       # own cache entry rather than a reuse of the plain lanes'.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: $/.github/actions/rust-cache
         with:
-          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
           shared-key: rust-coverage
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # The runtime's MCP tests launch a small stdio MCP server fixture with Bun.
       - uses: $/.github/actions/setup-bun
