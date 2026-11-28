@@ -361,49 +361,6 @@ com o argumento de porta e verifica que o estado do servidor registra o bind pad
 `.env` e do TOML. Esses caminhos de smoke qualificam contratos de bind diferentes; veja
 `tests/browser-smoke/support/smoke-home.ts`, `scripts/release/smoke-binary.sh` e os dois Dockerfiles.
 
-## Sombra de reuso de árvore
-
-Um squash merge costuma trazer a árvore que a última execução de CI do pull request já
-testou. A cada push em `main`, o último passo do Preflight calcula se isso vale para o
-commit enviado e escreve o veredito, com o motivo ou o link da execução provada e a
-árvore, no resumo do passo e no log. **Ele não pula nada**: o passo não tem `id`, não
-define saída e nenhum job ou passo o lê; a execução é a mesma completa com ou sem ele.
-Ele também não pode falhar nem atrasar a execução: o script sempre sai com 0, o passo é
-`continue-on-error` com timeout de um minuto, e o job ganha só `actions: read` e
-`pull-requests: read`. É uma medição para uma etapa futura que pularia os jobs do Browser
-Smoke com uma prova.
-
-O veredito é o `resolveTreeReuse` de `scripts/lib/tree-reuse.ts`, sobre a mesma porta
-síncrona de leitura do GitHub que o Canary usa. Ele diz "reutilizaria" só quando tudo
-isto vale; qualquer erro de leitura ou payload malformado diz "execução completa" com o
-motivo:
-
-1. o commit enviado tem exatamente um pai, e ele é o `before` do push;
-2. o diff `before...sha` (API de compare, recusada com 300 arquivos, onde ela trunca) não
-   toca nada sob `.github/`, `scripts/ci/` ou `scripts/lib/tree-reuse.ts`;
-3. `commits/{sha}/pulls` retorna exatamente um pull request: mergeado, com
-   `merge_commit_sha` igual ao commit enviado, para `main`, deste repositório (sem fork),
-   de um autor que não é bot;
-4. a execução `ci.yml` `pull_request` mais nova do head desse pull request está concluída,
-   é sucesso na primeira tentativa, deste repositório, atualizada há menos de 24 horas;
-5. `referenced_workflows` da execução não é vazio e toda entrada tem o mesmo `sha` M em
-   `refs/pull/<número>/merge`;
-6. M tem pais `[before, head do pull request]` e a árvore do commit enviado;
-7. nessa execução `CI Gate` e cada job de `TREE_REUSE_SKIPPABLE_JOBS` (os dois jobs
-   `Smoke — Browser`) tiveram sucesso na última tentativa.
-
-A prova vem de objetos git e da API do Actions, nunca de algo que a execução do pull
-request escreveu. Um merge depois que a main andou falha na verificação 6: a execução
-testou uma base mais antiga.
-
-O script do gate já tem o vocabulário que uma etapa futura usaria, e nenhum workflow o
-define. `evaluate-gate.ts` lê `REUSED_SKIPS` (uma lista de jobs, separada de
-`ALLOWED_SKIPS`), `REUSE_RUN` (a execução que prova) e `REUSE_TREE`. Um job listado que
-foi pulado reporta `skipped (reused: pull request run <id> tested tree <sha>)`. O gate
-falha quando um job é listado com `REUSE_RUN` ou `REUSE_TREE` vazio, quando um job listado
-não foi pulado, quando ele não é dependência do gate ou quando também está em
-`ALLOWED_SKIPS`.
-
 ## Limpeza de caches de pull request
 
 Os caches por PR (`...-turbo-pr-<N>-test|build|check-...`,
