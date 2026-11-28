@@ -2610,8 +2610,9 @@ is listed under `refs/heads/main`. The explicit family registry preserves the
 runner OS and architecture, target, compiler/environment hash and cache archive
 version, including distinct shipping and light-profile environment hashes.
 Only the profile prefix and dependency hash rotate. Sole entries, unknown
-families, fuzz and other cache kinds remain untouched (the fuzz key is not a registered
-family and `protocol-fuzz.yml` pins its nightly; see "Fuzzing" in `docs/protocol/conformance.md`).
+families and other cache kinds remain untouched, except the families "Retention for other main
+caches" below names. The `fuzz` family is registered (`protocol-fuzz.yml` is a cache writer and
+a cleanup trigger; see "Fuzzing" in `docs/protocol/conformance.md`).
 
 Every workflow reaches `Swatinem/rust-cache` through `.github/actions/rust-cache`, which
 `scripts/tests/cache-policy.unit.test.ts` pins. rust-cache's restore key is
@@ -2631,9 +2632,11 @@ are unchanged. The composite keeps both stable:
   the pinned one the default. A job that needs another (the fuzz nightly) names it in
   `keep-toolchains`; it must already be installed.
 
-The retired prefix's entries stay recognizable to the cleanup. The first main run that saves a
-profile-generation entry for a family, runner and archive version lets the cleanup delete that
-family's remaining `v0-rust-<sha256 of Cargo.toml>` entries, whatever their environment hash:
+The retired prefixes' entries stay recognizable to the cleanup: `v0-rust-<sha256 of Cargo.toml>` and
+the bare `v0-rust-fuzz-` keys rust-cache wrote under its default prefix before the fuzz job moved
+to the composite. The first main run that saves a profile-generation entry for a family, runner
+and archive version lets the cleanup delete that family's remaining entries of either retired
+prefix, whatever their environment hash:
 pruning the image's toolchain moved every environment hash at once, so the ordinary rule, which
 keeps one entry per environment, would never pair them. Before each deletion the
 script audits active main writers and fetches the complete listing again; a
@@ -2651,7 +2654,7 @@ post-merge lockfile change before adding more Rust cache consumers.
 
 #### Cleanup triggers
 
-The workflow starts on the completion of `CI`, `Rust fresh dependencies`,
+The workflow starts on the completion of `CI`, `Rust fresh dependencies`, `Protocol Fuzz`,
 `Randomized Order Nightly`, `Smoke — Browser`, `Smoke — Binary`, `Release` and
 `Release Dry Run` on `main`. `Cargo Shim` and `Protocol CI` are registered writers
 (the audit still defers while either runs) but not triggers. Each main push starts
@@ -2688,6 +2691,55 @@ that CI is a trigger, and that a daily scheduled writer is a trigger. A `schedul
 `workflow_dispatch` trigger on the workflow itself is not possible today: the entry
 script accepts only a `workflow_run` event and the cleanup requires a completed
 trigger run, so it would need a change under `scripts/ci/rust-cache/`.
+
+#### Retention for other main caches
+
+`cache-scoped` families save a fresh key per run on `main`, and `actions/cache` restores only the
+newest entry under a restore prefix, so every older entry of a prefix is dead weight that only
+GitHub's 7-day eviction removes. The cleanup run that prunes Rust generations also applies
+`scripts/ci/rust-cache/retention.ts` to three families, with the same trigger, writer audit,
+exact-ID revalidation and post-delete replacement check:
+
+| Family       | Key after `<os>-<arch>-<epoch>-`                                       | Restore prefix (lane)       | Writer                  |
+| ------------ | ---------------------------------------------------------------------- | --------------------------- | ----------------------- |
+| `turbo`      | `turbo-main-<build\|check>-bun-<bun>-turbo-<turbo>-<sha256>-<run>-<n>` | `build-`, `check-` per lane | `build.yml`, `lint.yml` |
+| `timings`    | `timings-main-test-shard-<count>-<run id>`                             | `test-`                     | `test.yml` (merge job)  |
+| `lint-tools` | `lint-tools-main-<sha256 of the lint tool manifest>`                   | the family                  | `lint.yml`              |
+
+The Bun and Turbo versions may contain hyphens. Two retired `turbo` shapes are still read so they
+are pruned instead of failing the run: the `test` lane and the keys written before rotation, which
+have no `-<run>-<n>` suffix.
+
+- **Rule.** Per lane (platform and family, not epoch, validity or archive version) keep the newest
+  three entries by `created_at` (ties by cache ID) and delete the rest, oldest first, each paired
+  with the lane's newest entry as its replacement. Lanes are coarser than the exact validity on
+  purpose: the turbo validity embeds the Bun canary revision, so grouping on it would keep the
+  newest entry of every revision ever seen (the 2026-11-28 listing had 38 distinct validities for 88
+  turbo entries). A run whose exact validity has no entry falls back to the loose lane prefix, which is
+  the newest entry of the lane. The epoch is left out so a `CI_CACHE_EPOCH` bump, which invalidates
+  every older entry by design, ages them out against the new ones.
+- **Why three.** Restore reads the single newest entry, and the writer audit already defers while
+  any main writer runs, so the extra two cover a pull request that resolved its restore key just
+  before a save landed and a rerun of an older commit that saves out of order. Deleting a needed
+  entry costs one cold turbo run or one unbalanced shard split, never a failed build.
+- **Quiet window.** An entry created or restored (`last_accessed_at`) within the last hour is never
+  deleted, even beyond the newest three, because a run that restored it a moment ago may still be
+  downloading. Entries inside the window still count toward the three.
+- **Scope.** Only `refs/heads/main` entries whose key names one of the three families in the main
+  scope. Pull request refs, other branches, `run-<id>` scopes (a `schedule` or `workflow_dispatch`
+  run on `main` saves under `run-<id>`, which no key restores; they are not cleaned) and every
+  family not in the table are never selected.
+- **Fails closed.** A main-scope key of a named family that does not match the grammar above, or an
+  unreadable `created_at`/`last_accessed_at`, fails the run before any deletion, in the plan and in
+  every revalidation. The error names the key and the expected grammar. This also stops the Rust
+  deletions of that run, so the failure is seen instead of skipped.
+- **Per-run cap.** A deletion costs about ten API requests (the writer audit, two listings and the
+  DELETE) against the workflow token's 1,000 requests per hour, so one run attempts at most 25
+  retention deletions, oldest first. The 2026-11-28 listing (178 entries) held 133 deletable ones,
+  so the backlog clears over six runs; steady state is at most three entries per main push.
+- **Preview.** `bun ./scripts/ci/rust-cache-cleanup.ts --fixture <listing.json> [--now <ISO 8601>]`
+  prints one run's plan from a captured listing, with the cap applied and the clock pinned by
+  `--now`.
 
 ### Cargo incremental compilation
 

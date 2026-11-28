@@ -23,6 +23,8 @@ export interface ActionsCacheEntry {
   readonly ref: string;
   readonly version: string;
   readonly created_at: string;
+  /** Present in every live listing; a restore updates it. Older fixtures omit it. */
+  readonly last_accessed_at?: string;
   readonly size_in_bytes: number;
 }
 
@@ -44,11 +46,12 @@ export function parseCacheEntry(value: unknown): ActionsCacheEntry {
     typeof value.ref !== 'string' ||
     typeof value.version !== 'string' ||
     typeof value.created_at !== 'string' ||
+    (value.last_accessed_at !== undefined && typeof value.last_accessed_at !== 'string') ||
     !Number.isSafeInteger(value.size_in_bytes) ||
     Number(value.size_in_bytes) < 1
   ) {
     throw new Error(
-      `Invalid cache entry ${JSON.stringify(value)}; expected a positive ID/size, key, ref, version and creation timestamp`
+      `Invalid cache entry ${JSON.stringify(value)}; expected a positive ID/size, key, ref, version, creation timestamp and an optional string last_accessed_at`
     );
   }
   return value as unknown as ActionsCacheEntry;

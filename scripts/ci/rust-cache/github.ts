@@ -87,11 +87,12 @@ export class GithubRustCacheApi implements RustCacheApi {
   }
 
   /**
-   * List every committed Rust cache on main; never use one capped page.
+   * List every committed cache on main, whatever its key; never use one capped page. The
+   * selections skip keys no rule names, and the ref filter keeps pull request refs out of reach.
    * @example await api.listCaches();
    */
   listCaches(): Promise<RustCacheEntry[]> {
-    return listActionsCaches(this.client, { ref: MAIN_CACHE_REF, key: 'v0-rust-' });
+    return listActionsCaches(this.client, { ref: MAIN_CACHE_REF });
   }
 
   /**

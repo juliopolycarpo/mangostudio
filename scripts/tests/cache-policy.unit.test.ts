@@ -66,10 +66,6 @@ const RUST_CACHE_CALL_INPUTS = new Set([
   'read-only',
 ]);
 const RUST_CACHE_USES = /^\s*(?:-\s+)?uses: [.$]\/\.github\/actions\/rust-cache(?:\s|$)/m;
-// The fuzz workspace is excluded from the root workspace and has its own
-// manifest, so the root manifest's profiles never apply to it. Its cache is not a registered
-// family: the cleanup tooling ignores it and the entries age out.
-const RUST_UNREGISTERED_FAMILY_FILES = new Set(['.github/workflows/protocol-fuzz.yml']);
 // Keep existing physical entries recognizable to lifecycle accounting until
 // their post-merge disposition is verified; these families have no writer.
 const RETIRED_RUST_CACHE_FAMILIES = new Set(['semver-checks', 'schema-equality']);
@@ -218,14 +214,12 @@ describe('CI cache policy', () => {
         )
       );
     };
-    const entrypoints = workflowFiles().filter((file) => {
-      if (file === '.github/workflows/protocol-fuzz.yml') return false;
-      return (
+    const entrypoints = workflowFiles().filter(
+      (file) =>
         sectionKeys(extractOnBlock(readText(file))).some((event) =>
           ['push', 'schedule', 'workflow_dispatch'].includes(event)
         ) && reachesRustCache(file)
-      );
-    });
+    );
     expect(entrypoints.sort()).toEqual(RUST_CACHE_WRITERS.map((writer) => writer.path).sort());
     const cleanup = Bun.YAML.parse(readText('.github/workflows/rust-cache-cleanup.yml')) as {
       on: { workflow_run: { workflows: string[] } };
@@ -279,7 +273,6 @@ describe('CI cache policy', () => {
     }
     const observed = new Set<string>();
     for (const step of rustCacheSteps()) {
-      if (RUST_UNREGISTERED_FAMILY_FILES.has(step.file)) continue;
       const shared = /^\s+shared-key: (.+)$/m.exec(step.block)?.[1];
       const inputKey = /^\s+key: (.+)$/m.exec(step.block)?.[1];
       const family = shared ?? [inputKey, step.job].filter(Boolean).join('-');

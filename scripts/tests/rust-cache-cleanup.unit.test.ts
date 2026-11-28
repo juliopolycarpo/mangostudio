@@ -207,7 +207,7 @@ describe('Rust cache generation selection', () => {
     expect(ids([OLD, changedEntry(NEW, { id: OLD.id })])).toEqual([]);
   });
 
-  test('keeps sole entries, non-Rust families, excluded fuzz and unknown future families', () => {
+  test('keeps sole entries, non-Rust families, a lone retired fuzz key and unknown future families', () => {
     const fuzz = changedEntry(OLD, { id: 2, key: 'v0-rust-fuzz-Linux-x64-12345678-87654321' });
     const future = changedEntry(OLD, {
       id: 3,
@@ -271,6 +271,60 @@ describe('Rust cache generation selection', () => {
     expect(ids([NEW, changedEntry(OLD, { created_at: NEW.created_at })])).toEqual([]);
     expect(ids([NEW, changedEntry(OLD, { created_at: 'not a timestamp' })])).toEqual([]);
     expect(ids([NEW, changedEntry(OLD, { key: NEW.key })])).toEqual([]);
+  });
+});
+
+describe('retired fuzz keys and the Rust grammar', () => {
+  const profile = `v0-rust-profile-${'1'.repeat(64)}-fuzz-Linux-x64-8272a5e9-aaaa1111`;
+  const bare = (environment: string, lock: string) =>
+    `v0-rust-fuzz-Linux-x64-${environment}-${lock}`;
+
+  test('reads the bare fuzz key and the profile fuzz key as the fuzz family', () => {
+    expect(parseRustCacheKey(bare('382b4d60', '96e3044c'))).toEqual({
+      generation: 'bare',
+      family: 'fuzz',
+      os: 'Linux',
+      arch: 'x64',
+      environment: '382b4d60',
+    });
+    expect(parseRustCacheKey(profile)).toMatchObject({ generation: 'profile', family: 'fuzz' });
+  });
+
+  test.each([
+    'v0-rust-workspace-Linux-x64-382b4d60-96e3044c',
+    'v0-rust-fuzz-Linux-x64-382b4d60',
+    'v0-rust-fuzz-Linux-x64-382B4D60-96e3044c',
+    'v0-rust-fuzz-extra-Linux-x64-382b4d60-96e3044c',
+  ])('does not read %p as a Rust cache key', (key) => {
+    expect(parseRustCacheKey(key)).toBeUndefined();
+  });
+
+  test('retires every bare fuzz key once a profile fuzz entry exists, whatever its environment', () => {
+    const olds = [
+      changedEntry(OLD, { id: 11, key: bare('31d23444', '072a1532') }),
+      changedEntry(OLD, { id: 12, key: bare('382b4d60', '96e3044c') }),
+      changedEntry(OLD, { id: 13, key: bare('c730b669', '96e3044c') }),
+    ];
+    const successor = changedEntry(NEW, { id: 14, key: profile });
+    expect(
+      selectRustCacheDeletions([...olds, successor])
+        .map((plan) => plan.entry.id)
+        .sort()
+    ).toEqual([11, 12, 13]);
+    // Until the first profile fuzz entry is saved the bare ones are the only fuzz caches.
+    expect(selectRustCacheDeletions(olds)).toEqual([]);
+  });
+
+  test('keeps a bare fuzz key when the profile successor has another archive version', () => {
+    const old = changedEntry(OLD, { id: 11, key: bare('31d23444', '072a1532') });
+    const successor = changedEntry(NEW, { id: 14, key: profile, version: 'e'.repeat(64) });
+    expect(selectRustCacheDeletions([old, successor])).toEqual([]);
+  });
+
+  test('prunes superseded profile fuzz entries of the same compiler hash like any family', () => {
+    const older = changedEntry(OLD, { id: 15, key: profile.replace('aaaa1111', 'bbbb2222') });
+    const newer = changedEntry(NEW, { id: 16, key: profile });
+    expect(selectRustCacheDeletions([older, newer]).map((plan) => plan.entry.id)).toEqual([15]);
   });
 });
 
@@ -482,7 +536,7 @@ class FakeStartingWriterHttp extends FakeGithubHttp {
 }
 
 describe('GitHub cache adapter', () => {
-  test('follows every cache page with main-ref and Rust-prefix scope', async () => {
+  test('follows every cache page with main-ref scope and no key filter', async () => {
     const http = new FakeGithubHttp();
     const first = Array.from({ length: 100 }, (_, i) => changedEntry(OLD, { id: i + 1 }));
     http.replies = [
@@ -493,7 +547,8 @@ describe('GitHub cache adapter', () => {
     expect(http.calls.map(({ url }) => url.searchParams.get('page'))).toEqual(['1', '2']);
     for (const { url, init } of http.calls) {
       expect(url.searchParams.get('ref')).toBe('refs/heads/main');
-      expect(url.searchParams.get('key')).toBe('v0-rust-');
+      // The retention rule reads families outside `v0-rust-`, so the listing carries no key filter.
+      expect(url.searchParams.get('key')).toBeNull();
       expect(init.redirect).toBe('error');
       expect(init.headers).toMatchObject({ authorization: 'Bearer fake-token' });
     }
@@ -693,7 +748,7 @@ describe('GitHub cache adapter', () => {
     const partial = { status: 200, body: { total_count: 2, actions_caches: [NEW] } };
     http.replies = [{ status: 200, body: MAIN_RUN }, partial, partial, partial];
     await expect(http.cleanup({ apply: true })).rejects.toThrow(
-      'Incomplete actions_caches listing 1/2; expected every entry; main Rust cache listing gave up after 3 attempts'
+      'Incomplete actions_caches listing 1/2; expected every entry; main cache listing gave up after 3 attempts'
     );
     expect(http.calls.map(({ init }) => init.method)).not.toContain('DELETE');
   });
