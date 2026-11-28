@@ -666,6 +666,13 @@ and the workflow file. It is advisory: it is not in the
 `needs`, so a starved runner delays the signal but never a merge. A superseded push cancels the
 earlier run. There is no macOS pull-request job; the scheduled native run covers macOS.
 
+Before the API lane, an advisory step (`scripts/ci/windows-cold-start.ts`) starts the tools the
+layout tests spawn twice, reads the trees they load from, and prints the Defender state, all as
+`[windows-cold-start]` lines. It exists because the first case of `install-ps1-layout` and
+`install-sh-layout` sometimes took 13 to 17 s and lost the 15 s default timeout while the cases
+after it took under 2 s (#2661). A `COLD` start line or a multi-second `read` line names the cold
+component; the first cases of those two files should then match their second cases.
+
 ## Workflow hygiene
 
 `scripts/tests/workflow-hygiene.unit.test.ts` enforces repository-wide workflow
