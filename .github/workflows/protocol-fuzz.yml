@@ -14,9 +14,13 @@ permissions:
 # under sanitizer instrumentation before the 300s run starts, so two overlapping
 # runs would fight over the same cache entry for no extra coverage. The cache is
 # warm on every run except the first after a FUZZ_NIGHTLY or lockfile change.
+#
+# The group is shared by every pure diagnostic workflow (see "Concurrency
+# policy" in docs/reference/ci.md), so one of them runs at a time and the rest
+# wait in order instead of competing with pull request CI for runners.
 concurrency:
-  group: protocol-fuzz-${{ github.ref }}
-  cancel-in-progress: false
+  group: diagnostics
+  queue: max
 
 # Incremental compilation keeps state for rebuilding one target directory. A CI
 # job builds once, so that state only costs time and disk (measured and written

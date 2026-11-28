@@ -10,10 +10,13 @@ import { wholeFileWorkflowAssertions } from './support/whole-file-workflow-asser
 import {
   extractJobBlock,
   extractJobBlocks,
+  extractOnBlock,
   extractStepBlocks,
   extractStepBlocksUsing,
+  extractTopLevelBlock,
   githubScripts,
   runScriptLines,
+  sectionKeys,
 } from './support/workflow-blocks';
 import { compositeActionFiles, workflowFiles } from './support/workflow-files';
 
@@ -445,6 +448,41 @@ describe('workflow hygiene', () => {
     }
     // Guards against the policy silently covering zero workflows.
     expect(checked).toBeGreaterThan(0);
+  });
+
+  // Pure diagnostics: cron or manual runs that no required check, Canary or
+  // release step reads. They share one FIFO group so they wait for each other
+  // instead of competing with pull request CI for the runner cap.
+  const DIAGNOSTIC_WORKFLOWS = [
+    '.github/workflows/cross-runtime-nightly.yml',
+    '.github/workflows/protocol-fuzz.yml',
+    '.github/workflows/randomized-order-nightly.yml',
+  ];
+
+  test('diagnostic workflows share one queued group and never cancel', () => {
+    const received = workflowFiles()
+      .filter((file) =>
+        /^ {2}group: diagnostics$/m.test(extractTopLevelBlock(readText(file), 'concurrency'))
+      )
+      .sort();
+    expect(received, 'workflows in the `diagnostics` group').toEqual(DIAGNOSTIC_WORKFLOWS);
+    for (const file of DIAGNOSTIC_WORKFLOWS) {
+      const concurrency = extractTopLevelBlock(readText(file), 'concurrency');
+      // `queue: max` keeps up to 100 pending runs in order; the default keeps one.
+      // GitHub rejects it next to `cancel-in-progress: true`, so the key is absent.
+      expect(concurrency, `${file} concurrency block`).toMatch(/^ {2}queue: max$/m);
+      expect(concurrency, `${file} concurrency block`).not.toContain('cancel-in-progress');
+    }
+  });
+
+  test('diagnostic workflows run only on schedule or manual dispatch', () => {
+    for (const file of DIAGNOSTIC_WORKFLOWS) {
+      const triggers = sectionKeys(extractOnBlock(readText(file)));
+      expect(
+        triggers,
+        `${file} triggers: expected only schedule and workflow_dispatch so no required check waits in the diagnostics queue`
+      ).toEqual(['schedule', 'workflow_dispatch']);
+    }
   });
 });
 
