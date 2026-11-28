@@ -1027,7 +1027,8 @@ A revisão, ferramentas, perfil e features padrão acima são obrigatórios. Use
 limpe overrides de compilador/perfil não relacionados e confira todas as linhas. Os comandos mostram
 o mesmo fluxo build/cópia/strip/seções. O grupo supervisionado executado também exigiu selos de
 revisão/tools/evidência antiga iguais, contagens exatas de arquivo/texto do bloat, crates únicos e não
-vazios, alocação limitada e escopos finais vazios.
+vazios, alocação limitada e escopos finais vazios. Os comandos registram uma medição passada:
+`MANGOSTUDIO_RELEASE_VERSION` era input de compilação na época e não afeta mais o build; remova-a para executá-los hoje.
 
 ```bash
 # From the recorded source, with cargo-bloat 0.12.1 and GNU binutils 2.46.

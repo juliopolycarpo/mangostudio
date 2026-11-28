@@ -1285,7 +1285,9 @@ The exact source, tools, profile and default feature selection above are require
 output/target, clear unrelated compiler/profile overrides and inspect all returned rows. These commands
 show the same build/copy/strip/section workflow; the executed supervised cohort also required unchanged
 source/tool/old-evidence seals, exact bloat file/text counts, unique nonempty crate rows, bounded
-allocation and empty terminal process scopes.
+allocation and empty terminal process scopes. The commands are the record of a past measurement:
+`MANGOSTUDIO_RELEASE_VERSION` was a compile input then and no longer affects the build, so drop it
+to run them today.
 
 ```bash
 # From the recorded source, with cargo-bloat 0.12.1 and GNU binutils 2.46.
