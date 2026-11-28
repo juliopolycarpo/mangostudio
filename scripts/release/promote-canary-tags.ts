@@ -14,6 +14,7 @@ import {
   promoteCanaryTags,
 } from '../lib/canary-tags';
 import { readDistributionManifest } from '../lib/distribution-manifest';
+import { GitHubRetry, STANDARD_RETRY_POLICY } from '../lib/github-retry';
 import type { NpmCommandResult } from '../lib/npm-publish';
 import { requireJsonRecord } from '../lib/script-guards';
 
@@ -145,7 +146,11 @@ export class HttpCanaryRegistry implements RegistryClient {
 export class GitHubCanaryTagAncestry implements CanaryTagAncestry {
   constructor(
     private readonly repository: string,
-    private readonly runner: CanaryTagRunner
+    private readonly runner: CanaryTagRunner,
+    // One budget per adapter: its GET reads retry a 5xx or a rate limit under the
+    // standard policy (5 s, then 10 s, at most 60 s in all). Tests inject a retry
+    // whose environment records the waits.
+    private readonly retry: GitHubRetry = new GitHubRetry(STANDARD_RETRY_POLICY)
   ) {
     validateRepository(repository);
   }
@@ -201,11 +206,15 @@ export class GitHubCanaryTagAncestry implements CanaryTagAncestry {
   }
 
   private async get(path: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    const response = await this.runner.run(['gh', 'api', path], signal);
-    if (response.exitCode !== 0)
+    // A GET is idempotent, so a 502 or a secondary rate limit is read again.
+    const response = await this.retry.ghCommand(() => this.runner.run(['gh', 'api', path], signal));
+    if (response.exitCode !== 0) {
+      // Only a bare status code is surfaced: gh stderr can carry a signed URL.
+      const status = /\bHTTP (\d{3})\b/.exec(response.stderr)?.[1];
       throw new Error(
-        `GitHub canary ancestry ${path}: expected exit0; received ${response.exitCode}`
+        `GitHub canary ancestry ${path}: expected exit0; received ${response.exitCode}${status ? ` (HTTP ${status})` : ''}`
       );
+    }
     let body: unknown;
     try {
       body = JSON.parse(response.stdout);
