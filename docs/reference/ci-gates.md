@@ -133,6 +133,27 @@ topology changes must verify actual PR context names and application IDs before
 changing these settings. Canary independently verifies its expected successful
 workflow producers and unique aggregate names.
 
+## Light lane set refusal
+
+A manifest-only Dependabot pull request without the `ci: full` label runs a light lane
+set (see [`ci.md`](./ci.md#light-lane-set-for-dependabot-pull-requests)). Every aggregate
+on a lightened workflow (`CI Gate`, `Cargo Shim Gate`, `Protocol Gate` and `Release Dry Run
+/ Release Dry Run Gate`) takes `LANE_SET` from the `changes` job and, when it is `light`,
+evaluates its needs, reports each lane's real result and then fails with
+`light lane set for a Dependabot pull request; add the ci: full label and ask Dependabot to
+rebase to run the full set`. Required contexts and application IDs are unchanged, so the
+ruleset needs no edit: the contexts report, they just never pass on a light run.
+
+The evaluator tells the two failures apart. With every lane green it logs
+`Gate: refused, no lane failed` and titles the job summary `Gate refused`. With a failed
+lane it logs `Gate: light lane failure` and then `also refused`, and titles the summary
+`Gate failed`. A missing, empty or unknown `LANE_SET` fails the gate rather than reading as
+`full`; only a gate with no `LANE_SET` variable at all is lane-unaware.
+
+CodeQL and Dependency Review are not lightened: CodeQL's context is reported by code
+scanning, so no job of ours could refuse a lighter run, and Dependency Review costs about
+one minute. `scripts/tests/lane-mode.unit.test.ts` pins both the wiring and this boundary.
+
 ## Verification boundary
 
 `gate-compatibility.unit.test.ts` uses explicit relevance fixtures from `gate-cases.json`

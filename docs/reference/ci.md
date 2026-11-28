@@ -16,6 +16,10 @@ dependency results through `scripts/ci/evaluate-gate.ts`.
 | `Protocol CI` (`protocol-ci.yml`)                       | `Protocol Gate`                          | Mandatory protocol lanes only when no compiled protocol validation is required                                                                                                                                                     |
 | `Release Dry Run` (`release-dry-run.yml`), called by CI | `Release Dry Run / Release Dry Run Gate` | Irrelevant assertion lanes and the clean runtime producer on the verified same-run PR reuse path                                                                                                                                   |
 
+The skips above are the full lane set's. The first four gates also receive `LANE_SET` and,
+for a [light Dependabot run](#light-lane-set-for-dependabot-pull-requests), report their
+lanes and then fail on purpose.
+
 Reusable workflow calls prefix the leaf job name with the caller's job name.
 Standalone scheduled or manual Release Dry Run runs report `Release Dry Run Gate`.
 The legacy jobs named `Gate` have been removed. The
@@ -59,6 +63,95 @@ Unit tests in `scripts/tests/ci-gate.unit.test.ts` derive each gate's expected `
 the workflow text. `gate-compatibility.unit.test.ts` verifies the surviving unique
 producers, mandatory dependencies and accepted-skip contracts. Adding a mandatory
 lane without wiring it into the aggregate fails validation.
+
+## Light lane set for Dependabot pull requests
+
+Dependabot pull requests are rolled up into one human-authored pull request instead of
+being merged (119 closed unmerged against 11 merged at the time of writing), yet each one
+used to run the whole fan-out under the account's 20-job cap. A manifest-only Dependabot
+pull request now runs a light lane set, and no light run can merge.
+
+**When a run is light.** All of these hold, decided once by
+[`scripts/lib/lane-mode.ts`](../../scripts/lib/lane-mode.ts):
+
+- the event is `pull_request`;
+- the pull request author, `github.event.pull_request.user.login`, is exactly
+  `dependabot[bot]`. `github.actor` is never read: it changes when a maintainer pushes to
+  the branch or re-runs a job;
+- the head repository is this repository;
+- the pull request has no `ci: full` label at run time (see below);
+- every changed path is a manifest of one ecosystem: `package.json` files and `bun.lock`
+  (bun), `Cargo.toml`/`Cargo.lock` files (cargo), or `.github/workflows/*.yml` and
+  `.github/actions/*/action.yml` (github-actions). A maintainer's fix commit on the
+  Dependabot branch, a mixed diff, and the docker ecosystem run the full set: Smoke —
+  Container is the only lane that builds the Dockerfiles, and light drops it.
+
+Anything else, including every human-authored pull request (rollups included), every push
+and every manual dispatch, runs the full set unchanged.
+
+**Where it is decided.** One step, `Decide the lane set` (`scripts/ci/lane-mode.ts`), in
+the `changes` job of `ci.yml` (Preflight), `cargo-shim.yml` and `protocol-ci.yml`. Each
+publishes `lane_set` (`full` or `light`) and a one-line `lane_reason`, which the step also
+writes to the log and the job summary. Every later condition reads `lane_set`; none
+re-derives the author. The step needs `pull-requests: read` (job-level, with
+`contents: read`) and no secret, which a Dependabot `pull_request` token can hold.
+
+**What a light run keeps and drops.** Minutes are runner minutes from the check-run
+durations of six Dependabot pull requests (#2185, #2689 to #2693), rounded up per job:
+
+| Workflow lane                                                                                                                                                    | Light                     | Full minutes seen |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | ----------------- |
+| CI: Check, Dependency Audit (with the cargo advisory audit), Local Runtime, Test shards, Build, Browser smoke, Rust Coverage (Ubuntu), QA Metrics, Cross-runtime | kept                      | 25 to 33          |
+| CI: Distribution (eight targets), Smoke — Binary, Smoke — Container                                                                                              | dropped                   | 45 to 68          |
+| CI: Release Dry Run lanes                                                                                                                                        | dropped, the gate reports | 2 to 6            |
+| Cargo Shim: Workspace (Ubuntu), Runtime clippy (musl)                                                                                                            | kept                      | 2 to 10           |
+| Cargo Shim: Workspace (macOS, Windows, Windows ARM64), real-binary qualification                                                                                 | dropped                   | 9 to 35           |
+| Protocol CI: every Ubuntu lane (TypeScript, Rust, Interop, cargo-deny, schema equality)                                                                          | kept                      | 2 to 12           |
+| Protocol CI: macOS and Windows legs of Rust and Interop                                                                                                          | dropped                   | 0 to 19           |
+| Dependency Review, CodeQL, labeler, PR title, Windows PR Tests                                                                                                   | unchanged                 |                   |
+
+Light cost 432 runner minutes across those six pull requests against 981 for the full set
+(56% less): bun bumps 107 to 53, cargo bumps 188 to 74, 204 to 96 and 204 to 89, and an
+actions bump 169 to 66. Docker bumps were not measured (one docker pull request exists).
+CodeQL's Rust legs (about 22 of its 27 minutes on cargo bumps) stay because its required
+context comes from code scanning, which no gate of ours can refuse. Windows PR Tests (13
+minutes on bun bumps) is advisory, in no gate, and not lightened yet; that is a follow-up.
+
+**The gates refuse.** In a light run `CI Gate`, `Cargo Shim Gate`, `Protocol Gate` and
+`Release Dry Run / Release Dry Run Gate` each receive `LANE_SET` and evaluate their needs
+as usual, then fail with
+
+```text
+light lane set for a Dependabot pull request; add the ci: full label and ask Dependabot to rebase (or re-run all jobs, not only the failed ones) to run the full set
+```
+
+Every workflow that lightens refuses, so re-running one workflow after adding the label
+cannot turn a light run into a mergeable one. The refusal and a lane failure are
+different: when every light lane passed the job log says `Gate: refused, no lane failed`
+and the summary is titled `Gate refused`; when a light lane failed it reports
+`Gate: light lane failure` first, then `also refused`, and the summary is titled
+`Gate failed`. `LANE_SET` must be exactly `full` or `light`; an empty or unknown value
+(a broken `changes` output) fails the gate. CodeQL's required context comes from code
+scanning and Dependency Review costs one minute, so neither has a light variant. Windows
+PR Tests stays advisory and unchanged for now.
+
+**Restoring the full run.** Create the `ci: full` label once in the repository settings,
+add it to the pull request, then comment `@dependabot rebase`, which pushes a fresh
+commit and starts every workflow with the label visible. Alternatively use "Re-run all
+jobs" on each of `CI`, `Cargo Shim` and `Protocol CI`. Dependabot may answer `rebase` on
+an up-to-date pull request with a note that there is nothing to do and push nothing, so no
+run starts; comment `@dependabot recreate` instead, which rebuilds the branch and the
+pull request payload. "Re-run failed jobs" does not re-run
+the `changes` job, so it keeps the light output and the gate refuses again. CI has no
+`labeled` trigger on purpose: the labeler adds labels to every pull request when it opens,
+and a trigger would double every run. The label is read through the API at run time
+because a re-run reuses the original event payload, which never shows a label added
+afterwards; a rebase has a new payload and sees it either way. If that read fails the run
+is full.
+
+**Tests.** `scripts/tests/lane-mode.unit.test.ts` pins the classification matrix
+(author, label, ecosystem), the label read with a named API fake, the gate's refusal in
+the three light cases and with the label, and the workflow wiring.
 
 ## Protocol relevance and advisory semver
 

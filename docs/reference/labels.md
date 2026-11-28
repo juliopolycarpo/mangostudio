@@ -70,6 +70,14 @@ zero or multiple `type:` labels. Closed issues are left alone so label cleanup d
 - `type: chore` — manual, maintenance that fits no other type
 - `type: bug`, `type: feature`, `type: migration`, `type: question` — manual / issue-template defaults
 
+## `ci:` (how CI runs)
+
+Applied by hand to a pull request; no glob and no workflow applies it, and it does not
+count as an `area:` or `type:` classification. Create it once in the repository's label
+settings before first use.
+
+- `ci: full` — restores the full lane set on a Dependabot pull request, which otherwise runs a light set that its gates refuse to merge. Add it, then comment `@dependabot rebase`; if Dependabot replies that the pull request is up to date, use `@dependabot recreate`, or "Re-run all jobs" on CI, Cargo Shim and Protocol CI. See [`ci.md`](./ci.md#light-lane-set-for-dependabot-pull-requests)
+
 ## `status:` (issues only)
 
 Issues carry exactly one `status:` label. No glob applies these — `issue-triage.yml` seeds the
@@ -87,7 +95,9 @@ Keep new labels and glob moves in sync between `.github/labeler.yml`, `.github/d
 and this page. `scripts/tests/labeler.unit.test.ts` asserts that the `area:`/`type:` label set
 documented here matches the one defined in `.github/labeler.yml` (plus the manual-only labels
 above), so a label added to one and not the other fails the test by name. The glob text on each
-bullet and the `status:` list are **not** asserted — keep those accurate by hand.
+bullet, the `ci:` section and the `status:` list are **not** asserted — keep those accurate by
+hand. `scripts/lib/lane-mode.ts` owns the `ci: full` name; `lane-mode.unit.test.ts` checks that
+both language versions of this page spell it.
 
 ## Related
 

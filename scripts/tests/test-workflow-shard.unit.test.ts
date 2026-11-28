@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { LANE_SET_OS_MATRIX } from './support/lane-set-workflows';
 import { readText } from './support/read-text';
 import {
   extractJobBlock,
@@ -443,7 +444,8 @@ describe('Test workflow shape', () => {
   // matrix, so that matrix, not this workflow, is what must keep Windows.
   test('leaves the Windows runtime slot tests to the cargo workspace matrix', () => {
     const cargo = extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'workspace');
-    expect(cargo).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
+    // Windows stays in the full set; only the light Dependabot set narrows to Ubuntu.
+    expect(cargo).toContain(LANE_SET_OS_MATRIX);
     expect(cargo).toContain(
       'cargo nextest run --workspace --all-targets --all-features --locked --retries 0'
     );

@@ -59,8 +59,15 @@ jobs:
     runs-on: ubuntu-latest
     # Bun setup can wait four minutes for a republished canary asset.
     timeout-minutes: 9
+    # A job-level block replaces the workflow's, so contents stays. The pull
+    # request read is for the lane-set step's label lookup.
+    permissions:
+      contents: read
+      pull-requests: read # the PR's current labels for the lane-set step
     outputs:
       protocol: ${{ steps.changed.outputs.protocol }}
+      lane_set: ${{ steps.lanes.outputs.lane_set }}
+      lane_reason: ${{ steps.lanes.outputs.lane_reason }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -91,6 +98,20 @@ jobs:
 
           bun ./scripts/ci/changed-paths.ts collect "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/changed-files"
           bun ./scripts/ci/protocol-lanes.ts relevance "$RUNNER_TEMP/changed-files" >> "$GITHUB_OUTPUT"
+
+      # The same lane-set decision CI's Preflight makes, from the same script
+      # and inputs; see the step of that name in ci.yml. A manual dispatch or a
+      # zero base never collects a path file, and is never light.
+      - id: lanes
+        name: Decide the lane set
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: bun ./scripts/ci/lane-mode.ts "$RUNNER_TEMP/changed-files" >> "$GITHUB_OUTPUT"
 
   typescript:
     name: TypeScript
@@ -127,7 +148,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Light keeps Ubuntu only; the Gate refuses the run (lane-mode.ts).
+        os: ${{ fromJSON(needs.changes.outputs.lane_set == 'light' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -175,7 +197,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Light keeps Ubuntu only; the Gate refuses the run (lane-mode.ts).
+        os: ${{ fromJSON(needs.changes.outputs.lane_set == 'light' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -286,6 +309,8 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
+          # `light` makes the evaluator report the lanes and then refuse.
+          LANE_SET: ${{ needs.changes.outputs.lane_set }}
           ALLOWED_SKIPS: ${{ needs.changes.outputs.protocol == 'false' && 'typescript rust interop deny schema-equality' || '' }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts

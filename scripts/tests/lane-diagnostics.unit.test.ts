@@ -98,6 +98,14 @@ function expectedGate(name: string, source: string, original: { needs: string[];
   if (name === 'cargo-shim') {
     expected.needs = expected.needs.filter((job) => job !== 'runtime-home-fixture-freshness');
     expected.skips = expected.skips.replace(' runtime-home-fixture-freshness', '');
+    // Windows ARM64 gets its own skip output, `arm64`: the Rust signal, except
+    // that the light lane set for a Dependabot pull request turns it off.
+    expected.skips = expected.skips
+      .replace("format('{0} {1}',", "format('{0} {1} {2}',")
+      .replace(
+        "needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 musl-clippy' || ''",
+        "needs.changes.outputs.rust == 'false' && 'workspace musl-clippy' || '', needs.changes.outputs.arm64 == 'false' && 'workspace-windows-arm64' || ''"
+      );
   }
   if (name === 'protocol-ci') {
     // Semver diagnostics stay per-change but no longer delay the mandatory gate.

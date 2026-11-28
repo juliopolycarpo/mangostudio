@@ -16,6 +16,10 @@ avalia as dependências via `scripts/ci/evaluate-gate.ts`.
 | `Protocol CI` (`protocol-ci.yml`)                          | `Protocol Gate`                          | Lanes obrigatórias do protocolo somente quando a validação compilada não é necessária                                                                                                                                                                        |
 | `Release Dry Run` (`release-dry-run.yml`), chamado pelo CI | `Release Dry Run / Release Dry Run Gate` | Lanes de asserção irrelevantes e o produtor limpo do runtime no caminho verificado de reutilização do mesmo run de PR                                                                                                                                        |
 
+Os skips acima são os do conjunto completo. Os quatro gates também recebem `LANE_SET` e, em
+uma [execução leve do Dependabot](#conjunto-leve-de-lanes-para-pull-requests-do-dependabot),
+reportam suas lanes e depois falham de propósito.
+
 Chamadas de reusable workflows prefixam o nome do job folha com o nome do
 job chamador. Runs agendados ou manuais independentes do Release Dry Run
 reportam `Release Dry Run Gate`. Os jobs legados chamados `Gate` foram removidos.
@@ -37,6 +41,97 @@ Os testes em `scripts/tests/ci-gate.unit.test.ts` derivam o `needs` esperado
 do texto de cada workflow. `gate-compatibility.unit.test.ts` verifica os
 produtores únicos, dependências obrigatórias e contratos de skips aceitos.
 Adicionar uma lane obrigatória sem conectá-la ao agregado falha a validação.
+
+## Conjunto leve de lanes para pull requests do Dependabot
+
+Os pull requests do Dependabot são reunidos em um único pull request escrito por uma pessoa,
+em vez de serem mesclados (119 fechados sem merge contra 11 mesclados na data desta escrita),
+e mesmo assim cada um rodava todo o fan-out sob o limite de 20 jobs da conta. Um pull request
+do Dependabot que altera só manifestos agora roda um conjunto leve de lanes, e nenhuma
+execução leve consegue ser mesclada.
+
+**Quando uma execução é leve.** Todas as condições abaixo valem, decididas uma vez por
+[`scripts/lib/lane-mode.ts`](../../../scripts/lib/lane-mode.ts):
+
+- o evento é `pull_request`;
+- o autor do pull request, `github.event.pull_request.user.login`, é exatamente
+  `dependabot[bot]`. `github.actor` nunca é lido: ele muda quando um mantenedor faz push na
+  branch ou reexecuta um job;
+- o repositório da head é este repositório;
+- o pull request não tem a label `ci: full` no momento da execução (veja abaixo);
+- todo caminho alterado é manifesto de um ecossistema: `package.json` e `bun.lock` (bun),
+  `Cargo.toml`/`Cargo.lock` (cargo) ou `.github/workflows/*.yml` e
+  `.github/actions/*/action.yml` (github-actions). Um commit de correção de mantenedor na
+  branch do Dependabot, um diff misto e o ecossistema docker rodam o conjunto completo:
+  Smoke — Container é a única lane que constrói os Dockerfiles, e o modo leve a descarta.
+
+Todo o resto, inclusive todo pull request escrito por pessoa (os reunidos também), todo push
+e todo dispatch manual, roda o conjunto completo sem mudança.
+
+**Onde é decidido.** Um passo, `Decide the lane set` (`scripts/ci/lane-mode.ts`), no job
+`changes` de `ci.yml` (Preflight), `cargo-shim.yml` e `protocol-ci.yml`. Cada um publica
+`lane_set` (`full` ou `light`) e um `lane_reason` de uma linha, que o passo também grava no log
+e no resumo do job. Toda condição posterior lê `lane_set`; nenhuma recalcula o autor. O passo
+precisa de `pull-requests: read` (no job, junto com `contents: read`) e de nenhum segredo, o que
+o token de um `pull_request` do Dependabot pode ter.
+
+**O que a execução leve mantém e descarta.** Minutos de runner a partir das durações dos
+check-runs de seis pull requests do Dependabot (#2185, #2689 a #2693), arredondados para cima
+por job:
+
+| Lane                                                                                                                                                                              | Leve                       | Minutos no completo |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ------------------- |
+| CI: Check, Dependency Audit (com a auditoria de advisories do cargo), Local Runtime, shards de Test, Build, smoke de navegador, Rust Coverage (Ubuntu), QA Metrics, Cross-runtime | mantida                    | 25 a 33             |
+| CI: Distribution (oito alvos), Smoke — Binary, Smoke — Container                                                                                                                  | descartada                 | 45 a 68             |
+| CI: lanes do Release Dry Run                                                                                                                                                      | descartada, o gate reporta | 2 a 6               |
+| Cargo Shim: Workspace (Ubuntu), Runtime clippy (musl)                                                                                                                             | mantida                    | 2 a 10              |
+| Cargo Shim: Workspace (macOS, Windows, Windows ARM64), qualificação do binário real                                                                                               | descartada                 | 9 a 35              |
+| Protocol CI: todas as lanes Ubuntu (TypeScript, Rust, Interop, cargo-deny, schema)                                                                                                | mantida                    | 2 a 12              |
+| Protocol CI: pernas macOS e Windows de Rust e Interop                                                                                                                             | descartada                 | 0 a 19              |
+| Dependency Review, CodeQL, labeler, título do PR, Windows PR Tests                                                                                                                | sem mudança                |                     |
+
+O modo leve custou 432 minutos de runner nesses seis pull requests contra 981 do conjunto
+completo (56% a menos): bumps de bun de 107 para 53, bumps de cargo de 188 para 74, de 204 para
+96 e de 204 para 89, e um bump de actions de 169 para 66. Bumps de docker não foram medidos
+(existe um único pull request de docker). As pernas Rust do CodeQL (cerca de 22 dos seus 27
+minutos em bumps de cargo) continuam porque o contexto obrigatório vem do code scanning, que
+nenhum gate nosso consegue recusar. O Windows PR Tests (13 minutos em bumps de bun) é
+informativo, não está em nenhum gate e ainda não ficou leve; é uma tarefa seguinte.
+
+**Os gates recusam.** Em uma execução leve, `CI Gate`, `Cargo Shim Gate`, `Protocol Gate` e
+`Release Dry Run / Release Dry Run Gate` recebem `LANE_SET`, avaliam seus `needs` como sempre
+e depois falham com
+
+```text
+light lane set for a Dependabot pull request; add the ci: full label and ask Dependabot to rebase (or re-run all jobs, not only the failed ones) to run the full set
+```
+
+Todo workflow que fica leve recusa, então reexecutar um workflow depois de adicionar a label não
+transforma uma execução leve em uma liberável. A recusa e a falha de lane são coisas
+diferentes: quando todas as lanes leves passaram, o log do job diz `Gate: refused, no lane
+failed` e o resumo se chama `Gate refused`; quando uma lane leve falhou, aparece primeiro `Gate:
+light lane failure`, depois `also refused`, e o resumo se chama `Gate failed`. `LANE_SET` precisa
+ser exatamente `full` ou `light`; valor vazio ou desconhecido (uma saída quebrada de `changes`)
+falha o gate. O contexto obrigatório do CodeQL vem do code scanning e o Dependency Review custa
+um minuto, então nenhum dos dois tem variante leve. O Windows PR Tests continua informativo e
+sem mudança por enquanto.
+
+**Restaurar a execução completa.** Crie a label `ci: full` uma vez nas configurações do
+repositório, adicione-a ao pull request e comente `@dependabot rebase`, que faz um novo push e
+inicia todos os workflows com a label visível. Como alternativa, use "Re-run all jobs" em cada
+um de `CI`, `Cargo Shim` e `Protocol CI`. O Dependabot pode responder ao `rebase` em um pull
+request já atualizado dizendo que não há nada a fazer, sem push, e então nenhuma execução
+começa; comente `@dependabot recreate`, que refaz a branch e o payload do pull request.
+"Re-run failed jobs" não reexecuta o job `changes`,
+então mantém a saída leve e o gate recusa de novo. O CI não tem gatilho `labeled` de propósito:
+o labeler adiciona labels a todo pull request na abertura, e um gatilho dobraria cada execução.
+A label é lida pela API no momento da execução porque uma reexecução reutiliza o payload
+original do evento, que nunca mostra uma label adicionada depois; um rebase tem payload novo e a
+vê de qualquer forma. Se essa leitura falhar, a execução é completa.
+
+**Testes.** `scripts/tests/lane-mode.unit.test.ts` fixa a matriz de classificação (autor,
+label, ecossistema), a leitura da label com um fake nomeado da API, a recusa do gate nos três
+casos leves e com a label, e a fiação dos workflows.
 
 ## Relevância do protocolo e semver informativo
 

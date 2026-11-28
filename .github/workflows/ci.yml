@@ -54,8 +54,18 @@ jobs:
       deployment: false
     # Bun setup can wait four minutes for a republished canary asset.
     timeout-minutes: 9
+    # A job-level block replaces the workflow's, so contents stays. The pull
+    # request read is for the lane-set step's label lookup; a Dependabot
+    # `pull_request` token may hold it, and no secret is involved.
+    permissions:
+      contents: read
+      pull-requests: read # the PR's current labels for the lane-set step
     outputs:
-      distribution: ${{ steps.changed.outputs.distribution }}
+      # A light run never builds a distribution, whatever the diff says; the
+      # gate accepts the skip and refuses the run (scripts/ci/evaluate-gate.ts).
+      distribution: ${{ steps.lanes.outputs.lane_set == 'light' && 'false' || steps.changed.outputs.distribution }}
+      lane_set: ${{ steps.lanes.outputs.lane_set }}
+      lane_reason: ${{ steps.lanes.outputs.lane_reason }}
       rust: ${{ steps.rust.outputs.rust }}
       version: ${{ steps.identity.outputs.version }}
       channel: ${{ steps.identity.outputs.channel }}
@@ -122,6 +132,25 @@ jobs:
           bun ./scripts/ci/rust-lanes.ts relevance "$RUNNER_TEMP/changed-files" > "$RUNNER_TEMP/rust-lanes"
           grep '^rust=' "$RUNNER_TEMP/rust-lanes" >> "$GITHUB_OUTPUT"
           cat "$RUNNER_TEMP/rust-lanes"
+
+      # The one lane-set decision for this run, with its reason logged. Light
+      # only for a manifest-only pull request authored by dependabot[bot] from
+      # this repository and carrying no `ci: full` label; see
+      # scripts/lib/lane-mode.ts. The author is the pull request's, not
+      # `github.actor`, which changes when a maintainer pushes or re-runs. The
+      # labels come from the API at run time: a re-run reuses the original
+      # event payload, which never sees a label added afterwards. There is no
+      # `labeled` trigger, so adding the label runs nothing by itself.
+      - id: lanes
+        name: Decide the lane set
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: bun ./scripts/ci/lane-mode.ts "$RUNNER_TEMP/changed-files" >> "$GITHUB_OUTPUT"
 
       # `fetch-depth: 0` changes history, not the checked out commit, so HEAD is
       # the same SHA the former single-purpose identity job resolved: the PR
@@ -241,6 +270,9 @@ jobs:
     uses: $/.github/workflows/release-dry-run.yml
     with:
       reuse_distribution: true
+      # Light skips distribution, so there are no bytes to dry-run; the called
+      # workflow reports its gate without the lanes and refuses.
+      lane_set: ${{ needs.changes.outputs.lane_set }}
       version: ${{ needs.changes.outputs.version }}
       source_sha: ${{ needs.changes.outputs.source_sha }}
       channel: ${{ needs.changes.outputs.channel }}
@@ -381,6 +413,8 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
+          # `light` makes the evaluator report the lanes and then refuse.
+          LANE_SET: ${{ needs.changes.outputs.lane_set }}
           ALLOWED_SKIPS: ${{ format('{0} {1} {2} {3} {4} {5}',
             github.event_name != 'pull_request' && 'release-dry-run' || '',
             github.event_name == 'workflow_dispatch' && 'qa-metrics' || '',

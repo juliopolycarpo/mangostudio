@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { evaluateGate, parseAllowedSkips, parseNeeds } from '../ci/evaluate-gate';
 import { ROOT_DIR } from '../lib/config';
 import { classifyChangedPaths } from '../lib/rust-lanes';
+import { LANE_SET_OS_MATRIX } from './support/lane-set-workflows';
 import { readText } from './support/read-text';
 import {
   expectedGateNeeds,
@@ -383,7 +384,13 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     const changesBlock = extractJobBlock(workflow, 'changes');
 
     expect(changesBlock).toContain(`rust: ${EXPR} steps.changed.outputs.rust }}`);
-    expect(changesBlock).toContain(`qualification: ${EXPR} steps.changed.outputs.qualification }}`);
+    // Light forces the qualification and ARM64 skips; the gate accepts them and refuses the run.
+    expect(changesBlock).toContain(
+      `qualification: ${EXPR} steps.lanes.outputs.lane_set == 'light' && 'false' || steps.changed.outputs.qualification }}`
+    );
+    expect(changesBlock).toContain(
+      `arm64: ${EXPR} steps.lanes.outputs.lane_set == 'light' && 'false' || steps.changed.outputs.rust }}`
+    );
     expect(changesBlock).toContain(
       'bun ./scripts/ci/rust-lanes.ts relevance "$RUNNER_TEMP/changed-files" > "$RUNNER_TEMP/lanes"'
     );
@@ -399,7 +406,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
 
     expect(parseNeedsList(workspaceBlock)).toEqual(['changes']);
     expect(workspaceBlock).toContain("if: needs.changes.outputs.rust == 'true'");
-    expect(workspaceBlock).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
+    expect(workspaceBlock).toContain(LANE_SET_OS_MATRIX);
     for (const command of [
       'cargo build --workspace --locked',
       'cargo clippy --workspace --all-targets --all-features --locked -- -D warnings',
@@ -475,7 +482,8 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
       'workspace-windows-arm64 job missing: no cargo test runs on Windows ARM64'
     ).not.toBe('');
     expect(parseNeedsList(block)).toEqual(['changes']);
-    expect(block).toContain("if: needs.changes.outputs.rust == 'true'");
+    // `arm64` is the Rust signal, except that light mode turns it off.
+    expect(block).toContain("if: needs.changes.outputs.arm64 == 'true'");
     expect(block).toContain('runs-on: windows-11-arm');
     expect(block).toContain('rustup target add aarch64-pc-windows-msvc');
     for (const command of [
@@ -626,7 +634,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 musl-clippy' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}`
+      `ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2}', needs.changes.outputs.rust == 'false' && 'workspace musl-clippy' || '', needs.changes.outputs.arm64 == 'false' && 'workspace-windows-arm64' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}`
     );
   });
 

@@ -54,9 +54,7 @@ describe('Cargo Shim unused-dependency check', () => {
     const gate = extractJobBlock(workflow, 'gate-unique');
     expect(parseNeedsList(gate)).toContain('workspace');
     // The only skip the gate grants the job is the "no Rust change" one.
-    expect(gate).toContain(
-      "needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 musl-clippy'"
-    );
+    expect(gate).toContain("needs.changes.outputs.rust == 'false' && 'workspace musl-clippy'");
     expect(evaluateGate({ workspace: 'failure' }, parseAllowedSkips('')).ok).toBe(false);
   });
 
