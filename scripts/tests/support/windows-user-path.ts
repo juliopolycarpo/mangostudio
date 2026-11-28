@@ -99,6 +99,58 @@ export function runUserPathPrune(powershell: string, access: UserPathAccess): Po
 }
 
 /**
+ * The stdout of `reg.exe query HKCU\Environment /v Path`, or `null` when the
+ * value could not be read that way (no `reg.exe` on PATH, a non-zero exit, no
+ * Path value). `reg.exe` answers in about 70 ms where a PowerShell start costs
+ * about 500 ms, and it reads the same registry value the PowerShell prune does.
+ *
+ * @example
+ * const raw = readRegistryUserPath(); // "...\n    Path    REG_EXPAND_SZ    C:\\Tools;...\n"
+ */
+export function readRegistryUserPath(): string | null {
+  const reg = Bun.which('reg.exe');
+  if (!reg) return null;
+  const result = Bun.spawnSync({ cmd: [reg, 'query', 'HKCU\\Environment', '/v', 'Path'] });
+  return result.exitCode === 0 ? result.stdout.toString() : null;
+}
+
+/**
+ * Whether the PowerShell prune has anything to do for what `reg.exe` read. An
+ * unreadable value (`null`) says yes: the PowerShell script then decides, and
+ * fails the case if it cannot read the PATH either. The match is the script's
+ * own, a case-insensitive substring test on `FIXTURE_DIR_PREFIX`.
+ *
+ * @example
+ * userPathNeedsPrune('    Path    REG_EXPAND_SZ    C:\\Tools'); // => false
+ */
+export function userPathNeedsPrune(
+  registryOutput: string | null,
+  prefix: string = FIXTURE_DIR_PREFIX
+): boolean {
+  if (registryOutput === null) return true;
+  return registryOutput.toLowerCase().includes(prefix.toLowerCase());
+}
+
+/**
+ * The per-case sweep against the real user PATH: a `reg.exe` read first, so a
+ * case that left no fixture entry (nearly all of them) costs 70 ms instead of
+ * a PowerShell start, and the full PowerShell prune only when an entry is
+ * there or the value could not be read. The outcome is the same either way:
+ * no fixture entry survives, and a failed prune fails the case.
+ *
+ * @example
+ * afterEach(() => sweepFixtureUserPath(POWERSHELL as string));
+ */
+export function sweepFixtureUserPath(
+  powershell: string,
+  readUserPath: () => string | null = readRegistryUserPath,
+  prune: (powershell: string) => void = pruneFixtureUserPath
+): void {
+  if (!userPathNeedsPrune(readUserPath())) return;
+  prune(powershell);
+}
+
+/**
  * Removes the fixtures' entries from the real user PATH and throws if the
  * child failed, so a restore that did not happen fails the case that asked
  * for it.
