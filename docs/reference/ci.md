@@ -332,10 +332,12 @@ runs are predictable and a newer commit always supersedes an older one:
   without a completed run; Canary selects the newest commit that has one.
   Only `push` and `pull_request` runs cancel: Canary accepts only a main `push`
   run, so a cron or manual dispatch on `main` queues behind it instead.
-  A main push run also waits five minutes before its first job: Preflight
-  names the `main-ci-settle` environment, whose wait timer holds the run
-  without a runner, so a push that lands in that window cancels it before it
-  costs anything. The timer is a repository setting, not a file: recreate it
+  A main push run also waits five minutes before its first job: every job
+  without `needs` (Preflight, Cross-runtime download, and the jobs of the
+  called Check, Dependency Audit and Local Runtime workflows) names the
+  `main-ci-settle` environment, whose wait timer holds the run without a
+  runner, so a push that lands in that window cancels it before it costs
+  anything. The timer is a repository setting, not a file: recreate it
   with `gh api -X PUT repos/<owner>/<repo>/environments/main-ci-settle -F wait_timer=5`.
   If the environment is missing, GitHub creates it without a timer and main
   runs start at once.

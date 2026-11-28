@@ -17,6 +17,10 @@ jobs:
   check:
     name: Check (tooling + typecheck)
     runs-on: ubuntu-latest
+    # Settle timer on a main push; see Preflight in ci.yml.
+    environment:
+      name: ${{ github.event_name == 'push' && 'main-ci-settle' || '' }}
+      deployment: false
     timeout-minutes: 10
     outputs:
       invocation_id: ${{ steps.identity.outputs.invocation_id }}
