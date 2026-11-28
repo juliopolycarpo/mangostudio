@@ -18,7 +18,7 @@ import {
   type WorkerPlan,
   WORKERS_ENV,
 } from '../lib/test-workers';
-import { main, type RunnerDeps, systemDeps } from '../run-test-workers';
+import { main, type RunnerDeps, selectedRunCommand, systemDeps } from '../run-test-workers';
 import {
   crashingWorker,
   diskWorker,
@@ -232,6 +232,71 @@ describe('run-test-workers', () => {
     expect(run.started, 'expected no worker for a selected run').toEqual([]);
     expect(run.serial).toEqual([[...LANE_COMMAND, '--changed=abc123']]);
     expect(existsSync(run.mergedPath)).toBe(false);
+  });
+
+  describe('a selected root-lane run', () => {
+    const ROOT_COMMAND = ['bun', 'test', '--timeout', '15000', 'scripts'];
+    const ROOT_ARGV = ['--lane=root', '--', ...ROOT_COMMAND];
+
+    it('runs --changed under Bun’s own --parallel at the lane width, in one process', async () => {
+      const run = harness(diskWorker([]), { [WORKERS_ENV]: '4' });
+
+      const code = await main([...ROOT_ARGV, '--changed=abc123'], run.deps);
+
+      expect(code).toBe(7);
+      expect(run.started, 'expected no worker for a selected run').toEqual([]);
+      expect(run.serial).toEqual([
+        ['bun', 'test', '--parallel=4', '--timeout', '15000', 'scripts', '--changed=abc123'],
+      ]);
+    });
+
+    it('takes the default width of half the cores, capped at six', async () => {
+      const run = harness(diskWorker([]));
+
+      await main([...ROOT_ARGV, '--changed=abc123'], run.deps);
+
+      expect(run.serial[0]?.[2]).toBe('--parallel=6');
+    });
+
+    it('keeps the serial command at width one, so MANGO_TEST_WORKERS=1 restores it', async () => {
+      const run = harness(diskWorker([]), { [WORKERS_ENV]: '1' });
+
+      await main([...ROOT_ARGV, '--changed=abc123'], run.deps);
+
+      expect(run.serial).toEqual([[...ROOT_COMMAND, '--changed=abc123']]);
+    });
+
+    it('keeps the serial command on Windows, even at an explicit width', async () => {
+      const run = harness(diskWorker([]), { [WORKERS_ENV]: '4' });
+
+      await main([...ROOT_ARGV, '--changed=abc123'], { ...run.deps, platform: 'win32' });
+
+      expect(run.serial).toEqual([[...ROOT_COMMAND, '--changed=abc123']]);
+    });
+  });
+
+  describe('selectedRunCommand', () => {
+    const base = ['bun', 'test', '--timeout', '15000', 'scripts'];
+
+    it('leaves a name filter, a second argument and another lane as they were', () => {
+      expect(selectedRunCommand('root', [...base, 'names'], ['names'], 6)).toEqual([
+        ...base,
+        'names',
+      ]);
+      expect(
+        selectedRunCommand('root', [...base, '--changed=a', 'x'], ['--changed=a', 'x'], 6)
+      ).toEqual([...base, '--changed=a', 'x']);
+      expect(selectedRunCommand('api-unit', [...base, '--changed=a'], ['--changed=a'], 6)).toEqual([
+        ...base,
+        '--changed=a',
+      ]);
+    });
+
+    it('does not add a second --parallel to a command that has one', () => {
+      const command = ['bun', 'test', '--parallel=2', 'scripts', '--changed=a'];
+
+      expect(selectedRunCommand('root', command, ['--changed=a'], 6)).toBe(command);
+    });
   });
 
   it('splits the integration lane the same way, and fails it when a worker leaks a process', async () => {

@@ -13,7 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { FIXTURE_DIR_PREFIX, pruneFixtureUserPath } from './support/windows-user-path';
+import { FIXTURE_DIR_PREFIX, sweepFixtureUserPath } from './support/windows-user-path';
 
 // Same matrix as install-sh-layout.unit.test.ts, run against the real host
 // PowerShell (powershell.exe on PATH via WSL interop) instead of bash.
@@ -113,7 +113,7 @@ beforeAll(() => {
 // 7 s, a settings broadcast) only when an entry carries that prefix, and a
 // failed write fails the case; see support/windows-user-path.ts.
 function pruneStalePathEntries(): void {
-  pruneFixtureUserPath(POWERSHELL as string);
+  sweepFixtureUserPath(POWERSHELL as string);
 }
 
 afterEach(() => {
@@ -244,10 +244,17 @@ function buildZipMissingExe(linuxDir: string, name: string): string {
   return buildZipMember(join(stageDir, 'not-mangostudio.txt'), zipPath);
 }
 
+// %SystemRoot% is fixed for the life of the host, and reading it costs a
+// PowerShell start (about 0.5 s) for each of the cases that copy a System32 binary.
+let systemRootLinux: string | undefined;
+
 /** A System32 binary, at the path this process can read and copy it from. */
 function systemExecutable(name: string): string {
-  const root = sh([POWERSHELL as string, '-NoProfile', '-Command', '$env:SystemRoot']);
-  return join(toLinuxPath(root.stdout.replace(/\r/g, '').trim()), 'System32', name);
+  if (systemRootLinux === undefined) {
+    const root = sh([POWERSHELL as string, '-NoProfile', '-Command', '$env:SystemRoot']);
+    systemRootLinux = toLinuxPath(root.stdout.replace(/\r/g, '').trim());
+  }
+  return join(systemRootLinux, 'System32', name);
 }
 
 /**

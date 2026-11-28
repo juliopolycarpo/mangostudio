@@ -29,7 +29,7 @@ import { Glob } from 'bun';
 
 import { ROOT_DIR } from './config';
 import { endOfOpenTag, type JunitCounts, parseJunitXml, readAttributes } from './junit-report';
-import { type FileWeights, laneWeights } from './test-lane-weights';
+import { type FileWeights, type HostFacts, laneWeights } from './test-lane-weights';
 import type { TestLane } from './test-lanes';
 import { type Leftover, WORKER_TOKEN_ENV } from './test-worker-settle';
 
@@ -121,6 +121,18 @@ export interface WorkerLaneSpec {
 }
 
 /**
+ * What this machine has that decides whether a heavy test file runs. The
+ * `powershell.exe` probe is the one `install-ps1-layout.unit.test.ts` skips on
+ * (`Bun.which('powershell.exe')`), read once per `laneSpec`.
+ *
+ * @example
+ * detectHostFacts().powershell; // => false on a CI Linux runner, true on WSL with interop
+ */
+function detectHostFacts(): HostFacts {
+  return { powershell: Bun.which('powershell.exe') !== null };
+}
+
+/**
  * The spec for a lane that declares `workers`, from the serial command its
  * package script runs. Every worker starts through `scripts/with-test-home.ts`,
  * so each has a temporary HOME of its own and never the developer's.
@@ -133,7 +145,8 @@ export function laneSpec(
   lane: TestLane,
   command: readonly string[],
   launcher?: readonly string[],
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  host: HostFacts = detectHostFacts()
 ): WorkerLaneSpec {
   if (!lane.workers) {
     throw new Error(
@@ -150,7 +163,7 @@ export function laneSpec(
     // `--shard` the root lane's two workers took 660 s and 371 s of 366 files.
     // One worker still runs the serial command: `planWorkers` uses weights only
     // when it plans more than one.
-    weights: laneWeights(lane.id, platform),
+    weights: laneWeights(lane.id, platform, host),
     launcher: launcher ?? [process.execPath, join(ROOT_DIR, 'scripts', 'with-test-home.ts')],
     // Windows keeps the serial default and Bun's orphan cleanup. It has no
     // POSIX process group for the replacement settlement guard to inspect.

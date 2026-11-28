@@ -16,6 +16,12 @@
 // above, and keep the keys in path order. `scripts/tests/test-lane-weights.unit.test.ts`
 // checks that every key is a file its lane owns.
 //
+// A refresh from CI JUnit must leave `POWERSHELL_HOST_WEIGHTS` (below) alone: it
+// weighs a file CI skips, so CI's report cannot say what it costs. It is added
+// to the root table only on a POSIX host that has powershell.exe (`HostFacts`,
+// detected once by `laneSpec`); refresh it from a run on such a host, and CI's
+// plan never reads it.
+//
 // The figures come from the per-file times of the lane's own runner, at four
 // workers.
 
@@ -164,15 +170,52 @@ export const WINDOWS_LANE_WEIGHTS: Readonly<Partial<Record<TestLaneId, FileWeigh
 };
 
 /**
+ * What the planning host has that decides whether a test file runs at all. The
+ * planner takes it as a value (`laneSpec` detects it once), so a split stays a
+ * function of its inputs and a test hands it a named fake.
+ */
+export interface HostFacts {
+  /** `powershell.exe` is on PATH: the condition `install-ps1-layout.unit.test.ts` skips on. */
+  readonly powershell: boolean;
+}
+
+/** A host with none of the optional tools: what CI's Linux runners are. */
+export const NO_HOST_FACTS: HostFacts = { powershell: false };
+
+/**
+ * Weights that hold only on a POSIX host that has `powershell.exe`, so they are
+ * not part of the CI-derived tables above and a refresh from CI JUnit must keep
+ * them (CI skips the file, which reads as about 0 s). The install layout suite
+ * drives a real Windows PowerShell through WSL interop, 70 to 98 s on a WSL
+ * machine (about 75 s after the per-case PATH sweep read `reg.exe`), and on
+ * a host without PowerShell it skips in a few milliseconds. Windows has its own
+ * weight for the file in `ROOT_LANE_WINDOWS_WEIGHTS`, so these never apply there.
+ * Same rounding and path order as the tables above.
+ */
+export const POWERSHELL_HOST_WEIGHTS: Readonly<Partial<Record<TestLaneId, FileWeights>>> = {
+  root: {
+    'scripts/tests/install-ps1-layout.unit.test.ts': 75,
+  },
+};
+
+/**
  * The weights a lane splits by on a platform, or undefined for a lane that keeps `--shard`.
+ * On a POSIX host with PowerShell the lane's `POWERSHELL_HOST_WEIGHTS` are added; without
+ * it the result is the lane's table itself, so CI plans exactly what it always did.
  *
  * @example
  * laneWeights('root', 'win32')?.['scripts/tests/check-cache.unit.test.ts']; // => 115
  * laneWeights('api-unit', 'linux'); // => undefined
+ * laneWeights('root', 'linux', { powershell: true })?.['scripts/tests/install-ps1-layout.unit.test.ts']; // => 75
  */
 export function laneWeights(
   laneId: TestLaneId,
-  platform: NodeJS.Platform
+  platform: NodeJS.Platform,
+  host: HostFacts = NO_HOST_FACTS
 ): FileWeights | undefined {
-  return (platform === 'win32' ? WINDOWS_LANE_WEIGHTS[laneId] : undefined) ?? LANE_WEIGHTS[laneId];
+  const base =
+    (platform === 'win32' ? WINDOWS_LANE_WEIGHTS[laneId] : undefined) ?? LANE_WEIGHTS[laneId];
+  const hostWeights =
+    platform !== 'win32' && host.powershell ? POWERSHELL_HOST_WEIGHTS[laneId] : undefined;
+  return base && hostWeights ? { ...base, ...hostWeights } : base;
 }

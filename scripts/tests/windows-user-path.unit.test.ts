@@ -5,8 +5,11 @@ import {
   FIXTURE_DIR_PREFIX,
   type PowerShellOutcome,
   pruneFixtureUserPath,
+  readRegistryUserPath,
   runUserPathPrune,
+  sweepFixtureUserPath,
   type UserPathAccess,
+  userPathNeedsPrune,
 } from './support/windows-user-path';
 
 // The cleanup normally reads and writes the real HKCU\Environment\Path. Every
@@ -157,6 +160,79 @@ describe('fixture user PATH cleanup', () => {
     expect(() =>
       pruneFixtureUserPath(POWERSHELL as string, fakeUserPath(`${ORIGINAL};${FIXTURE_ENTRY}`))
     ).not.toThrow();
+  });
+});
+
+describe('fixture user PATH sweep (reg.exe read before the PowerShell prune)', () => {
+  const REG_PREFIX = '\nHKEY_CURRENT_USER\\Environment\n    Path    REG_EXPAND_SZ    ';
+  const cleanRegistry = `${REG_PREFIX}${ORIGINAL}\n`;
+  const dirtyRegistry = `${REG_PREFIX}${ORIGINAL};${FIXTURE_ENTRY}\n`;
+
+  /** A named fake for the prune: counts calls instead of starting PowerShell. */
+  function recordingPrune(): { calls: string[]; prune: (powershell: string) => void } {
+    const calls: string[] = [];
+    return { calls, prune: (powershell) => void calls.push(powershell) };
+  }
+
+  test('a PATH with no fixture entry needs no prune', () => {
+    expect(userPathNeedsPrune(cleanRegistry)).toBe(false);
+    expect(userPathNeedsPrune(`${REG_PREFIX}\n`)).toBe(false);
+  });
+
+  test('a PATH with a fixture entry needs the prune, in any letter case', () => {
+    expect(userPathNeedsPrune(dirtyRegistry)).toBe(true);
+    expect(userPathNeedsPrune(dirtyRegistry.toUpperCase())).toBe(true);
+  });
+
+  test('an unreadable PATH needs the prune, so the PowerShell script decides', () => {
+    expect(userPathNeedsPrune(null)).toBe(true);
+  });
+
+  test('the sweep skips the prune when the registry read shows no fixture entry', () => {
+    const { calls, prune } = recordingPrune();
+
+    sweepFixtureUserPath('powershell.exe', () => cleanRegistry, prune);
+
+    expect(calls, `expected prune calls: 0 | received: ${show(calls.length)}`).toEqual([]);
+  });
+
+  test('the sweep runs the prune once when the registry read shows a fixture entry', () => {
+    const { calls, prune } = recordingPrune();
+
+    sweepFixtureUserPath('powershell.exe', () => dirtyRegistry, prune);
+
+    expect(calls, `expected prune calls: 1 | received: ${show(calls.length)}`).toEqual([
+      'powershell.exe',
+    ]);
+  });
+
+  test('the sweep runs the prune when the registry read fails', () => {
+    const { calls, prune } = recordingPrune();
+
+    sweepFixtureUserPath('powershell.exe', () => null, prune);
+
+    expect(calls).toEqual(['powershell.exe']);
+  });
+
+  test('a failed prune still fails the sweep', () => {
+    const failingPrune = (): void => {
+      throw new Error('expected PowerShell exit 0 with no signal | received: exit 1');
+    };
+
+    expect(() => sweepFixtureUserPath('powershell.exe', () => dirtyRegistry, failingPrune)).toThrow(
+      'expected PowerShell exit 0 with no signal'
+    );
+  });
+
+  test('reads the real user PATH value through reg.exe, or null where there is none', () => {
+    const raw = readRegistryUserPath();
+
+    // No reg.exe on PATH (Linux, macOS) or no Path value (reg.exe exits 1) is
+    // null; anything else carries the value's name in reg.exe's listing format.
+    expect(
+      raw === null || /\bPath\s+REG_(EXPAND_)?SZ\b/i.test(raw),
+      `expected null or a reg.exe Path listing | received: ${show(raw)}`
+    ).toBe(true);
   });
 });
 

@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { parseJunitXml } from '../lib/junit-report';
-import { LANE_WEIGHTS, WINDOWS_LANE_WEIGHTS } from '../lib/test-lane-weights';
+import {
+  type HostFacts,
+  LANE_WEIGHTS,
+  NO_HOST_FACTS,
+  WINDOWS_LANE_WEIGHTS,
+} from '../lib/test-lane-weights';
 import { laneById } from '../lib/test-lanes';
 import { WORKER_TOKEN_ENV } from '../lib/test-worker-settle';
 import {
@@ -413,9 +418,114 @@ describe('planWorkers with weights', () => {
     (id) => {
       const command = ['bun', 'test', laneById(id).workers?.testDir ?? ''];
 
-      expect(laneSpec(laneById(id), command, undefined, 'linux').weights).toBe(LANE_WEIGHTS[id]);
+      expect(laneSpec(laneById(id), command, undefined, 'linux', NO_HOST_FACTS).weights).toBe(
+        LANE_WEIGHTS[id]
+      );
     }
   );
+
+  describe('the host-conditional PowerShell weight of the root lane', () => {
+    const INSTALL_PS1 = 'scripts/tests/install-ps1-layout.unit.test.ts';
+    const WITH_POWERSHELL: HostFacts = { powershell: true };
+    const command = ['bun', 'test', 'scripts'];
+    // Heavy listed files, the install layout suite and three unlisted ones.
+    const files = [
+      'check-cache',
+      'exec-process-tree',
+      'import-cycles',
+      'install-ps1-layout',
+      'run-tests-watchdog',
+      'supervision-fixtures',
+      'wait-for-health-shell',
+      'a-plain',
+      'b-plain',
+      'c-plain',
+    ].map((name) => `scripts/tests/${name}.unit.test.ts`);
+    const groupsOf = (host: HostFacts, count: number) =>
+      planWorkers(laneSpec(laneById('root'), command, undefined, 'linux', host), count, '/r', files)
+        .map((plan) => plan.files)
+        .map((group) => group?.map((file) => file.replace('./', '')));
+
+    it('leaves the plan a host without PowerShell gets as it was, the CI plan', () => {
+      // The groups below are what `partitionByWeight` gave this file list before the
+      // conditional weight existed: two workers (a 4-core CI runner) and three.
+      expect(groupsOf(NO_HOST_FACTS, 2)).toEqual([
+        [
+          'scripts/tests/check-cache.unit.test.ts',
+          'scripts/tests/import-cycles.unit.test.ts',
+          'scripts/tests/wait-for-health-shell.unit.test.ts',
+        ],
+        [
+          'scripts/tests/a-plain.unit.test.ts',
+          'scripts/tests/b-plain.unit.test.ts',
+          'scripts/tests/c-plain.unit.test.ts',
+          'scripts/tests/exec-process-tree.unit.test.ts',
+          INSTALL_PS1,
+          'scripts/tests/run-tests-watchdog.unit.test.ts',
+          'scripts/tests/supervision-fixtures.unit.test.ts',
+        ],
+      ]);
+      expect(groupsOf(NO_HOST_FACTS, 3)).toEqual([
+        [
+          'scripts/tests/check-cache.unit.test.ts',
+          'scripts/tests/wait-for-health-shell.unit.test.ts',
+        ],
+        [
+          'scripts/tests/a-plain.unit.test.ts',
+          'scripts/tests/c-plain.unit.test.ts',
+          'scripts/tests/run-tests-watchdog.unit.test.ts',
+          'scripts/tests/supervision-fixtures.unit.test.ts',
+        ],
+        [
+          'scripts/tests/b-plain.unit.test.ts',
+          'scripts/tests/exec-process-tree.unit.test.ts',
+          'scripts/tests/import-cycles.unit.test.ts',
+          INSTALL_PS1,
+        ],
+      ]);
+      expect(
+        laneSpec(laneById('root'), command, undefined, 'linux', NO_HOST_FACTS).weights,
+        '(root weights): expected the CI table itself without PowerShell | received: a copy'
+      ).toBe(LANE_WEIGHTS.root);
+    });
+
+    it('weighs the install layout suite only where PowerShell is on the host', () => {
+      const without = laneSpec(laneById('root'), command, undefined, 'linux', NO_HOST_FACTS);
+      const withPs = laneSpec(laneById('root'), command, undefined, 'linux', WITH_POWERSHELL);
+
+      expect(without.weights?.[INSTALL_PS1]).toBeUndefined();
+      expect(withPs.weights?.[INSTALL_PS1]).toBe(75);
+      // Every other weight is the shared table's.
+      expect({ ...withPs.weights, [INSTALL_PS1]: undefined }).toEqual({
+        ...LANE_WEIGHTS.root,
+        [INSTALL_PS1]: undefined,
+      });
+    });
+
+    it('keeps the suite off the worker of the heaviest unconditional files', () => {
+      const groups = groupsOf(WITH_POWERSHELL, 3);
+      const holder = groups.find((group) => group?.includes(INSTALL_PS1)) ?? [];
+
+      expect(
+        holder.filter((file) => /check-cache|import-cycles|exec-process-tree/.test(file)),
+        `(root split with PowerShell): expected ${INSTALL_PS1} apart from the other heavy files | received: ${JSON.stringify(holder)}`
+      ).toEqual([]);
+    });
+
+    it('never applies on Windows, whose table weighs the file itself, nor to other lanes', () => {
+      const win = laneSpec(laneById('root'), command, undefined, 'win32', WITH_POWERSHELL);
+      const integration = laneSpec(
+        laneById('api-integration'),
+        ['bun', 'test', 'tests/integration'],
+        undefined,
+        'linux',
+        WITH_POWERSHELL
+      );
+
+      expect(win.weights).toBe(WINDOWS_LANE_WEIGHTS.root);
+      expect(integration.weights).toBe(LANE_WEIGHTS['api-integration']);
+    });
+  });
 
   it('gives the root lane its own table on Windows and api-integration the shared one', () => {
     const rootCommand = ['bun', 'test', 'scripts'];
