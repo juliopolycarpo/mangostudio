@@ -427,7 +427,14 @@ export function frontendBuildCacheArguments(repositoryRoot: string): string[] {
     ...HELPERS.map((path) => path),
     '$TURBO_ROOT$/apps/shared/src/frontend-build/host.ts',
     ...controls
-      .filter((control) => control.path.base === 'repository')
+      .filter(
+        // The `.git` marker is deliberately not a Turbo input. Turbo expands a directory input
+        // to every file under it, so declaring `.git` hashes the index, refs, logs and objects:
+        // any `git status` or `git fetch` in the checkout would change the task hash. The
+        // marker's kind is enforced by `createTailwindInputs` below (a non-directory marker is
+        // `always-build`).
+        (control) => control.path.base === 'repository' && control.kind !== 'repository-marker'
+      )
       .map((control) => `$TURBO_ROOT$/${control.path.path}`),
   ];
   for (const input of required)
