@@ -109,6 +109,72 @@ export function extractCrateInputs(source: string, text: string, crateDir: strin
   return [...found.values()].sort((left, right) => left.path.localeCompare(right.path));
 }
 
+/** `//` and `///` lines: a macro named in a comment reads nothing. */
+function withoutLineComments(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => (line.trimStart().startsWith('//') ? '' : line))
+    .join('\n');
+}
+
+/**
+ * Paths a build script reaches by joining a literal onto its crate directory
+ * (`manifest.join("../../apps/x.json")`), which no `include_str!` scan sees:
+ * every string literal containing `../`, resolved from the crate directory.
+ *
+ * @example
+ * extractBuildScriptInputs(
+ *   'crates/x/build.rs',
+ *   'let a = manifest.join("../../apps/a.json");',
+ *   'crates/x'
+ * ); // [{ source: 'crates/x/build.rs', line: 1, path: 'apps/a.json' }]
+ */
+export function extractBuildScriptInputs(
+  source: string,
+  text: string,
+  crateDir: string
+): CrateInput[] {
+  const found = new Map<string, CrateInput>();
+  const code = withoutLineComments(text);
+  for (const match of code.matchAll(/"([^"\n]*\.\.\/[^"\n]*)"/g)) {
+    const path = toPosixPath(join(crateDir, (match[1] as string).replace(/^\/+/, '')));
+    found.set(path, { source, line: lineOf(code, match.index ?? 0), path });
+  }
+  return [...found.values()].sort((left, right) => left.path.localeCompare(right.path));
+}
+
+/** One environment variable a crate reads while it compiles. */
+export interface CompileTimeEnvRead {
+  readonly source: string;
+  readonly line: number;
+  readonly name: string;
+}
+
+/**
+ * The environment variables a source reads at compile time: `env!` and
+ * `option_env!` anywhere, plus `env::var`/`env::var_os` in a build script (the
+ * only place those run while compiling).
+ *
+ * @example
+ * extractCompileTimeEnvReads('crates/x/src/a.rs', 'let v = env!("CARGO_PKG_VERSION");', false);
+ * // [{ source: 'crates/x/src/a.rs', line: 1, name: 'CARGO_PKG_VERSION' }]
+ */
+export function extractCompileTimeEnvReads(
+  source: string,
+  text: string,
+  buildScript: boolean
+): CompileTimeEnvRead[] {
+  const code = withoutLineComments(text);
+  const pattern = buildScript
+    ? /\b(?:option_env!|env!|env::var_os|env::var)\s*\(\s*"([^"\n]+)"/g
+    : /\b(?:option_env!|env!)\s*\(\s*"([^"\n]+)"/g;
+  return [...code.matchAll(pattern)].map((match) => ({
+    source,
+    line: lineOf(code, match.index ?? 0),
+    name: match[1] as string,
+  }));
+}
+
 function listRustSources(dir: string): string[] {
   const files: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
