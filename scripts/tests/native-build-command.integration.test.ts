@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import { hostReleasePlatform } from '../lib/bun-cross-runtime';
+import { readReleaseStamp, stampRuntimeFile } from '../lib/runtime-stamp';
 import { FakeNativeBuildInputs } from './support/fake-native-build-inputs';
 
 const platform = hostReleasePlatform();
@@ -103,6 +104,66 @@ test.skipIf(!platform || platform.startsWith('windows') || platform.endsWith('-m
         profile: 'shipping',
         reportedVersion: fake.version,
       });
+    } finally {
+      fake.dispose();
+    }
+  },
+  60000
+);
+
+/** A prebuilt runtime directory holding a copy of the fake runtime, as `--runtime-dir` expects. */
+function prebuiltRuntimeDir(fake: FakeNativeBuildInputs, stampedWith?: string): string {
+  const directory = join(fake.root, 'prebuilt');
+  const copy = join(directory, fake.platform, 'mangostudio-runtime');
+  mkdirSync(dirname(copy), { recursive: true });
+  copyFileSync(fake.runtime, copy);
+  if (stampedWith) stampRuntimeFile(copy, stampedWith);
+  return directory;
+}
+
+const sha256 = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
+
+test.skipIf(!platform || platform.startsWith('windows') || platform.endsWith('-musl'))(
+  'an unstamped prebuilt runtime is stamped in the staged copy and its source is left alone',
+  async () => {
+    if (!platform) throw new Error('expected supported native fixture host');
+    const fake = new FakeNativeBuildInputs(platform);
+    try {
+      await fake.prepare();
+      const directory = prebuiltRuntimeDir(fake);
+      const source = join(directory, platform, 'mangostudio-runtime');
+      const sourceHash = sha256(source);
+
+      const built = fake.run(['--runtime-dir', directory]);
+
+      expect(built.exitCode, `${built.stdout.toString()}\n${built.stderr.toString()}`).toBe(0);
+      const staged = join(fake.root, '.mango/out', platform, 'mangostudio-runtime');
+      expect(readReleaseStamp(readFileSync(staged)).version).toBe(fake.version);
+      expect(sha256(source), `expected the caller's runtime directory untouched`).toBe(sourceHash);
+      expect(readReleaseStamp(readFileSync(source)).version).toBeNull();
+    } finally {
+      fake.dispose();
+    }
+  },
+  60000
+);
+
+test.skipIf(!platform || platform.startsWith('windows') || platform.endsWith('-musl'))(
+  'a prebuilt runtime already stamped with this version passes through, and another version is refused',
+  async () => {
+    if (!platform) throw new Error('expected supported native fixture host');
+    const fake = new FakeNativeBuildInputs(platform);
+    try {
+      await fake.prepare();
+      const same = fake.run(['--runtime-dir', prebuiltRuntimeDir(fake, fake.version)]);
+      expect(same.exitCode, `${same.stdout.toString()}\n${same.stderr.toString()}`).toBe(0);
+
+      rmSync(join(fake.root, 'prebuilt'), { recursive: true });
+      const other = fake.run(['--runtime-dir', prebuiltRuntimeDir(fake, '9.9.9')]);
+      expect(other.exitCode).toBe(1);
+      expect(other.stderr.toString()).toContain(
+        `expected an unstamped release slot or one already carrying ${fake.version} | received: 9.9.9`
+      );
     } finally {
       fake.dispose();
     }

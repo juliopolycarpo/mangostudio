@@ -511,9 +511,10 @@ pub fn run(args: &[String], env: &impl EnvSource) -> i32 {
 ///
 /// `version` is what `--version`, the help header, the handshake's peer
 /// version and every health payload report. The process entry point
-/// (`src/main.rs`) owns the compile-time `MANGOSTUDIO_RELEASE_VERSION` stamp
-/// and passes it here, so a stamp change recompiles the binary and leaves this
-/// library untouched. `tests/release_stamp_boundary.rs` keeps it that way.
+/// (`src/main.rs`) reads the release stamp that `scripts/lib/runtime-stamp.ts`
+/// writes into the linked binary and passes it here, so a release version is
+/// never a compile input of this library. `tests/release_stamp_boundary.rs`
+/// keeps it that way.
 ///
 /// # Example
 ///

@@ -59,10 +59,10 @@ import {
   cargoTargetDir,
   prebuiltRuntimePath,
   resolveRuntimeSource,
-  RUNTIME_RELEASE_VERSION_ENV,
   type RuntimeSource,
   verifyRuntimeBinary,
 } from './lib/runtime-build';
+import { stampRuntimeFile } from './lib/runtime-stamp';
 import { renderStandaloneReadme } from './lib/standalone-readme';
 import { standaloneRunnerScripts } from './lib/standalone-runners';
 
@@ -206,7 +206,7 @@ function withFrontendDistAside(
 /**
  * Compiles the hub entrypoint for one Bun target. The build stamp carries the
  * release version; the cargo runtime beside it is stamped with the same one
- * (`MANGOSTUDIO_RELEASE_VERSION`), because the protocol handshake refuses a
+ * (`scripts/lib/runtime-stamp.ts`), because the protocol handshake refuses a
  * mismatch.
  */
 async function compileBinary(
@@ -316,6 +316,17 @@ async function stageRuntime(
       : cargoRuntimeOutputPath(cargoTargetDir(ROOT_DIR), target);
   copyFileSync(from, runtimePath);
   if (process.platform !== 'win32') chmodSync(runtimePath, 0o755);
+  // The release version is written into the staged copy, never the source: cargo's own output
+  // stays unstamped, and a caller's runtime directory is never modified. A runtime that
+  // `scripts/build-runtime.ts` already stamped with this version passes through unchanged; one
+  // stamped with another version is refused.
+  try {
+    stampRuntimeFile(runtimePath, version);
+  } catch (caught) {
+    console.error(`❌ Runtime for ${target.arch} (from ${from}) could not be stamped:`);
+    console.error(`   ${caught instanceof Error ? caught.message : String(caught)}`);
+    return false;
+  }
 
   const verification = await verifyRuntimeBinary({
     path: runtimePath,
@@ -545,7 +556,7 @@ function resolveRuntimeSources(
   return sources;
 }
 
-/** Runs the host target's `cargo build`, stamped with the release version. */
+/** Runs the host target's `cargo build`; `stageRuntime` stamps the release version afterwards. */
 async function buildHostRuntimes(
   sources: ReadonlyMap<BinaryTarget['arch'], RuntimeSource>,
   options: BinaryBuildOptions
@@ -559,7 +570,6 @@ async function buildHostRuntimes(
     console.log(`🦀 Building the ${platform} runtime with cargo`);
     const result = await runCommand(`runtime:${platform}`, [...source.command], {
       cwd: ROOT_DIR,
-      env: { [RUNTIME_RELEASE_VERSION_ENV]: options.version },
     });
     if (result.exitCode !== 0) {
       fatal(`cargo exited ${result.exitCode} building the ${platform} runtime.`);

@@ -385,10 +385,18 @@ stay the same. Rust toolchains remain:
   at a pinned version and SHA-256 (`ZIG_VERSION`/`ZIG_SHA256` in
   `runtime-build.yml`); cargo-zigbuild is installed at a pinned version by
   `taiki-e/install-action`, which verifies its own checksum.
-- **Version.** Every runtime is stamped with the release version through
-  `MANGOSTUDIO_RELEASE_VERSION` at compile time (canary and dry-run versions
-  differ from the committed manifest), and prints it bare from `--version`, the
-  line the hub's doctor and WSL/SSH provisioning compare verbatim.
+- **Version.** The release version is not a compile input: cargo builds the
+  same bytes for any version, and `scripts/lib/runtime-stamp.ts` writes it into
+  a fixed slot of the staged copy after the link (canary and dry-run versions
+  differ from the committed manifest). The patcher requires exactly one copy of
+  the slot's magic and a slot that is unstamped or already carries the version.
+  It patches ELF in place, requires a PE optional-header `CheckSum` of 0, and
+  re-signs a Mach-O ad hoc under the identifier the linker chose, so a macOS
+  host without `codesign` fails the build. A binary prints the version bare
+  from `--version`, the line the hub's doctor and WSL/SSH provisioning compare
+  verbatim, and the post-build `--version` check is what catches an optimizer
+  that folded the slot. An unstamped binary (`cargo build`, `cargo test`)
+  reports the manifest version.
 - **Checks.** `scripts/build-runtime.ts` and the `--runtime-dir` staging both
   read each binary's header (`scripts/lib/executable-header.ts`): ELF, Mach-O,
   or PE; x64 or arm64; the glibc loader for gnu, no interpreter for musl; no

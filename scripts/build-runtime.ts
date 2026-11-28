@@ -24,12 +24,12 @@ import {
   cargoTargetDir,
   hostPlatformId,
   prebuiltRuntimePath,
-  RUNTIME_RELEASE_VERSION_ENV,
   runtimeBuildVersion,
   rustTargetTriple,
   selectRuntimeTargets,
   verifyRuntimeBinary,
 } from './lib/runtime-build';
+import { stampRuntimeFile } from './lib/runtime-stamp';
 
 function printHelp(): never {
   console.log(`Usage: bun run build:runtime [--platform <ids>] [--os <os>] [--zig] [--rustup] [--dev] [--out <dir>]
@@ -67,10 +67,9 @@ async function buildOne(
     });
     if (added.exitCode !== 0) fatal(`rustup target add ${triple} exited ${added.exitCode}.`);
   }
-  const result = await runCommand(`runtime:${target.arch}`, command, {
-    cwd: ROOT_DIR,
-    env: { [RUNTIME_RELEASE_VERSION_ENV]: context.version },
-  });
+  // The release version is not a compile input: cargo builds the same bytes for any version, and
+  // the stamp is written into the staged copy below, so cargo's own output stays unstamped.
+  const result = await runCommand(`runtime:${target.arch}`, command, { cwd: ROOT_DIR });
   if (result.exitCode !== 0) {
     fatal(`cargo exited ${result.exitCode} building the ${target.arch} runtime.`);
   }
@@ -80,6 +79,13 @@ async function buildOne(
   mkdirSync(dirname(staged), { recursive: true });
   copyFileSync(built, staged);
   if (process.platform !== 'win32') chmodSync(staged, 0o755);
+  try {
+    stampRuntimeFile(staged, context.version);
+  } catch (caught) {
+    fatal(
+      `Runtime ${target.arch} release stamp failed: ${caught instanceof Error ? caught.message : String(caught)}`
+    );
+  }
 
   const verification = await verifyRuntimeBinary({
     path: staged,

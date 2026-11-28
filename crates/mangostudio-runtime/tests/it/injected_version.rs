@@ -1,8 +1,8 @@
 //! Every site that reports the runtime's release reports the one it was handed, not the package
 //! version.
 //!
-//! The shipped binary is stamped at compile time and no CI lane stamps the Rust tests, so the
-//! tests of the real binary (`cli`, `transport_stdio_spawned`, `update_supervised_restart`)
+//! The shipped binary is stamped after the link and no CI lane stamps the Rust tests' binary, so
+//! the tests of the real binary (`cli`, `transport_stdio_spawned`, `update_supervised_restart`)
 //! compare the package version with itself: an edit that passed `CARGO_PKG_VERSION` to one site
 //! would keep them green. These tests run the same library entry point through
 //! `tests/fixtures/injected_version_runtime.rs`, which reports a version chosen at run time, one no

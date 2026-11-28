@@ -10,16 +10,17 @@ fn binary_path() -> &'static str {
     env!("CARGO_BIN_EXE_mangostudio-runtime")
 }
 
-/// The release the binary reports: the compile-time stamp when the build set
-/// one, the manifest version otherwise — the same expression as `src/main.rs`.
+/// The release the binary reports. `cargo test` builds it unstamped (the release stamp is
+/// written after the link, by `scripts/lib/runtime-stamp.ts`), so it reports the manifest
+/// version.
 pub(super) fn expected_version() -> &'static str {
-    option_env!("MANGOSTUDIO_RELEASE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+    env!("CARGO_PKG_VERSION")
 }
 
 /// Fails unless `received`, what `site` reported, is [`expected_version`].
 ///
-/// A binary that reports the manifest version under a stamped build fails
-/// here with both values, whichever of its version reads was miswired.
+/// A binary that reports anything but [`expected_version`] fails here with
+/// both values, whichever of its version reads was miswired.
 ///
 /// Usage: `assert_reports_stamp("--version", stdout.trim())`.
 pub(super) fn assert_reports_stamp(site: &str, received: &str) {
@@ -48,7 +49,7 @@ pub(super) fn assert_all_report(expected: &str, reports: &[(&str, &str)]) {
     );
 }
 
-/// [`assert_all_report`] against [`expected_version`], the release this build was stamped with.
+/// [`assert_all_report`] against [`expected_version`], the release the unstamped test binary reports.
 pub(super) fn assert_all_report_stamp(reports: &[(&str, &str)]) {
     assert_all_report(expected_version(), reports);
 }

@@ -244,6 +244,106 @@ function readCString(bytes: Uint8Array, offset: number): string {
   return new TextDecoder('latin1').decode(bytes.subarray(offset, end === -1 ? undefined : end));
 }
 
+/** `CheckSum` sits 64 bytes into the PE32 and PE32+ optional headers alike. */
+const PE_CHECKSUM_FIELD = 64;
+const LC_CODE_SIGNATURE = 0x1d;
+const CODE_SIGNATURE_SUPERBLOB_MAGIC = 0xfade_0cc0;
+const CODE_SIGNATURE_DIRECTORY_MAGIC = 0xfade_0c02;
+const MACHO_HEADER_BYTES = 32;
+
+/**
+ * The optional header's `CheckSum` of a PE32+ executable. MSVC's linker writes 0 unless `/RELEASE`
+ * or a driver subsystem asks for a real one, and patching a binary invalidates a real one.
+ * Throws, naming what was found, for anything that is not a PE32+ file.
+ *
+ * @example
+ * readPeCheckSum(new Uint8Array(await Bun.file('mangostudio-runtime.exe').arrayBuffer())); // → 0
+ */
+export function readPeCheckSum(bytes: Uint8Array): number {
+  const header = readExecutableHeader(bytes);
+  if (header.format !== 'pe') {
+    throw new Error(`expected a PE executable to read CheckSum from | received: ${header.format}`);
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const field = view.getUint32(0x3c, true) + 24 + PE_CHECKSUM_FIELD;
+  if (field + 4 > bytes.length) {
+    throw new Error(
+      `expected a PE optional header holding CheckSum | received: ${bytes.length} bytes, field at ${field}`
+    );
+  }
+  return view.getUint32(field, true);
+}
+
+/**
+ * The ad hoc code signature a 64-bit Mach-O carries: the identifier its `CodeDirectory` names, or
+ * `null` when the file has no `LC_CODE_SIGNATURE`. Apple's linker signs arm64 output itself, and
+ * a signed binary that is edited afterwards no longer verifies, so a patcher uses this to know
+ * whether it owes a re-sign and under which identifier.
+ *
+ * @example
+ * readMachOSignature(bytes); // → { identifier: 'mangostudio_runtime-3f9a1c0d2b7e4a55' }
+ */
+export function readMachOSignature(bytes: Uint8Array): { readonly identifier: string } | null {
+  const header = readExecutableHeader(bytes);
+  if (header.format !== 'macho') {
+    throw new Error(
+      `expected a Mach-O executable to read a signature from | received: ${header.format}`
+    );
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const commandCount = view.getUint32(16, true);
+  let command = MACHO_HEADER_BYTES;
+  for (let index = 0; index < commandCount; index += 1) {
+    if (command + 8 > bytes.length) break;
+    const kind = view.getUint32(command, true);
+    const size = view.getUint32(command + 4, true);
+    if (size < 8) break;
+    if (kind === LC_CODE_SIGNATURE) {
+      return { identifier: readCodeDirectoryIdentifier(bytes, view, command) };
+    }
+    command += size;
+  }
+  return null;
+}
+
+function readCodeDirectoryIdentifier(bytes: Uint8Array, view: DataView, command: number): string {
+  if (command + 16 > bytes.length) {
+    throw new Error(`expected a whole LC_CODE_SIGNATURE command | received offset ${command}`);
+  }
+  const dataOffset = view.getUint32(command + 8, true);
+  const dataSize = view.getUint32(command + 12, true);
+  if (dataSize < 12 || dataOffset + dataSize > bytes.length) {
+    throw new Error(
+      `expected a code signature inside the file | received: offset ${dataOffset}, size ${dataSize}, file ${bytes.length} bytes`
+    );
+  }
+  // Code signature structures are big-endian regardless of the file's byte order.
+  if (view.getUint32(dataOffset, false) !== CODE_SIGNATURE_SUPERBLOB_MAGIC) {
+    throw new Error(
+      `expected a code signature SuperBlob (magic 0xfade0cc0) | received: 0x${view.getUint32(dataOffset, false).toString(16)}`
+    );
+  }
+  const blobCount = view.getUint32(dataOffset + 8, false);
+  for (let blob = 0; blob < blobCount; blob += 1) {
+    const entry = dataOffset + 12 + blob * 8;
+    if (entry + 8 > dataOffset + dataSize) break;
+    const directory = dataOffset + view.getUint32(entry + 4, false);
+    if (
+      directory + 24 <= bytes.length &&
+      view.getUint32(directory, false) === CODE_SIGNATURE_DIRECTORY_MAGIC
+    ) {
+      const identifier = readCString(bytes, directory + view.getUint32(directory + 20, false));
+      if (identifier.length === 0) {
+        throw new Error('expected a non-empty code signature identifier | received: empty');
+      }
+      return identifier;
+    }
+  }
+  throw new Error(
+    `expected a CodeDirectory (magic 0xfade0c02) in the code signature | received ${blobCount} blob(s) without one`
+  );
+}
+
 /**
  * Compare two dotted versions numerically (`'2.17'` vs `'2.9'`).
  *

@@ -6,9 +6,10 @@ name = "mangostudio-runtime"
 # `scripts/lib/release-version.ts`'s `APP_VERSIONED_CRATES` version-locks it to
 # the app release (via `bun run check:versions`, bumped by
 # `bumpLockstepVersions` on release — this manifest's version is never
-# hand-maintained). Distribution builds stamp the exact release version in at
-# compile time (`MANGOSTUDIO_RELEASE_VERSION`, see `src/main.rs`); this version
-# is what a plain `cargo build` reports, never the protocol version.
+# hand-maintained). Distribution builds write the exact release version into
+# the linked binary (`scripts/lib/runtime-stamp.ts`, see `src/main.rs`); this
+# version is what an unstamped `cargo build` reports, never the protocol
+# version.
 version = "0.1.1"
 authors.workspace = true
 categories = ["command-line-utilities", "network-programming", "filesystem", "os"]

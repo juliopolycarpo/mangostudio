@@ -373,8 +373,8 @@ regras valem para novos lotes; estudos preservados mantêm suas fontes e regras 
 Os recibos guardam revisão, selo das entradas Rust/Cargo, toolchain, árvore de todos os alvos,
 metadados estáveis com features padrão/completas e árvore fuzz separada. Uma tentativa aceita precisa
 terminar com sucesso, entradas inalteradas e árvore de processos vazia. Builds sem alteração não podem
-recompilar unidades nem mudar o hash do binário. Uma nova versão deve recompilar uma unidade, relatar
-a versão esperada, mudar o hash do executável e preservar os hashes das bibliotecas. Só o runtime tem carga de nova versão, pelo input de compilação existente `MANGOSTUDIO_RELEASE_VERSION`; o launcher usa metadados Cargo e não é restampado. O launcher downloader nunca é executado para identificar sua versão: ela vem dos metadados Cargo selados, sem instalar um hub ou acessar o estado real do usuário. Tempo decorrido (resolução de 10 ms na saída), CPU final e RSS máximo individual do GNU time
+recompilar unidades nem mudar o hash do binário. Uma nova versão não deve recompilar unidade alguma: deve manter o binário sem carimbo idêntico, relatar
+a versão esperada na cópia carimbada, mudar o hash dessa cópia e preservar os hashes das bibliotecas. Só o runtime tem carga de nova versão: o harness grava a versão numa cópia da saída do cargo com `scripts/lib/runtime-stamp.ts`, porque a versão da release não é mais input de compilação; o launcher usa metadados Cargo e não é restampado. O launcher downloader nunca é executado para identificar sua versão: ela vem dos metadados Cargo selados, sem instalar um hub ou acessar o estado real do usuário. Tempo decorrido (resolução de 10 ms na saída), CPU final e RSS máximo individual do GNU time
 ficam separados das amostras de RSS/CPU da árvore de processos.
 
 `--attribution` produz outro artefato, com símbolos, para `cargo bloat`. A atribuição só é qualificada
@@ -1027,7 +1027,8 @@ A revisão, ferramentas, perfil e features padrão acima são obrigatórios. Use
 limpe overrides de compilador/perfil não relacionados e confira todas as linhas. Os comandos mostram
 o mesmo fluxo build/cópia/strip/seções. O grupo supervisionado executado também exigiu selos de
 revisão/tools/evidência antiga iguais, contagens exatas de arquivo/texto do bloat, crates únicos e não
-vazios, alocação limitada e escopos finais vazios.
+vazios, alocação limitada e escopos finais vazios. Os comandos registram uma medição passada:
+`MANGOSTUDIO_RELEASE_VERSION` era input de compilação na época e não afeta mais o build; remova-a para executá-los hoje.
 
 ```bash
 # From the recorded source, with cargo-bloat 0.12.1 and GNU binutils 2.46.

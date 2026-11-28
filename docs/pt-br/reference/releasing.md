@@ -255,9 +255,12 @@ arquivos e o layout de dois binários permanecem iguais. Os toolchains Rust são
 - **Pins.** Rust vem de `rust-toolchain.toml`; zig é baixado com versão e
   SHA-256 fixos (`ZIG_VERSION`/`ZIG_SHA256`); cargo-zigbuild é instalado em
   versão fixa pelo `taiki-e/install-action`, que verifica o checksum.
-- **Versão.** Cada runtime recebe a versão da release em tempo de compilação via
-  `MANGOSTUDIO_RELEASE_VERSION` e a imprime sozinha em `--version`, a linha que o
-  doctor do hub e o provisionamento WSL/SSH comparam literalmente.
+- **Versão.** A versão da release não entra na compilação: o cargo gera os mesmos
+  bytes para qualquer versão, e `scripts/lib/runtime-stamp.ts` a grava em um slot
+  fixo da cópia preparada, depois do link. O runtime a imprime sozinha em
+  `--version`, a linha que o doctor do hub e o provisionamento WSL/SSH comparam
+  literalmente. Um binário sem carimbo (`cargo build`, `cargo test`) informa a
+  versão do manifesto.
 - **Verificações.** `scripts/build-runtime.ts` e o staging com `--runtime-dir`
   leem o cabeçalho de cada binário (`scripts/lib/executable-header.ts`): formato,
   CPU, loader glibc ou binário estático, e nenhum símbolo `GLIBC_` acima do piso.

@@ -1,7 +1,7 @@
 //! The runtime's CLI entry point with a release version chosen at run time.
 //!
-//! The shipped binary is stamped at compile time (`src/main.rs`), and no CI lane stamps the Rust
-//! tests, so a test of the real binary compares the package version with itself and cannot tell a
+//! The shipped binary is stamped after the link (`src/main.rs`), and no CI lane stamps the Rust
+//! tests' binary, so a test of the real binary compares the package version with itself and cannot tell a
 //! site that reports the injected version from one that reports `CARGO_PKG_VERSION`. This
 //! stand-in hands `cli::run_with_version` the version named by
 //! `MANGOSTUDIO_TEST_INJECTED_VERSION` instead, a value no manifest carries, so every site that
@@ -11,8 +11,8 @@
 //! It is a test fixture, never shipped: it is a binary target behind the
 //! `injected-version-fixture` feature, so cargo builds it for integration tests (and exports its
 //! path to them as `CARGO_BIN_EXE_injected-version-runtime`) only when that feature is on, which
-//! every `--all-features` lane does, and a release build never is. The stamp stays a compile-time
-//! value in `src/main.rs`.
+//! every `--all-features` lane does, and a release build never is. The real binary's stamp stays
+//! a slot in `src/main.rs`.
 //!
 //! ```text
 //! $ MANGOSTUDIO_TEST_INJECTED_VERSION=9.8.7-injected injected-version-runtime --version
