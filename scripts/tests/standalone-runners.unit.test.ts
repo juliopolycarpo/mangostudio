@@ -13,6 +13,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { standaloneRunnerScripts } from '../lib/standalone-runners';
+// Every scratch root here held an executable a child just ran; Windows can keep it locked for
+// a moment after exit, so a single rm fails with EBUSY. This helper retries.
+import { removeFakeCliDirectory } from './support/fake-cli';
 
 function writeFakeUnixExecutable(directory: string, name = 'mangostudio'): void {
   mkdirSync(directory, { recursive: true });
@@ -62,7 +65,7 @@ describe('standalone runner scripts', () => {
         expect(child.exitCode, 'expected the runner to propagate executable exit 37').toBe(37);
       } finally {
         rmSync(aliasPath, { force: true });
-        rmSync(root, { recursive: true, force: true });
+        removeFakeCliDirectory(root);
       }
     }
   );
@@ -91,7 +94,7 @@ describe('standalone runner scripts', () => {
         );
         expect(child.exitCode, 'expected the runner to propagate executable exit 37').toBe(37);
       } finally {
-        rmSync(root, { recursive: true, force: true });
+        removeFakeCliDirectory(root);
       }
     }
   );
@@ -161,7 +164,7 @@ describe('standalone runner scripts', () => {
         );
         expect(child.stderr.toString()).toBe('');
       } finally {
-        rmSync(root, { recursive: true, force: true });
+        removeFakeCliDirectory(root);
       }
     }
   );
@@ -195,7 +198,7 @@ describe('standalone runner scripts', () => {
           hasPlatform ? 'windows-x64' : 'none built yet',
         ]);
       } finally {
-        rmSync(root, { recursive: true, force: true });
+        removeFakeCliDirectory(root);
       }
     }
   );
