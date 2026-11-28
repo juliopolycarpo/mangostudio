@@ -412,7 +412,7 @@ describe('evaluateGate in the light lane set', () => {
 
   test('the refusal sentence names the reason, the label and the recovery', () => {
     expect(LIGHT_REFUSAL).toBe(
-      'light lane set for a Dependabot pull request; add the ci: full label and ask Dependabot to rebase to run the full set'
+      'light lane set for a Dependabot pull request; add the ci: full label and ask Dependabot to rebase (or re-run all jobs, not only the failed ones) to run the full set'
     );
   });
 

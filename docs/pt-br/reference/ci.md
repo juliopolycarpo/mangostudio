@@ -103,7 +103,7 @@ informativo, não está em nenhum gate e ainda não ficou leve; é uma tarefa se
 e depois falham com
 
 ```text
-light lane set for a Dependabot pull request; add the ci: full label and ask Dependabot to rebase to run the full set
+light lane set for a Dependabot pull request; add the ci: full label and ask Dependabot to rebase (or re-run all jobs, not only the failed ones) to run the full set
 ```
 
 Todo workflow que fica leve recusa, então reexecutar um workflow depois de adicionar a label não

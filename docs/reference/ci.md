@@ -122,7 +122,7 @@ minutes on bun bumps) is advisory, in no gate, and not lightened yet; that is a 
 as usual, then fail with
 
 ```text
-light lane set for a Dependabot pull request; add the ci: full label and ask Dependabot to rebase to run the full set
+light lane set for a Dependabot pull request; add the ci: full label and ask Dependabot to rebase (or re-run all jobs, not only the failed ones) to run the full set
 ```
 
 Every workflow that lightens refuses, so re-running one workflow after adding the label

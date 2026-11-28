@@ -18,7 +18,7 @@ export const DEPENDABOT_LOGIN = 'dependabot[bot]';
 export const FULL_RUN_LABEL = 'ci: full';
 
 /** What a light-mode gate says instead of passing. The sentence names the reason and the recovery. */
-export const LIGHT_REFUSAL = `light lane set for a Dependabot pull request; add the ${FULL_RUN_LABEL} label and ask Dependabot to rebase to run the full set`;
+export const LIGHT_REFUSAL = `light lane set for a Dependabot pull request; add the ${FULL_RUN_LABEL} label and ask Dependabot to rebase (or re-run all jobs, not only the failed ones) to run the full set`;
 
 const LANE_SETS = ['full', 'light'] as const;
 export type LaneSet = (typeof LANE_SETS)[number];
