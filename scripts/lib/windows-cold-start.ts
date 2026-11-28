@@ -23,7 +23,7 @@
 // run with this step in place is also the experiment: the first-case durations in the test
 // lane should fall to the second-case level.
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** One start-up measurement: the same command run twice, back to back. */
@@ -130,15 +130,20 @@ export function readTree(
       truncated = true;
       break;
     }
+    // One descriptor for the size check and the read, so both see the same file.
+    let descriptor: number | undefined;
     try {
-      if (statSync(path).size > limits.maxFileBytes) {
+      descriptor = openSync(path, 'r');
+      if (fstatSync(descriptor).size > limits.maxFileBytes) {
         skipped += 1;
-        continue;
+      } else {
+        bytes += readFileSync(descriptor).byteLength;
+        files += 1;
       }
-      bytes += readFileSync(path).byteLength;
-      files += 1;
     } catch {
       skipped += 1;
+    } finally {
+      if (descriptor !== undefined) closeSync(descriptor);
     }
   }
   return { label, root, files, bytes, ms: Math.round(now() - started), skipped, truncated };
