@@ -286,7 +286,12 @@ if (import.meta.main) {
         outDir: out,
         binaryName: runtimeBinaryName(target.name),
         inputs,
-        producer: readRuntimeProducer(process.env, process.platform, runTool(ROOT_DIR)),
+        producer: readRuntimeProducer(
+          process.env,
+          process.platform,
+          runTool(ROOT_DIR),
+          inputs.facts.command[1] === 'zigbuild'
+        ),
       });
       log(
         `unstamped ${staged.receipt.target.platform}: ${staged.receipt.binary.sha256} (digest ${inputs.digest})`

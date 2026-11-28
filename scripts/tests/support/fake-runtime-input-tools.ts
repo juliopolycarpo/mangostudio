@@ -69,6 +69,7 @@ export const MINIMAL_RUNTIME_TREE: readonly string[] = [
   'Cargo.lock',
   'rust-toolchain.toml',
   '.cargo/config.toml',
+  '.gitattributes',
   'apps/shared/src/runtime-contract/generated/catalog.json',
   'apps/shared/src/runtime-contract/generated/hub-catalog.json',
   'apps/shared/src/runtime-contract/generated/health.schema.json',

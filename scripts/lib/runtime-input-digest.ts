@@ -35,6 +35,15 @@
 //     package version that becomes `CARGO_PKG_VERSION`), `Cargo.lock` (every
 //     third-party crate version and checksum), `rust-toolchain.toml` and
 //     `.cargo/config.toml` (the static CRT flag, the publish-age hold).
+//   - Root `.gitattributes`: blob ids are of the stored content, the compiler
+//     reads the checked-out bytes, and the eol rules decide whether a Windows
+//     runner (`core.autocrlf=true` by default) turns embedded JSON and
+//     multi-line string literals into CRLF. Nested `.gitattributes` files
+//     elsewhere in the tree do not reach any crate or embedded file.
+//   - A reachable path dependency or `[patch]`/`[replace]` path outside the
+//     declared crates, a `build.rs` whose bytes differ from the pinned ones, and
+//     an `include!` family macro the scanner cannot resolve are policy-test
+//     failures, so each forces a human to extend this list or say why not.
 //   - `.github/actions/setup-zigbuild/`: pins the zig and cargo-zigbuild
 //     versions. The versions the job observes are hashed as well; the file is
 //     the declared intent, the observation is what ran.
@@ -62,6 +71,16 @@
 //     change about weekly, and the maintainer accepted "compiled on an image up
 //     to seven days older" for reuse. The determinism evidence (the binary's
 //     SHA-256 next to the digest in the step summary) is how drift shows.
+//
+// Trust boundary, for whoever consumes a published base: the artifact name is
+// forgeable. Anyone can compute a digest, and pull request runs (forks
+// included) store artifacts in this repository under their own workflow file,
+// so neither the main-only `if` in `runtime-build.yml` nor the receipt's
+// self-reported producer proves where a binary came from. A consumer must find
+// the artifact by listing runs of this workflow's caller with event `push`,
+// branch `main` and a head repository equal to the base repository, and verify
+// that run through the Actions API (workflow path, head SHA, job success,
+// artifact digest), never by artifact name alone.
 
 import { createHash } from 'node:crypto';
 
@@ -74,6 +93,11 @@ export const RUNTIME_INPUT_FILES: readonly string[] = [
   'Cargo.lock',
   'rust-toolchain.toml',
   '.cargo/config.toml',
+  // Blob ids are of the stored (normalized) content, but the compiler reads the checked-out
+  // bytes. A Windows runner defaults to `core.autocrlf=true`; only these eol rules keep LF in
+  // the embedded JSON and in multi-line string literals, so editing them changes the binary
+  // without changing any blob id below.
+  '.gitattributes',
   // Read by `mangostudio-runtime-contract/build.rs` (catalog.json) and `include_str!`.
   'apps/shared/src/runtime-contract/generated/catalog.json',
   'apps/shared/src/runtime-contract/generated/hub-catalog.json',
@@ -315,9 +339,13 @@ const BUILD_ENV_PATTERNS: readonly RegExp[] = [
   /^CARGO_ZIGBUILD_[A-Z0-9_]+$/,
   /^ZIG_[A-Z0-9_]+$/,
   // The `cc` crate (ring's C and assembly) and the system linker driver.
-  /^(?:CC|CXX|AR|LD|CFLAGS|CXXFLAGS|LDFLAGS|CPPFLAGS|ASMFLAGS)$/,
-  /^(?:CC|CXX|AR|CFLAGS|CXXFLAGS|ASMFLAGS|TARGET_CC|TARGET_CFLAGS)_[A-Za-z0-9_]+$/,
-  /^(?:TARGET_CC|TARGET_CFLAGS)$/,
+  /^(?:CC|CXX|AR|LD|CFLAGS|CXXFLAGS|LDFLAGS|CPPFLAGS|ASMFLAGS|ARFLAGS)$/,
+  /^(?:CC|CXX|AR|CFLAGS|CXXFLAGS|ASMFLAGS|ARFLAGS)_[A-Za-z0-9_]+$/,
+  /^(?:TARGET|HOST)_(?:CC|CXX|AR|CFLAGS|CXXFLAGS|ASMFLAGS|ARFLAGS)$/,
+  // `cc` ignores its built-in flags when this is set, so it changes every -sys crate.
+  /^CRATE_CC_NO_DEFAULTS$/,
+  // The MSVC compiler and linker read these before the command line.
+  /^(?:CL|_CL_|LINK|_LINK_)$/,
   /^(?:MACOSX_DEPLOYMENT_TARGET|SDKROOT|DEVELOPER_DIR|SOURCE_DATE_EPOCH)$/,
 ];
 
@@ -486,6 +514,46 @@ export interface RuntimeProducer {
 }
 
 /**
+ * The banner of the C compiler the -sys crates (ring's C and assembly) would
+ * use, for the receipt only. Best effort and never throws: `zig cc` for a zig
+ * link, the `CC` the environment names, `cl` on Windows (its banner goes to
+ * stderr and it exits non-zero without arguments), `cc` elsewhere. `cl` is
+ * usually not on PATH outside a developer shell, so it is often unobservable.
+ *
+ * @example
+ * observeCCompiler({}, 'linux', false, run); // → 'cc (Ubuntu 13.3.0) 13.3.0'
+ */
+export function observeCCompiler(
+  env: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform,
+  zigLinked: boolean,
+  run: ToolRunner
+): string | undefined {
+  const named = env.CC?.trim();
+  const candidates: string[][] = zigLinked
+    ? [['zig', 'cc', '--version']]
+    : platform === 'win32'
+      ? [['cl']]
+      : [...(named ? [[named, '--version']] : []), ['cc', '--version']];
+  for (const command of candidates) {
+    try {
+      const output = run(command);
+      if (output.exitCode !== 0 && command[0] !== 'cl') continue;
+      const banner = `${output.stdout}\n${output.stderr}`
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .slice(0, 2)
+        .join('; ');
+      if (banner) return banner;
+    } catch {
+      // Not installed or not on PATH: the receipt just omits it.
+    }
+  }
+  return undefined;
+}
+
+/**
  * The producing run from the Actions environment, plus what the runner image
  * says about itself. Throws, naming the variable, when a run identity is
  * missing: a receipt that cannot name its run is not evidence.
@@ -499,7 +567,8 @@ export interface RuntimeProducer {
 export function readRuntimeProducer(
   env: Readonly<Record<string, string | undefined>>,
   platform: NodeJS.Platform,
-  run: ToolRunner
+  run: ToolRunner,
+  zigLinked = false
 ): RuntimeProducer {
   const required = (name: string): string => {
     const value = env[name]?.trim();
@@ -518,6 +587,8 @@ export function readRuntimeProducer(
       // Unobservable here; the image version above still identifies it.
     }
   }
+  const compiler = observeCCompiler(env, platform, zigLinked, run);
+  if (compiler) runner.cCompiler = compiler;
   return {
     runId: required('GITHUB_RUN_ID'),
     runAttempt: required('GITHUB_RUN_ATTEMPT'),

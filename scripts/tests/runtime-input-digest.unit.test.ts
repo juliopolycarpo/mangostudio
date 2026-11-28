@@ -4,7 +4,14 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { collectRuntimeInputs, stageUnstampedRuntime } from '../ci/runtime-input-digest';
-import { extractBuildScriptInputs, extractCompileTimeEnvReads } from '../lib/crate-inputs';
+import {
+  extractBuildScriptHazards,
+  extractBuildScriptInputs,
+  extractCompileTimeEnvReads,
+  extractUnresolvedReads,
+  isInsideCfgTestModule,
+  isMountedUnderCfgTest,
+} from '../lib/crate-inputs';
 import {
   applyWorktreeChanges,
   assertCleanRuntimeInputs,
@@ -13,6 +20,7 @@ import {
   isRuntimeInputPath,
   observeBuildEnv,
   observeBuildTools,
+  observeCCompiler,
   parseIndexListing,
   parseWorktreeStatus,
   readRuntimeProducer,
@@ -80,6 +88,9 @@ describe('isRuntimeInputPath', () => {
     // A sibling directory that merely shares a crate's prefix.
     ['crates/mangostudio-runtime-extra/src/lib.rs', false],
     ['apps/shared/src/runtime-contract/generated/other.json', false],
+    // The root eol rules decide the checked-out bytes of embedded files on Windows.
+    ['.gitattributes', true],
+    ['apps/api/tests/support/fixtures/file-type/.gitattributes', false],
     ['README.md', false],
   ])('%s -> %p', (path, expected) => {
     expect(isRuntimeInputPath(path)).toBe(expected);
@@ -226,6 +237,38 @@ describe('observeBuildEnv and observeBuildTools', () => {
     });
   });
 
+  test('keeps the C toolchain variables the cc crate and MSVC read, host and target forms alike', () => {
+    expect(
+      observeBuildEnv({
+        CRATE_CC_NO_DEFAULTS: '1',
+        ARFLAGS: 'rcs',
+        ARFLAGS_x86_64_unknown_linux_gnu: 'rcs',
+        HOST_CC: 'gcc',
+        HOST_CFLAGS: '-O0',
+        TARGET_CC: 'zig cc',
+        CL: '/MP',
+        _CL_: '/Zi',
+        LINK: '/DEBUG',
+        _LINK_: '/OPT:REF',
+        // Near misses stay out.
+        LINKS: 'x',
+        HOST_HOME: '/h',
+        CLIPPY_CONF_DIR: '/c',
+      })
+    ).toEqual({
+      ARFLAGS: 'rcs',
+      ARFLAGS_x86_64_unknown_linux_gnu: 'rcs',
+      CL: '/MP',
+      CRATE_CC_NO_DEFAULTS: '1',
+      HOST_CC: 'gcc',
+      HOST_CFLAGS: '-O0',
+      LINK: '/DEBUG',
+      TARGET_CC: 'zig cc',
+      _CL_: '/Zi',
+      _LINK_: '/OPT:REF',
+    });
+  });
+
   test('asks for zig only when the command links through cargo-zigbuild', () => {
     const plain = new FakeToolRunner();
     expect(Object.keys(observeBuildTools(['cargo', 'build'], plain.run))).toEqual([
@@ -321,6 +364,30 @@ describe('collectRuntimeInputs', () => {
         : entry
     );
     expect(collect({}, new FakeGit(changed)).digest).not.toBe(collect().digest);
+  });
+
+  test('an edit to the root .gitattributes changes the digest, one to a nested file does not', () => {
+    const withBlob = (path: string) =>
+      new FakeGit(
+        indexOf([
+          ...MINIMAL_RUNTIME_TREE,
+          'apps/api/tests/support/fixtures/file-type/.gitattributes',
+        ]).map((entry) => (entry.path === path ? { ...entry, blob: 'a'.repeat(40) } : entry))
+      );
+    const base = collect({}, withBlob('none')).digest;
+    expect(collect({}, withBlob('.gitattributes')).digest).not.toBe(base);
+    expect(
+      collect({}, withBlob('apps/api/tests/support/fixtures/file-type/.gitattributes')).digest
+    ).toBe(base);
+  });
+
+  test('a tree without the root .gitattributes is refused by name', () => {
+    expect(() =>
+      collect(
+        {},
+        new FakeGit(indexOf(MINIMAL_RUNTIME_TREE.filter((path) => path !== '.gitattributes')))
+      )
+    ).toThrow('expected tracked runtime input .gitattributes | received: not in the git index');
   });
 
   test('the platform, the profile and the zig flag are inputs', () => {
@@ -525,10 +592,46 @@ describe('unstampedArtifactName and readRuntimeProducer', () => {
       repository: 'owner/repo',
       runner: { ImageOS: 'ubuntu24', ImageVersion: '20260101.1' },
     });
-    expect(linux.calls).toEqual([]);
+    // Only the C compiler banner (absent from this fake's output); no Xcode off macOS.
+    expect(linux.calls).toEqual(['cc --version']);
     expect(readRuntimeProducer(ENV, 'darwin', new FakeToolRunner().run).runner.xcode).toBe(
       'Xcode 26.0; Build version 17A324'
     );
+  });
+
+  test('records the C compiler banner in the receipt, and never fails for want of one', () => {
+    const runner = new FakeToolRunner({
+      'cc --version': 'cc (Ubuntu 13.3.0) 13.3.0\nCopyright',
+      'zig cc --version': 'clang version 20.1.2',
+    });
+    expect(readRuntimeProducer(ENV, 'linux', runner.run).runner.cCompiler).toBe(
+      'cc (Ubuntu 13.3.0) 13.3.0; Copyright'
+    );
+    expect(readRuntimeProducer(ENV, 'linux', runner.run, true).runner.cCompiler).toBe(
+      'clang version 20.1.2'
+    );
+    expect(readRuntimeProducer(ENV, 'linux', new FakeToolRunner({}).run).runner).not.toHaveProperty(
+      'cCompiler'
+    );
+  });
+
+  test('observeCCompiler prefers the CC the environment names and reads the cl banner off stderr', () => {
+    const named = new FakeToolRunner({ 'clang-19 --version': 'clang version 19.1.0' });
+    expect(observeCCompiler({ CC: 'clang-19' }, 'linux', false, named.run)).toBe(
+      'clang version 19.1.0'
+    );
+    const banner = (): ReturnType<FakeToolRunner['run']> => ({
+      exitCode: 2,
+      stdout: '',
+      stderr: 'Microsoft (R) C/C++ Optimizing Compiler Version 19.44\nusage: cl [ option... ]',
+    });
+    expect(observeCCompiler({}, 'win32', false, banner)).toBe(
+      'Microsoft (R) C/C++ Optimizing Compiler Version 19.44; usage: cl [ option... ]'
+    );
+    const throws = (): never => {
+      throw new Error('spawn cl ENOENT');
+    };
+    expect(observeCCompiler({}, 'win32', false, throws)).toBeUndefined();
   });
 
   test('a missing run identity is named, an unreadable Xcode is not fatal', () => {
@@ -569,5 +672,117 @@ describe('crate input scans for build scripts and compile-time environment', () 
       { source: 'build.rs', line: 4, name: 'PATH' },
       { source: 'build.rs', line: 5, name: 'OUT_DIR' },
     ]);
+  });
+});
+
+describe('scanner bypasses are reported instead of skipped', () => {
+  const unresolved = (text: string) =>
+    extractUnresolvedReads('crates/x/src/a.rs', text).map((read) => `${read.line}: ${read.reason}`);
+
+  test('an include with a literal, or from OUT_DIR, is resolved or generated: nothing to report', () => {
+    expect(
+      unresolved(
+        [
+          'const A: &str = include_str!("a.json");',
+          'const B: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/x.json"));',
+          'const C: &str = include_str!(concat!(env!("OUT_DIR"), "/c.json"));',
+          '// const D: &str = include_str!(PATH);',
+        ].join('\n')
+      )
+    ).toEqual([]);
+  });
+
+  test('an include whose argument holds no literal is named with its argument', () => {
+    expect(
+      unresolved(
+        '\nconst A: &str = include_str!(PATH);\nconst B: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), FILE));'
+      )
+    ).toEqual([
+      '2: include_str! without a string literal: expected a literal path | received: PATH',
+      '3: include_bytes! without a string literal: expected a literal path | received: concat!(env!("CARGO_MANIFEST_DIR"), FILE)',
+    ]);
+  });
+
+  test('a macro_rules! wrapper that expands to an include is named', () => {
+    const reads = unresolved(
+      'macro_rules! embed {\n    ($path:expr) => {\n        include_str!($path)\n    };\n}\nmacro_rules! plain {\n    () => { 1 };\n}'
+    );
+    // The wrapper itself, plus the include inside it that has no literal.
+    expect(reads).toHaveLength(2);
+    expect(reads.join('\n')).toContain('1: macro_rules! embed expands to an include-family macro');
+    expect(reads.join('\n')).not.toContain('plain');
+  });
+
+  test('an import that could rename an include macro is reported', () => {
+    expect(unresolved('use core::include_str as inc;\nconst A: &str = inc!("x.json");')).toEqual([
+      '1: import of an include-family macro: expected direct include_str!/include_bytes!/include! | received: use core::include_str as inc;',
+    ]);
+  });
+
+  test.each([
+    ['let up = manifest.parent().unwrap();', '.parent()'],
+    ['for dir in manifest.ancestors() {}', '.ancestors()'],
+    ['let here = std::env::current_dir().unwrap();', 'current_dir'],
+    ['let apps = root.join("apps");', 'literal names a top-level repository path'],
+    ['let spec = root.join("./spec/fixtures");', 'literal names a top-level repository path'],
+  ])('a build script reaching out with %s is reported', (text, reason) => {
+    const hazards = extractBuildScriptHazards('crates/x/build.rs', text, ['apps', 'spec']);
+    expect(hazards).toHaveLength(1);
+    expect(hazards[0]?.reason).toContain(reason);
+  });
+
+  test('a build script that stays in its crate has no hazard', () => {
+    expect(
+      extractBuildScriptHazards(
+        'crates/x/build.rs',
+        'let a = manifest.join("../../apps/a.json");\nlet s = "build_support/x.rs";\n// .parent()',
+        ['apps', 'spec']
+      )
+    ).toEqual([]);
+  });
+});
+
+describe('cfg(test) scoping', () => {
+  const text = [
+    'const PRODUCT: &str = include_str!("p.json");',
+    '',
+    '#[cfg(test)]',
+    'mod tests {',
+    '    const T: &str = include_str!("t.json");',
+    '}',
+    '',
+    'fn later() {',
+    '    let x = include_str!("l.json");',
+    '}',
+    '',
+    '#[cfg(not(test))]',
+    'mod product {',
+    '    const N: &str = include_str!("n.json");',
+    '}',
+    '',
+    '#[cfg(all(test, unix))]',
+    'pub(crate) mod unix_tests {',
+    '    const U: &str = include_str!("u.json");',
+    '}',
+  ].join('\n');
+
+  test.each([
+    [1, false],
+    [5, true],
+    [9, false],
+    [14, false],
+    [19, true],
+  ])('line %i inside a cfg(test) module: %p', (line, expected) => {
+    expect(isInsideCfgTestModule(text, line)).toBe(expected);
+  });
+
+  test('a file is mounted under cfg(test) only when the attribute directly precedes the mount', () => {
+    expect(isMountedUnderCfgTest('#[cfg(test)]\nmod a_tests;', 'a_tests.rs')).toBe(true);
+    expect(
+      isMountedUnderCfgTest('#[cfg(test)]\n#[path = "a_tests.rs"]\nmod t;', 'a_tests.rs')
+    ).toBe(true);
+    expect(isMountedUnderCfgTest('mod a_tests;', 'a_tests.rs')).toBe(false);
+    expect(isMountedUnderCfgTest('#[cfg(not(test))]\nmod a_tests;', 'a_tests.rs')).toBe(false);
+    expect(isMountedUnderCfgTest('#[cfg(test)]\nmod other;', 'a_tests.rs')).toBe(false);
   });
 });
