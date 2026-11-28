@@ -3,12 +3,20 @@ name: Rust Cache Cleanup
 # rust-cache saves in its post-job hook. Only a completed producer run proves
 # those saves finished. Execute trusted main tooling, never producer artifacts
 # or its head checkout, including when another job in that run failed.
+#
+# Every main push starts CI, Cargo Shim and Protocol CI, and one cleanup run per
+# completion was about 57 runs a day. A cleanup run prunes every family, whatever
+# producer triggered it, and the writer audit still checks every producer in
+# `RUST_CACHE_WRITERS`. So the push-triggered Cargo Shim and Protocol CI are not
+# triggers. Usually CI finishes last, but not always (a cold cache, which a
+# manifest rotation causes, can make Cargo Shim outlast it). Correctness does not
+# rest on that order: a deferred sweep waits for the next CI completion on main
+# or the daily Randomized Order Nightly, and a day without a sweep stays well
+# under the cache limit. docs/reference/testing.md ("Cleanup triggers") has the bound.
 on:
   workflow_run:
     workflows:
       - CI
-      - Cargo Shim
-      - Protocol CI
       - Rust fresh dependencies
       - Randomized Order Nightly
       - Smoke — Browser

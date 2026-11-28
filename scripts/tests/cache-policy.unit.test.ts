@@ -54,6 +54,16 @@ const RUST_PREFIX_KEY_EXEMPT_FILES = new Set(['.github/workflows/protocol-fuzz.y
 // their post-merge disposition is verified; these families have no writer.
 const RETIRED_RUST_CACHE_FAMILIES = new Set(['semver-checks', 'schema-equality']);
 
+// Registered writers whose completion does not start a cleanup run. Both start on every main
+// push beside CI, and CI usually finishes last, so CI's completion usually sees no active writer.
+// When it does not, the sweep waits for the next CI completion or the daily nightly, and the
+// bound in docs/reference/testing.md ("Cleanup triggers") covers that day. They stay in
+// RUST_CACHE_WRITERS, so the audit still defers while one of them runs.
+const RUST_CLEANUP_PUSH_COMPANIONS = ['Cargo Shim', 'Protocol CI'];
+const RUST_CLEANUP_TRIGGER_WRITERS = RUST_CACHE_WRITERS.map((writer) => writer.name).filter(
+  (name): boolean => !RUST_CLEANUP_PUSH_COMPANIONS.includes(name)
+);
+
 interface TurboLane {
   readonly file: string;
   readonly job: string;
@@ -200,12 +210,43 @@ describe('CI cache policy', () => {
     const cleanup = Bun.YAML.parse(readText('.github/workflows/rust-cache-cleanup.yml')) as {
       on: { workflow_run: { workflows: string[] } };
     };
-    expect(cleanup.on.workflow_run.workflows.sort()).toEqual(
-      RUST_CACHE_WRITERS.map((writer) => writer.name).sort()
+    // The writer audit (RUST_CACHE_WRITERS) sees every producer; the triggers are a subset.
+    // Anything else is registered as a trigger only when it is a registered writer.
+    const triggers = new Set(cleanup.on.workflow_run.workflows);
+    const writerNames = new Set<string>(RUST_CACHE_WRITERS.map((writer) => writer.name));
+    expect(
+      [...triggers].filter((name) => !writerNames.has(name)),
+      'cleanup triggers that are not registered cache writers'
+    ).toEqual([]);
+    expect([...triggers].sort(), 'rust-cache-cleanup.yml workflow_run.workflows').toEqual(
+      [...RUST_CLEANUP_TRIGGER_WRITERS].sort()
     );
     for (const writer of RUST_CACHE_WRITERS) {
       expect(/^name: (.+)$/m.exec(readText(writer.path))?.[1]).toBe(writer.name);
     }
+  });
+
+  test('a cache writer left out of the cleanup triggers is covered by CI and a daily floor', () => {
+    const writerOn = (name: string): string[] => {
+      const writer = RUST_CACHE_WRITERS.find((candidate) => candidate.name === name);
+      if (!writer) throw new Error(`expected a registered cache writer | received: ${name}`);
+      return sectionKeys(extractOnBlock(readText(writer.path)));
+    };
+    // The companions run on every main push, which is what CI's completion covers.
+    for (const name of RUST_CLEANUP_PUSH_COMPANIONS) {
+      expect(writerOn(name), `${name} on: keys, expected to include push`).toContain('push');
+    }
+    const cleanup = Bun.YAML.parse(readText('.github/workflows/rust-cache-cleanup.yml')) as {
+      on: { workflow_run: { workflows: string[] } };
+    };
+    const triggers = cleanup.on.workflow_run.workflows;
+    expect(triggers, 'the CI completion must start a cleanup run').toContain('CI');
+    // A sweep CI's completion deferred waits for the next trigger; a daily producer bounds that
+    // wait to a day, because a cleanup run is global and prunes every family.
+    const dailyTriggers = RUST_CACHE_WRITERS.filter((writer) => triggers.includes(writer.name))
+      .filter((writer) => /^\s+- cron: "\d+ \d+ \* \* \*"$/m.test(readText(writer.path)))
+      .map((writer) => writer.name);
+    expect(dailyTriggers, 'daily scheduled writers that start a cleanup run').not.toEqual([]);
   });
 
   test('registers exact Rust family identities and keeps the pinned key grammar', () => {
