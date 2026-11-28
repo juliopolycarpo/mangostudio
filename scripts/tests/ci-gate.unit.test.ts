@@ -201,6 +201,30 @@ describe('ci.yml trigger and concurrency policy', () => {
     expect(setting, `expected ${name}.yml workflow cancel-in-progress: ${expected}`).toBe(expected);
   });
 
+  // A superseded main run should be cancelled before it takes a runner. Only
+  // the first job can hold the run back, and only a push may wait: a pull
+  // request waiting five minutes per commit would cost more than it saves.
+  test('a main push waits out the settle timer before Preflight takes a runner', () => {
+    const preflight = extractJobBlock(workflow, 'changes');
+    const environment = /^ {4}environment:\n {6}name: (.+)\n {6}deployment: (.+)$/m.exec(preflight);
+
+    expect(
+      environment?.[1],
+      `(ci.yml changes.environment.name): expected the settle environment on push only | received: ${environment?.[1]}`
+    ).toBe(`${EXPR} github.event_name == 'push' && 'main-ci-settle' || '' }}`);
+    // Without `deployment: false` every main push would add a deployment record.
+    expect(environment?.[2]).toBe('false');
+    expect(preflight, 'Preflight is the first job: nothing may run before the timer').not.toMatch(
+      /^ {4}needs:/m
+    );
+    const others = extractJobBlocks(workflow).filter(({ job }) => job !== 'changes');
+    for (const { job, block } of others) {
+      expect(block, `${job}: only Preflight names the settle environment`).not.toContain(
+        'main-ci-settle'
+      );
+    }
+  });
+
   test.each(['smoke-binary', 'browser-smoke'])(
     '%s keys a called run on its run id, apart from manual dispatches',
     (name) => {

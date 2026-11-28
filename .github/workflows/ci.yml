@@ -35,6 +35,17 @@ jobs:
     # classification and the distribution identity share this checkout.
     name: Preflight
     runs-on: ubuntu-latest
+    # A main push waits out the `main-ci-settle` environment's five-minute
+    # timer before this job, and so the whole run, gets a runner. Merges land
+    # in bursts, and a superseded run used to spend its first minutes fanning
+    # out before the next push cancelled it; now the next push cancels it
+    # while it waits, holding no runner. `deployment: false` keeps the timer
+    # and creates no deployment record. Pull requests and manual runs name no
+    # environment and start at once. The timer lives in the repository's
+    # environment settings; docs/reference/ci.md says how to recreate it.
+    environment:
+      name: ${{ github.event_name == 'push' && 'main-ci-settle' || '' }}
+      deployment: false
     # Bun setup can wait four minutes for a republished canary asset.
     timeout-minutes: 9
     outputs:
