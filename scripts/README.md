@@ -341,7 +341,8 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
   this process-receipt contract. Version 1 requires a shard identity matching
   its job directory, an integer exit code from 0 to 255, a nonnegative finite
   duration, one or two attempts and a boolean `failuresSeen`. Retained findings
-  always force a nonzero exit, even after a clean retry. Unversioned legacy
+  always force a nonzero exit, even after a clean retry; so does a failed
+  attempt whose log the watchdog could not read. Unversioned legacy
   receipts still require identity and exit; omitted duration, attempt count and
   findings are unavailable. A missing duration makes the merged duration `null`;
   measured zero remains zero. Malformed fields invalidate either format.
@@ -357,7 +358,8 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
 - `unhandled-errors.ts` — the one signal JUnit cannot carry, for either runner:
   Vitest's reporter never receives the run's unhandled errors, and Bun's
   between-tests block never reaches its report either. Each shard extracts both
-  from its own log.
+  from its own log. A missing log exits 1 naming the path; the merge treats a
+  missing, empty or malformed report as an unknown count, never zero.
 - `merge-lcov-shards.ts` — merge per-shard Bun LCOV. Not a concatenation and not
   a union; see `docs/reference/testing.md` for why the naive merge reports a
   coverage regression that did not happen. Order-independent, and it fails

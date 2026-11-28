@@ -291,7 +291,21 @@ function loadImportGraph(
 ): { base: string; graph: Map<string, Edge[]> } {
   const base = canonical(root);
   const files = new Set<string>();
-  for (const path of roots) collectFiles(resolve(base, path), base, files);
+  for (const path of roots) {
+    const target = resolve(base, path);
+    // Name the root instead of letting `realpath` throw a bare ENOENT stack:
+    // the argument is usually a typo or a workspace directory that moved.
+    try {
+      statSync(target);
+    } catch (caught) {
+      const code = (caught as NodeJS.ErrnoException).code ?? 'unknown error';
+      throw new Error(
+        `Invalid cycle root "${path}" (resolved to ${target}, ${code}); ` +
+          `expected an existing directory or JS/TS file, relative to ${base}`
+      );
+    }
+    collectFiles(target, base, files);
+  }
   if (files.size === 0) {
     throw new Error(`No JS or TS files found under cycle roots: ${roots.join(', ')}`);
   }

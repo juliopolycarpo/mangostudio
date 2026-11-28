@@ -10,6 +10,11 @@
 // Everything else the old log parser did — pass, fail and skip counts — now
 // comes from ./junit-results.ts.
 //
+// A missing log is not "no errors": a shard that died before the runner wrote
+// its log has an unknown count. The CLI therefore exits 1 naming the path
+// instead of printing zero, and the merge treats an absent or malformed
+// `errors.json` as unknown (see `readUnhandledErrorsFile`).
+//
 // Usage: bun ./scripts/qa-gate/unhandled-errors.ts <run.log> > errors.json
 
 import {
@@ -82,6 +87,56 @@ export const parseUnhandledErrors = (text: string): UnhandledErrors => {
   return { errors, headlines };
 };
 
+/** What `errors.json` must look like, quoted by every failure about one. */
+const UNHANDLED_ERRORS_SHAPE =
+  '{"errors": <integer >= 0>, "headlines": [{"message": <string>, "originatedIn": <string|null>}]}';
+
+const isHeadline = (value: unknown): value is TestErrorHeadline =>
+  typeof value === 'object' &&
+  value !== null &&
+  typeof (value as TestErrorHeadline).message === 'string' &&
+  ((value as TestErrorHeadline).originatedIn === null ||
+    typeof (value as TestErrorHeadline).originatedIn === 'string');
+
+/** Whether a parsed value has the shape `parseUnhandledErrors` produces. */
+export const isUnhandledErrors = (value: unknown): value is UnhandledErrors =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value) &&
+  Number.isSafeInteger((value as UnhandledErrors).errors) &&
+  (value as UnhandledErrors).errors >= 0 &&
+  Array.isArray((value as UnhandledErrors).headlines) &&
+  (value as UnhandledErrors).headlines.every(isHeadline);
+
+/** A shard's unhandled-error count, or the reason it cannot be known. */
+export type UnhandledErrorsRead =
+  | { readonly kind: 'read'; readonly value: UnhandledErrors }
+  | { readonly kind: 'unavailable'; readonly reason: string };
+
+/**
+ * Read one shard's `errors.json` text. `null` means the file does not exist;
+ * an empty file is what a failed `> errors.json` redirect leaves behind. Both,
+ * and anything that is not the extractor's shape, are unknown rather than zero.
+ * // Usage: readUnhandledErrorsFile('shards/test-shard-1/unhandled-errors.json', text)
+ */
+export const readUnhandledErrorsFile = (path: string, text: string | null): UnhandledErrorsRead => {
+  const unavailable = (received: string): UnhandledErrorsRead => ({
+    kind: 'unavailable',
+    reason: `${path}: expected ${UNHANDLED_ERRORS_SHAPE} | received: ${received}`,
+  });
+  if (text === null) return unavailable('no such file');
+  if (text.trim() === '') return unavailable('an empty file');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return unavailable(`invalid JSON ${JSON.stringify(text.slice(0, 80))}`);
+  }
+  return isUnhandledErrors(parsed)
+    ? { kind: 'read', value: parsed }
+    : unavailable(JSON.stringify(parsed)?.slice(0, 80) ?? String(parsed));
+};
+
 /** Union several logs' findings, keeping at most `MAX_HEADLINES` headlines. */
 export const mergeUnhandledErrors = (parts: readonly UnhandledErrors[]): UnhandledErrors => ({
   errors: parts.reduce((sum, part) => sum + part.errors, 0),
@@ -97,8 +152,12 @@ if (import.meta.main) {
     process.exit(1);
   }
   const file = Bun.file(logPath);
-  const parsed = (await file.exists())
-    ? parseUnhandledErrors(await file.text())
-    : { errors: 0, headlines: [] };
-  process.stdout.write(`${JSON.stringify(parsed)}\n`);
+  if (!(await file.exists())) {
+    process.stderr.write(
+      `unhandled-errors: expected a run log at ${logPath} | received: no such file; ` +
+        'the run likely ended before it wrote one, so its unhandled-error count is unknown, not 0.\n'
+    );
+    process.exit(1);
+  }
+  process.stdout.write(`${JSON.stringify(parseUnhandledErrors(await file.text()))}\n`);
 }

@@ -8,6 +8,7 @@ import {
   listShardDirs,
   mergeTestShards,
   ShardSetError,
+  type ShardSummary,
   summarizeShardMeta,
 } from '../ci/merge-test-shards';
 import { ROOT_DIR } from '../lib/config';
@@ -45,7 +46,12 @@ interface ShardFiles {
   /** Per-path override of what the shard wrote: `null` leaves the report out, a string replaces its text. */
   readonly lcovOverrides?: Readonly<Record<string, string | null>>;
   readonly meta?: { shard: number | string; exitCode: number; durationSeconds: number };
-  readonly unhandledErrors?: { errors: number; headlines: [] };
+  /**
+   * What the shard's extract step wrote. Omitted means a clean `{errors: 0}` —
+   * a healthy shard always uploads one; `null` leaves the file out, and a
+   * string is written verbatim (an empty file is what a failed redirect leaves).
+   */
+  readonly unhandledErrors?: { errors: number; headlines: [] } | string | null;
 }
 
 const writeShards = async (root: string, shards: readonly ShardFiles[]): Promise<void> => {
@@ -59,8 +65,12 @@ const writeShards = async (root: string, shards: readonly ShardFiles[]): Promise
       }
     }
     if (shard.meta) await Bun.write(join(dir, 'shard-meta.json'), JSON.stringify(shard.meta));
-    if (shard.unhandledErrors) {
-      await Bun.write(join(dir, 'unhandled-errors.json'), JSON.stringify(shard.unhandledErrors));
+    if (shard.unhandledErrors !== null) {
+      const written = shard.unhandledErrors ?? { errors: 0, headlines: [] };
+      await Bun.write(
+        join(dir, 'unhandled-errors.json'),
+        typeof written === 'string' ? written : JSON.stringify(written)
+      );
     }
   }
 };
@@ -453,6 +463,53 @@ describe('mergeTestShards', () => {
   });
 });
 
+/**
+ * Run the shipped CLI over a one-shard-plus-frontend run, in an isolated
+ * checkout so its coverage writes cannot replace the developer's reports or
+ * those of a concurrent test lane. `shardOneUnhandled` is what shard 1's extract
+ * step left behind (see `ShardFiles.unhandledErrors`).
+ */
+const runMergeCli = async (
+  receipt: string,
+  shardOneUnhandled: ShardFiles['unhandledErrors'] = undefined
+) => {
+  const root = await makeTemp();
+  const script = 'scripts/ci/merge-test-shards.ts';
+  for (const path of [
+    script,
+    'scripts/lib/config.ts',
+    'scripts/lib/shard-receipt.ts',
+    'scripts/lib/test-lanes.ts',
+    'scripts/lib/log-lines.ts',
+    'scripts/qa-gate/merge-lcov-shards.ts',
+    'scripts/qa-gate/unhandled-errors.ts',
+  ]) {
+    await Bun.write(join(root, path), Bun.file(join(ROOT_DIR, path)));
+  }
+  const shards = join(root, 'shards');
+  await writeShards(shards, [
+    { name: 'test-shard-1', lcovLines: [[1, 1]], unhandledErrors: shardOneUnhandled },
+    {
+      name: 'test-shard-frontend',
+      lcovLines: [[1, 1]],
+      meta: { shard: 'frontend', exitCode: 0, durationSeconds: 30 },
+    },
+  ]);
+  await Bun.write(join(shards, 'test-shard-1/shard-meta.json'), receipt);
+  const proc = Bun.spawn({
+    cmd: ['bun', join(root, script), shards, '1'],
+    cwd: root,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { summary: JSON.parse(stdout) as ShardSummary, stderr, exitCode };
+};
+
 describe('merge-test-shards CLI verdict', () => {
   it.each([
     ['passing receipt', receiptText(shardReceipts.currentPass), 0, 0],
@@ -461,47 +518,112 @@ describe('merge-test-shards CLI verdict', () => {
     ['wrong producer', receiptText({ ...shardReceipts.currentPass, shard: 2 }), 1, 1],
     ['retained findings', receiptText(shardReceipts.retainedFindings), 1, 1],
   ])('enforces a %s after emitting its summary', async (_name, receipt, verdict, status) => {
-    // Run the shipped CLI in an isolated checkout so its coverage writes cannot
-    // replace the developer's reports or those of a concurrent test lane.
-    const root = await makeTemp();
-    const script = 'scripts/ci/merge-test-shards.ts';
-    for (const path of [
-      script,
-      'scripts/lib/config.ts',
-      'scripts/lib/shard-receipt.ts',
-      'scripts/lib/test-lanes.ts',
-      'scripts/lib/log-lines.ts',
-      'scripts/qa-gate/merge-lcov-shards.ts',
-      'scripts/qa-gate/unhandled-errors.ts',
-    ]) {
-      await Bun.write(join(root, path), Bun.file(join(ROOT_DIR, path)));
-    }
-    const shards = join(root, 'shards');
-    await writeShards(shards, [
-      { name: 'test-shard-1', lcovLines: [[1, 1]] },
-      {
-        name: 'test-shard-frontend',
-        lcovLines: [[1, 1]],
-        meta: { shard: 'frontend', exitCode: 0, durationSeconds: 30 },
-      },
-    ]);
-    await Bun.write(join(shards, 'test-shard-1/shard-meta.json'), receipt);
-    const proc = Bun.spawn({
-      cmd: ['bun', join(root, script), shards, '1'],
-      cwd: root,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    const summary = JSON.parse(stdout);
+    const { summary, stderr, exitCode } = await runMergeCli(receipt);
     expect(summary.exitCode).toBe(verdict);
     expect(summary.coverageErrors).toBeUndefined();
     expect(stderr).toContain(`Merged 2 shard(s): exit ${verdict}`);
     expect(exitCode).toBe(status);
+  });
+
+  // The extract step's output is the only record of unhandled errors, so a
+  // shard whose file is gone is not a clean shard even when its receipt is green.
+  it.each([
+    ['missing', null],
+    ['empty', ''],
+    ['truncated', '{"errors": 1, "headl'],
+  ])(
+    'fails a green shard whose unhandled-errors.json is %s, naming the file',
+    async (_name, unhandled) => {
+      const { summary, stderr, exitCode } = await runMergeCli(
+        receiptText(shardReceipts.currentPass),
+        unhandled
+      );
+      expect(summary.exitCode).toBe(0);
+      expect(Object.keys(summary.unhandledErrorsUnavailable ?? {})).toEqual(['test-shard-1']);
+      expect(summary.unhandledErrorsUnavailable?.['test-shard-1']).toContain(
+        join('test-shard-1', 'unhandled-errors.json')
+      );
+      expect(stderr).toContain('Unhandled-error count unavailable (test-shard-1)');
+      expect(exitCode).toBe(1);
+    }
+  );
+
+  // The unknown count must ride alongside the shard's own failure, not replace it.
+  it('keeps a failing shard exit code when its unhandled-errors.json is also missing', async () => {
+    const { summary, exitCode } = await runMergeCli(
+      receiptText({ ...shardReceipts.currentPass, exitCode: 7 }),
+      null
+    );
+    expect(summary.exitCode).toBe(7);
+    expect(summary.unhandledErrorsUnavailable).toBeDefined();
+    expect(exitCode).toBe(1);
+  });
+});
+
+describe('merge of unhandled-error reports', () => {
+  const twoShards = (first: ShardFiles['unhandledErrors'], second: ShardFiles['unhandledErrors']) =>
+    [
+      {
+        name: 'test-shard-1',
+        lcovLines: [[1, 1]] as Array<[number, number]>,
+        meta: { shard: 1, exitCode: 0, durationSeconds: 5 },
+        unhandledErrors: first,
+      },
+      {
+        name: 'test-shard-2',
+        lcovLines: [[1, 1]] as Array<[number, number]>,
+        meta: { shard: 2, exitCode: 0, durationSeconds: 5 },
+        unhandledErrors: second,
+      },
+    ] satisfies ShardFiles[];
+
+  it('names every shard whose report is missing, empty or malformed, and never reads it as zero', async () => {
+    const shards = await makeTemp();
+    await writeShards(shards, [
+      ...twoShards(null, ''),
+      {
+        name: 'test-shard-3',
+        lcovLines: [[1, 1]],
+        meta: { shard: 3, exitCode: 0, durationSeconds: 5 },
+        unhandledErrors: '{"errors": "two", "headlines": []}',
+      },
+      {
+        name: 'test-shard-4',
+        lcovLines: [[1, 1]],
+        meta: { shard: 4, exitCode: 0, durationSeconds: 5 },
+        unhandledErrors: { errors: 3, headlines: [] },
+      },
+    ]);
+
+    const summary = await mergeTestShards(shards, await makeTemp());
+
+    expect(Object.keys(summary.unhandledErrorsUnavailable ?? {}).sort()).toEqual([
+      'test-shard-1',
+      'test-shard-2',
+      'test-shard-3',
+    ]);
+    // Only the readable shard contributes: the total is a lower bound.
+    expect(summary.unhandledErrors.errors).toBe(3);
+    const reasons = Object.values(summary.unhandledErrorsUnavailable ?? {});
+    // The reason carries the path as the platform spells it.
+    expect(reasons[0]?.replaceAll('\\', '/')).toMatch(
+      /test-shard-1\/unhandled-errors\.json: expected \{.*\} \| received: no such file/
+    );
+    expect(reasons[1]).toContain('received: an empty file');
+    expect(reasons[2]).toContain('received: {"errors":"two","headlines":[]}');
+  });
+
+  it('reports no unavailable shards when every report is readable', async () => {
+    const shards = await makeTemp();
+    await writeShards(
+      shards,
+      twoShards({ errors: 0, headlines: [] }, { errors: 2, headlines: [] })
+    );
+
+    const summary = await mergeTestShards(shards, await makeTemp());
+
+    expect(summary.unhandledErrorsUnavailable).toBeUndefined();
+    expect(summary.unhandledErrors.errors).toBe(2);
   });
 });
 
@@ -582,6 +704,76 @@ describe('collect-test-metrics degradation', () => {
       const fragment = JSON.parse(stdout) as CollectedFragment;
       expect(fragment.coverage.api).toEqual({ state: 'unavailable', reasons: [reason] });
       expect(fragment.tests.value.exitCode).toBe(0);
+    },
+    COLLECT_TIMEOUT
+  );
+
+  interface SuiteCell {
+    state: string;
+    reasons?: string[];
+    value: { exitCode: number; errors?: number };
+  }
+
+  // The unknown count is the third state: the suite is `partial`, a lower
+  // bound, with the reason naming the file, instead of a clean zero.
+  it(
+    'marks the suite partial with the shard named when a shard unhandled-error count is unknown',
+    async () => {
+      const dir = await makeTemp();
+      const summaryPath = join(dir, 'shard-summary.json');
+      const reason =
+        'shards/test-shard-2/unhandled-errors.json: expected {...} | received: an empty file';
+      await Bun.write(
+        summaryPath,
+        JSON.stringify({
+          shards: 2,
+          exitCode: 0,
+          durationSeconds: 12,
+          unhandledErrors: { errors: 0, headlines: [] },
+          unhandledErrorsUnavailable: { 'test-shard-2': reason },
+        })
+      );
+
+      const { stdout } = await collect(summaryPath);
+
+      const { tests } = JSON.parse(stdout) as { tests: SuiteCell };
+      expect(tests.state).toBe('partial');
+      expect(tests.reasons).toContain(`unhandled-error count unknown (test-shard-2): ${reason}`);
+      expect(tests.value.exitCode).toBe(0);
+    },
+    COLLECT_TIMEOUT
+  );
+
+  it(
+    'marks the unhandled-error count unknown when the summary lacks it entirely',
+    async () => {
+      const dir = await makeTemp();
+      const summaryPath = join(dir, 'shard-summary.json');
+      await Bun.write(summaryPath, JSON.stringify({ shards: 2, exitCode: 0, durationSeconds: 12 }));
+
+      const { tests } = JSON.parse((await collect(summaryPath)).stdout) as { tests: SuiteCell };
+
+      expect(tests.state).toBe('partial');
+      expect(tests.reasons?.join('\n')).toContain(
+        `${summaryPath}: expected an "unhandledErrors" object | received: none`
+      );
+    },
+    COLLECT_TIMEOUT
+  );
+
+  it(
+    'names the summary path when it was never written',
+    async () => {
+      const dir = await makeTemp();
+      const missing = join(dir, 'missing.json');
+
+      const { tests } = JSON.parse((await collect(missing, join(dir, 'no-shards'))).stdout) as {
+        tests: SuiteCell;
+      };
+
+      expect(tests.reasons?.join('\n')).toContain(
+        `${missing}: expected a shard summary object | received: no such file`
+      );
     },
     COLLECT_TIMEOUT
   );

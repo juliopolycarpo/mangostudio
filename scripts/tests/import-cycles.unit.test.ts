@@ -1184,6 +1184,20 @@ describe('import cycle checks', () => {
     expect(result.stderr).toContain('apps/api/src/b.ts');
   });
 
+  test('names a missing root and the expected shape instead of a bare realpath ENOENT', async () => {
+    const root = createFixture();
+    const result = await runCapture(createImportCycleCommand(['apps/missing-workspace']), {
+      cwd: root,
+    });
+    expect(result.exitCode, 'missing root: expected a failing scanner exit').not.toBe(0);
+    // The CLI hands the scanner a root relative to its own base, so on Windows
+    // the quoted root is a `..\\..` path that ends in the argument.
+    expect(posix(result.stderr)).toMatch(/Invalid cycle root "[^"\n]*apps\/missing-workspace"/);
+    expect(posix(result.stderr)).toContain('apps/missing-workspace, ENOENT');
+    expect(result.stderr).toContain('expected an existing directory or JS/TS file');
+    expect(result.stderr).not.toContain('realpath');
+  });
+
   test('rejects an invalid tsconfig instead of reporting a clean graph', async () => {
     const root = createFixture();
     writeFileSync(join(root, 'apps/api/tsconfig.json'), '{ invalid json');

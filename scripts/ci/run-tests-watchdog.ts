@@ -30,7 +30,8 @@
 // A run that *fails* is not retried — only one that had to be killed. Real
 // failures should surface, not get a second roll of the dice.
 // Findings reported before a hang still fail the invocation after a clean
-// retry, independently of the crash-retry option below.
+// retry, independently of the crash-retry option below. A non-zero attempt
+// whose log cannot be read counts as one: not knowing is not "nothing found".
 //
 // Whatever the cause, a retry never overwrites attempt 1's log: it is renamed
 // to `<logFile>.attempt-1` first. Attempt 1 may hold the only record of
@@ -114,7 +115,15 @@ export interface WatchdogOptions {
   readonly retryOnCrash?: boolean;
   /** Process-group signalling; defaults to `process.kill`. Injected by tests. */
   readonly processGroups?: ProcessGroupPort;
+  /**
+   * Reads a finished attempt's log for the failure scan; rejects when the log
+   * cannot be read. Defaults to the file read. Injected by tests: making a real
+   * file unreadable is not portable (Windows refuses to delete an open file).
+   */
+  readonly readAttemptLog?: (path: string) => Promise<string>;
 }
+
+const readLogText = (path: string): Promise<string> => Bun.file(path).text();
 
 export interface WatchdogResult {
   /** 124 when the final attempt hung, mirroring GNU timeout. */
@@ -573,9 +582,20 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
    */
   const observe = async (result: AttemptResult): Promise<boolean> => {
     if (result.exitCode === 0) return false;
-    const text = await Bun.file(options.logFile)
-      .text()
-      .catch(() => '');
+    let text = '';
+    try {
+      text = await (options.readAttemptLog ?? readLogText)(options.logFile);
+    } catch (caught) {
+      // Not knowing is not "nothing to find": a failure before the hang or
+      // crash may sit in the log this read could not reach, and a clean retry
+      // would otherwise exit 0 over it. Same outcome as a failing line.
+      failuresSeen = true;
+      mirror.write(
+        `\n::warning::Watchdog could not read ${options.logFile} (${(caught as Error).message}); ` +
+          `expected a readable log for the non-zero attempt (exit ${result.exitCode}) of ` +
+          `'${options.label}', so failures in it are assumed and a clean retry keeps exit code 1.\n`
+      );
+    }
     if (hasFailure(text)) failuresSeen = true;
     const crashed = crashRetryEnabled && !result.hung && isCrash(result, text);
     crashedAny ||= crashed;

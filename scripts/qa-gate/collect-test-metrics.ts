@@ -39,7 +39,7 @@ import { unavailable } from './model/states';
 import { collectLaneOutcomes, laneCells, suiteMeasurement } from './results/collect';
 import { readTextOrNull } from './results/evidence';
 import { type ExpectedJobSet, expectedLocalJobs, expectedShardJobs } from './results/expected-jobs';
-import type { UnhandledErrors } from './unhandled-errors';
+import { isUnhandledErrors } from './unhandled-errors';
 
 const [, , summaryPath, shardsRoot, shardCountArg] = process.argv;
 if (!summaryPath) {
@@ -54,29 +54,25 @@ if (!summaryPath) {
 // render. Degrade to a failing exit code rather than throwing: this step runs
 // under `if: !cancelled()` precisely so a broken merge still produces a
 // fragment, and an unhandled parse error here would defeat that.
-const FAILED_SUMMARY: ShardSummary = {
+const failedSummary = (path: string, received: string): ShardSummary => ({
   shards: 0,
   exitCode: 1,
   durationSeconds: null,
+  // Nothing was read, so the count is unknown: the zero here is a placeholder
+  // and `unhandledErrorsUnavailable` is what keeps it from reading as measured.
   unhandledErrors: { errors: 0, headlines: [] },
-};
+  unhandledErrorsUnavailable: {
+    'shard-summary': `${path}: expected a shard summary object | received: ${received}`,
+  },
+});
 
 // Parsing is not enough: `[]` is valid JSON and would hand an undefined exit
 // code straight into the fragment, which renders as a suite with no outcome
 // rather than a failed one. `{"exitCode":0}` is the same hole with a number
 // in the one field the old guard checked.
-const isFiniteNumber = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isFinite(value);
 
-const isUnhandledErrors = (value: unknown): value is UnhandledErrors =>
-  typeof value === 'object' &&
-  value !== null &&
-  !Array.isArray(value) &&
-  isFiniteNumber((value as UnhandledErrors).errors) &&
-  Array.isArray((value as UnhandledErrors).headlines);
-
-// One reason string per workspace; anything else is a summary the merge did not write.
-const isCoverageErrors = (value: unknown): boolean =>
+// One reason string per key; anything else is a summary the merge did not write.
+const isReasonMap = (value: unknown): boolean =>
   typeof value === 'object' &&
   value !== null &&
   !Array.isArray(value) &&
@@ -91,22 +87,33 @@ const isShardSummary = (value: unknown): value is ShardSummary => {
     isReceiptExitCode(summary.exitCode) &&
     (summary.durationSeconds === null || isReceiptDuration(summary.durationSeconds)) &&
     (summary.unhandledErrors === undefined || isUnhandledErrors(summary.unhandledErrors)) &&
-    (summary.coverageErrors === undefined || isCoverageErrors(summary.coverageErrors))
+    (summary.unhandledErrorsUnavailable === undefined ||
+      isReasonMap(summary.unhandledErrorsUnavailable)) &&
+    (summary.coverageErrors === undefined || isReasonMap(summary.coverageErrors))
   );
 };
 
 const readShardSummary = async (path: string): Promise<ShardSummary> => {
   const file = Bun.file(path);
-  if (!(await file.exists())) return FAILED_SUMMARY;
+  if (!(await file.exists())) return failedSummary(path, 'no such file');
   try {
     const parsed: unknown = await file.json();
-    if (!isShardSummary(parsed)) return FAILED_SUMMARY;
-    return {
-      ...parsed,
-      unhandledErrors: parsed.unhandledErrors ?? FAILED_SUMMARY.unhandledErrors,
-    };
+    if (!isShardSummary(parsed)) {
+      return failedSummary(path, JSON.stringify(parsed)?.slice(0, 80) ?? String(parsed));
+    }
+    // A summary with no `unhandledErrors` at all never read the shards' counts.
+    return parsed.unhandledErrors === undefined
+      ? {
+          ...parsed,
+          unhandledErrors: { errors: 0, headlines: [] },
+          unhandledErrorsUnavailable: {
+            ...parsed.unhandledErrorsUnavailable,
+            'shard-summary': `${path}: expected an "unhandledErrors" object | received: none`,
+          },
+        }
+      : parsed;
   } catch {
-    return FAILED_SUMMARY;
+    return failedSummary(path, 'invalid JSON');
   }
 };
 
@@ -161,7 +168,11 @@ const collectSuite = async (): Promise<{
     exitCode,
     summary.durationSeconds
   );
-  return { outcomes, suite: suiteMeasurement(stats, outcomes) };
+  // A shard whose unhandled-error count is unknown makes `errors` a lower bound.
+  const unknownCounts = Object.entries(summary.unhandledErrorsUnavailable ?? {}).map(
+    ([shard, reason]) => `unhandled-error count unknown (${shard}): ${reason}`
+  );
+  return { outcomes, suite: suiteMeasurement(stats, outcomes, unknownCounts) };
 };
 
 // A workspace the shard merge could not assemble is unavailable with the

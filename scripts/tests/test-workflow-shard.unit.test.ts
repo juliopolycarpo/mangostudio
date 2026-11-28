@@ -267,6 +267,27 @@ describe('Test workflow frontend job', () => {
   });
 });
 
+describe('unhandled-error extraction', () => {
+  test.each(['shard', 'frontend'])(
+    'the %s job extracts without leaving an empty report and skips only when no test ran',
+    (job) => {
+      const step = extractStepBlocks(extractJobBlock(workflow, job)).find((block) =>
+        block.includes('- name: Extract unhandled errors')
+      );
+      expect(step, `expected an "Extract unhandled errors" step in the ${job} job`).toBeDefined();
+      // A plain `> unhandled-errors.json` creates the file before the extractor
+      // runs, so a missing log would upload an empty report and the merge could
+      // not tell it from a failed step. The temp name keeps the final path absent.
+      expect(step).toContain('coverage-run.log > unhandled-errors.json.tmp');
+      expect(step).toContain('mv unhandled-errors.json.tmp unhandled-errors.json');
+      expect(step).not.toMatch(/> unhandled-errors\.json$/m);
+      // Not cancelled (the report still uploads after a failure) and not when
+      // the test step itself never started, where no log exists by design.
+      expect(step).toContain(`if: ${EXPR} !cancelled() && steps.coverage.outcome != 'skipped' }}`);
+    }
+  );
+});
+
 describe('shared test timings', () => {
   const preflight = extractJobBlock(ci, 'changes');
 

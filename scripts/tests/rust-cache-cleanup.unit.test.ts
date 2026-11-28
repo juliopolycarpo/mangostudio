@@ -1,6 +1,9 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { readCleanupContext } from '../ci/rust-cache-cleanup';
+import { readCleanupContext, readFixtureListing } from '../ci/rust-cache-cleanup';
 import { cleanupRustCaches } from '../ci/rust-cache/cleanup';
 import {
   type CacheWriterRun,
@@ -9,6 +12,7 @@ import {
   type RustCacheApi,
 } from '../ci/rust-cache/github';
 import { type RustCacheEntry, selectRustCacheDeletions } from '../ci/rust-cache/selection';
+import { ROOT_DIR } from '../lib/config';
 import { readText } from './support/read-text';
 
 const listing = JSON.parse(readText('scripts/tests/fixtures/rust-cache-listing.json')) as {
@@ -675,5 +679,70 @@ describe('cleanup execution context', () => {
       'expected a positive integer'
     );
     expect(() => readCleanupContext(env, null)).toThrow('expected a positive integer');
+  });
+});
+
+describe('--fixture listing', () => {
+  const FIXTURE = 'scripts/tests/fixtures/rust-cache-listing.json';
+  const temps: string[] = [];
+  afterEach(() => {
+    for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+  const fixtureWith = (contents: string): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'mango-rust-cache-fixture-'));
+    temps.push(dir);
+    const path = join(dir, 'listing.json');
+    writeFileSync(path, contents);
+    return path;
+  };
+
+  test('accepts the captured listing and returns every entry', () => {
+    expect(readFixtureListing(FIXTURE)).toEqual(listing.actions_caches);
+  });
+
+  test.each([
+    [
+      'an object instead of an array',
+      '{"actions_caches":{"a":1}}',
+      'received {"actions_caches":{"a":1}}',
+    ],
+    ['a bare array', '[]', 'received []'],
+    ['a missing actions_caches key', '{"total_count":0}', 'received {"total_count":0}'],
+    ['null', 'null', 'received null'],
+    ['truncated JSON', '{"actions_caches":', 'received invalid JSON'],
+  ])('names the file and expected shape for %s', (_name, contents, received) => {
+    const path = fixtureWith(contents);
+    expect(() => readFixtureListing(path)).toThrow(
+      `Invalid fixture ${path}: expected {"actions_caches": [<cache entry>, ...]} | ${received}`
+    );
+  });
+
+  test('names the entry index when one entry is not a cache entry', () => {
+    const path = fixtureWith(
+      JSON.stringify({ actions_caches: [listing.actions_caches[0], { id: 0 }] })
+    );
+    expect(() => readFixtureListing(path)).toThrow(
+      `Invalid fixture ${path} at actions_caches[1]: Invalid cache entry {"id":0}; expected a positive ID/size`
+    );
+  });
+
+  test('names a fixture that cannot be read', () => {
+    const missing = join(tmpdir(), 'mango-rust-cache-fixture-missing', 'listing.json');
+    expect(() => readFixtureListing(missing)).toThrow(`Cannot read fixture ${missing}`);
+  });
+
+  // The old CLI path died with `entries.map is not a function`.
+  test('the CLI exits 1 with the shape message instead of a TypeError', () => {
+    const path = fixtureWith('{"actions_caches":{"a":1}}');
+    const run = Bun.spawnSync({
+      cmd: ['bun', 'scripts/ci/rust-cache-cleanup.ts', '--fixture', path],
+      cwd: ROOT_DIR,
+    });
+    const stderr = run.stderr.toString();
+    expect(run.exitCode).toBe(1);
+    expect(stderr).toContain(
+      `Invalid fixture ${path}: expected {"actions_caches": [<cache entry>, ...]}`
+    );
+    expect(stderr).not.toContain('entries.map');
   });
 });

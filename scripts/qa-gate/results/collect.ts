@@ -48,10 +48,14 @@ export const laneCells = (
  */
 export const suiteMeasurement = (
   stats: TestSuiteStats,
-  outcomes: readonly LaneOutcome[]
+  outcomes: readonly LaneOutcome[],
+  extraReasons: readonly string[] = []
 ): Measurement<TestSuiteStats> => {
-  const reasons = outcomes.flatMap(({ lane, result }) =>
-    result.state === 'measured' ? [] : [`${lane.id} ${result.state}: ${result.reasons[0]}`]
-  );
+  const reasons = [
+    ...outcomes.flatMap(({ lane, result }) =>
+      result.state === 'measured' ? [] : [`${lane.id} ${result.state}: ${result.reasons[0]}`]
+    ),
+    ...extraReasons,
+  ];
   return reasons.length === 0 ? measured(stats) : partial(stats, reasons);
 };

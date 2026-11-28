@@ -35,7 +35,9 @@ const formatSuiteBreakdown = (
     `shared ${formatNumber(suite.shared)}`,
   ];
   const extras: string[] = [];
-  if (state === 'partial') extras.push('partial: some lane results are missing');
+  if (state === 'partial') {
+    extras.push('partial: some lane results or unhandled-error counts are missing');
+  }
   if (suite.parseMiss) extras.push('failure counts not parsed');
   if (suite.failed) extras.push(`${formatNumber(suite.failed)} failed`);
   if (suite.failedFiles) extras.push(`${formatNumber(suite.failedFiles)} failed files`);

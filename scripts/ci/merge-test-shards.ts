@@ -37,7 +37,11 @@ import {
 } from '../lib/shard-receipt';
 import { SHARDED_LCOV_PATHS, TEST_LANES } from '../lib/test-lanes';
 import { type LcovShardInput, mergeLcovFiles } from '../qa-gate/merge-lcov-shards';
-import { mergeUnhandledErrors, type UnhandledErrors } from '../qa-gate/unhandled-errors';
+import {
+  mergeUnhandledErrors,
+  readUnhandledErrorsFile,
+  type UnhandledErrors,
+} from '../qa-gate/unhandled-errors';
 
 export interface ShardSummary {
   readonly shards: number;
@@ -45,7 +49,14 @@ export interface ShardSummary {
   readonly exitCode: number;
   /** Wall clock of the slowest shard, which is the lane's critical path. */
   readonly durationSeconds: number | null;
+  /** Sum over the shards whose count was readable; a lower bound when any was not. */
   readonly unhandledErrors: UnhandledErrors;
+  /**
+   * Shards whose `unhandled-errors.json` was missing, empty or malformed, each
+   * with the reason naming the path. Present only when non-empty; the QA
+   * fragment marks the suite partial instead of reading the count as zero.
+   */
+  readonly unhandledErrorsUnavailable?: Readonly<Record<string, string>>;
   /**
    * Workspaces whose LCOV could not be merged, each with the reason naming the
    * shard. Present only when non-empty; the QA fragment turns each into an
@@ -76,16 +87,6 @@ const summarizeReceipts = (
     durationSeconds:
       durations.length === 0 || durations.length < receipts.length ? null : Math.max(...durations),
   };
-};
-
-const readJson = async <T>(path: string, fallback: T): Promise<T> => {
-  const file = Bun.file(path);
-  if (!(await file.exists())) return fallback;
-  try {
-    return (await file.json()) as T;
-  } catch {
-    return fallback;
-  }
 };
 
 // Each unsharded lane runs whole in its own CI job and uploads its own
@@ -211,14 +212,25 @@ export const mergeTestShards = async (
       });
     })
   );
+  // A shard whose count cannot be read contributes nothing to the sum and is
+  // named in `unhandledErrorsUnavailable`, so the total is a lower bound and
+  // never a measured zero.
+  const unhandledReads = await Promise.all(
+    shardDirs.map(async (dir) => {
+      const path = join(dir, 'unhandled-errors.json');
+      const file = Bun.file(path);
+      return {
+        shard: basename(dir),
+        read: readUnhandledErrorsFile(path, (await file.exists()) ? await file.text() : null),
+      };
+    })
+  );
   const unhandledErrors = mergeUnhandledErrors(
-    await Promise.all(
-      shardDirs.map((dir) =>
-        readJson<UnhandledErrors>(join(dir, 'unhandled-errors.json'), {
-          errors: 0,
-          headlines: [],
-        })
-      )
+    unhandledReads.flatMap(({ read }) => (read.kind === 'read' ? [read.value] : []))
+  );
+  const unhandledErrorsUnavailable = Object.fromEntries(
+    unhandledReads.flatMap(({ shard, read }) =>
+      read.kind === 'unavailable' ? [[shard, read.reason]] : []
     )
   );
 
@@ -226,6 +238,7 @@ export const mergeTestShards = async (
     shards: shardDirs.length,
     ...summarizeReceipts(metas),
     unhandledErrors,
+    ...(Object.keys(unhandledErrorsUnavailable).length > 0 ? { unhandledErrorsUnavailable } : {}),
     ...(Object.keys(coverageErrors).length > 0 ? { coverageErrors } : {}),
   };
 };
@@ -236,6 +249,8 @@ const incompleteSetSummary = (reason: string): ShardSummary => ({
   exitCode: 1,
   durationSeconds: null,
   unhandledErrors: { errors: 0, headlines: [] },
+  // No shard was read, so no count is known; "shard-set" is not a directory name.
+  unhandledErrorsUnavailable: { 'shard-set': reason },
   coverageErrors: Object.fromEntries(
     Object.keys(SHARDED_LCOV_PATHS).map((workspace) => [workspace, reason])
   ),
@@ -269,7 +284,14 @@ if (import.meta.main) {
   for (const [workspace, reason] of Object.entries(summary.coverageErrors ?? {})) {
     process.stderr.write(`::error title=Coverage merge failed (${workspace})::${reason}\n`);
   }
+  for (const [shard, reason] of Object.entries(summary.unhandledErrorsUnavailable ?? {})) {
+    process.stderr.write(`::error title=Unhandled-error count unavailable (${shard})::${reason}\n`);
+  }
   // Keep the JSON above for QA, but fail before timings can be published from
-  // failed tests, invalid receipts or findings retained across a clean retry.
-  if (summary.exitCode !== 0 || summary.coverageErrors) process.exit(1);
+  // failed tests, invalid receipts, findings retained across a clean retry, or
+  // a shard whose unhandled-error count is unknown. The summary still carries
+  // every shard's own exit code, so this never replaces the shard's failure.
+  if (summary.exitCode !== 0 || summary.coverageErrors || summary.unhandledErrorsUnavailable) {
+    process.exit(1);
+  }
 }

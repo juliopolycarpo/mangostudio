@@ -128,7 +128,7 @@ describe('renderTestsSection lane rows', () => {
     const section = renderTestsSection(base, head);
 
     expect(section).toContain('≥ 900 passed');
-    expect(section).toContain('partial: some lane results are missing');
+    expect(section).toContain('partial: some lane results or unhandled-error counts are missing');
   });
 
   it('notes on the lane row a job the watchdog had to run twice', () => {
