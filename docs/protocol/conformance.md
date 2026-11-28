@@ -319,9 +319,13 @@ that `rustup toolchain install nightly-<date> --profile minimal` succeeds and th
 dependency needs a newer compiler, or about once a quarter so the fuzzer keeps tracking current
 sanitizer and codegen fixes. The first run on `main` after a bump builds cold and saves a new
 generation; the old one is never restored again and GitHub removes it seven days after its last
-use. `scripts/ci/rust-cache-cleanup.ts` does not own the `fuzz` family: it is not in the family
-registry, and its identity includes the compiler hash, so it would not pair the old generation
-with the new one after a bump anyway.
+use. `scripts/ci/rust-cache-cleanup.ts` owns the `fuzz` family like every other Rust family and
+`Protocol Fuzz` is a registered cache writer, so a lockfile change that keeps the compiler hash
+lets it delete the superseded entry. Its identity includes the compiler hash, so it does not pair
+the old generation with the new one after a nightly bump; that entry ages out as described above.
+The cleanup also retires the three `v0-rust-fuzz-<os>-<arch>-<env>-<lock>` entries rust-cache
+wrote under its default prefix, before the fuzz job moved to `.github/actions/rust-cache`, once the
+first profile-prefix fuzz entry exists.
 
 A bug either layer finds becomes an `n_` or `i_` case under `spec/fixtures/1/` (see "The fixture
 corpus" above for the naming convention and which files are generated) plus the fix, with a

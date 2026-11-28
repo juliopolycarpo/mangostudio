@@ -44,7 +44,8 @@ function platformIdentity(entry: RustCacheEntry): string | undefined {
 }
 
 /**
- * Entries of the retired `v0-rust-<hashFiles('Cargo.toml')>` generation. An entry is retired when
+ * Entries of the retired `v0-rust-<hashFiles('Cargo.toml')>` generation and of the retired bare
+ * `v0-rust-fuzz-` one (rust-cache's default prefix; see `families.ts`). An entry is retired when
  * a `v0-rust-profile-` entry exists on main for the same family, OS, architecture and archive
  * version, whatever either entry's environment hash. Until one does, the entry stays.
  *
@@ -63,7 +64,8 @@ function retiredManifestGenerations(entries: readonly RustCacheEntry[]): RustCac
   for (const entry of entries) {
     const identity = platformIdentity(entry);
     if (!identity) continue;
-    if (readEntry(entry)?.generation === 'manifest') {
+    const generation = readEntry(entry)?.generation;
+    if (generation === 'manifest' || generation === 'bare') {
       retired.push(entry);
       continue;
     }

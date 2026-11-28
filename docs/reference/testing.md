@@ -2610,8 +2610,9 @@ is listed under `refs/heads/main`. The explicit family registry preserves the
 runner OS and architecture, target, compiler/environment hash and cache archive
 version, including distinct shipping and light-profile environment hashes.
 Only the profile prefix and dependency hash rotate. Sole entries, unknown
-families, fuzz and other cache kinds remain untouched (the fuzz key is not a registered
-family and `protocol-fuzz.yml` pins its nightly; see "Fuzzing" in `docs/protocol/conformance.md`).
+families and other cache kinds remain untouched. The `fuzz` family is registered
+(`protocol-fuzz.yml` is a cache writer and a cleanup trigger; see "Fuzzing" in
+`docs/protocol/conformance.md`).
 
 Every workflow reaches `Swatinem/rust-cache` through `.github/actions/rust-cache`, which
 `scripts/tests/cache-policy.unit.test.ts` pins. rust-cache's restore key is
@@ -2631,9 +2632,11 @@ are unchanged. The composite keeps both stable:
   the pinned one the default. A job that needs another (the fuzz nightly) names it in
   `keep-toolchains`; it must already be installed.
 
-The retired prefix's entries stay recognizable to the cleanup. The first main run that saves a
-profile-generation entry for a family, runner and archive version lets the cleanup delete that
-family's remaining `v0-rust-<sha256 of Cargo.toml>` entries, whatever their environment hash:
+The retired prefixes' entries stay recognizable to the cleanup: `v0-rust-<sha256 of Cargo.toml>` and
+the bare `v0-rust-fuzz-` keys rust-cache wrote under its default prefix before the fuzz job moved
+to the composite. The first main run that saves a profile-generation entry for a family, runner
+and archive version lets the cleanup delete that family's remaining entries of either retired
+prefix, whatever their environment hash:
 pruning the image's toolchain moved every environment hash at once, so the ordinary rule, which
 keeps one entry per environment, would never pair them. Before each deletion the
 script audits active main writers and fetches the complete listing again; a
@@ -2651,7 +2654,7 @@ post-merge lockfile change before adding more Rust cache consumers.
 
 #### Cleanup triggers
 
-The workflow starts on the completion of `CI`, `Rust fresh dependencies`,
+The workflow starts on the completion of `CI`, `Rust fresh dependencies`, `Protocol Fuzz`,
 `Randomized Order Nightly`, `Smoke — Browser`, `Smoke — Binary`, `Release` and
 `Release Dry Run` on `main`. `Cargo Shim` and `Protocol CI` are registered writers
 (the audit still defers while either runs) but not triggers. Each main push starts

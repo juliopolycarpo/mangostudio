@@ -18,6 +18,7 @@ on:
     workflows:
       - CI
       - Rust fresh dependencies
+      - Protocol Fuzz
       - Randomized Order Nightly
       - Smoke — Browser
       - Smoke — Binary
