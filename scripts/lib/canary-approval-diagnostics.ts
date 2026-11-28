@@ -23,7 +23,9 @@ export function canaryApprovalChildFailure(
   else if (/\bHTTP\s*403\b/i.test(diagnostics))
     reason = 'GitHub access refused (HTTP403); verify repository and attestation read permissions';
   else if (workflow)
-    reason = `${workflow[1]}.yml: source validation contract differs from qualification revision; select a compatible successful source`;
+    // Canary has no input that selects another source, and an older run differs more, not
+    // less. The only way forward is a newer green main run, so the reason says that.
+    reason = `${workflow[1]}.yml: source validation contract differs from qualification revision; the workflow changed on main after the newest successful CI run. Wait for a successful main CI run at a commit with the current workflows, then run Canary again`;
   else if (/Original CI checksums unavailable or invalid/.test(diagnostics))
     reason =
       'Original CI checksums unavailable or invalid: recover approved artifact bytes; rebuilding a partial version is forbidden';
