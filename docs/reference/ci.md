@@ -513,6 +513,14 @@ and the workflow file. It is advisory: it is not in the
 `needs`, so a starved runner delays the signal but never a merge. A superseded push cancels the
 earlier run. There is no macOS pull-request job; the scheduled native run covers macOS.
 
+Both lanes run with `TEMP` and `TMP` set to `RUNNER_TEMP` (`D:\a\_temp`, beside the checkout)
+instead of the OS-disk default, `C:\Users\RUNNER~1\AppData\Local\Temp`. Spawn-bound root tests
+(a shell installer over a fresh archive, a PowerShell extraction) normally take 1 to 2 s and have
+stalled for 10 to 15 s on both root workers at once, which fails whichever test the 15 s default
+timeout catches in flight (#2661). The temp volume is a hypothesis, not a measured cause: compare
+the per-test durations of `install.sh layout` and `install.ps1 npm tarball extraction` before and
+after, and drop the step if they do not move.
+
 ## Workflow hygiene
 
 `scripts/tests/workflow-hygiene.unit.test.ts` enforces repository-wide workflow

@@ -66,6 +66,22 @@ jobs:
       # change. Built here because no job of this workflow produces a Windows one.
       - uses: $/.github/actions/local-runtime
 
+      # Both lanes create their fixtures (archives, repositories, copied
+      # executables) under the OS temp directory, which on windows-latest is
+      # C:\Users\RUNNER~1\AppData\Local\Temp on the OS disk, while the
+      # checkout lives on D:. Root-lane tests that normally take 1-2 s have
+      # stalled for 10-15 s on both workers at once (the 15 s default timeout
+      # then fails whichever test is in flight), which points at a host
+      # resource shared by the two workers, and the temp volume is the one the
+      # earlier spawn probes (#2661) did not measure. Putting TEMP beside the
+      # checkout moves fixture I/O to the runner's temporary volume. If the
+      # lane's per-test durations do not change, the stall is not the disk.
+      # Set after setup, so only the lane steps see it.
+      - name: Keep test fixtures on the workspace volume
+        run: |
+          printf 'TEMP=%s\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'TMP=%s\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+
       - name: API unit lane
         run: bun run --filter @mangostudio/api test:unit
 

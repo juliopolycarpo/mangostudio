@@ -529,4 +529,36 @@ describe('workflow wiring', () => {
       expect(needs, `${other} needs`).not.toContain('windows-tests');
     }
   });
+
+  test('the Windows pull-request lanes get their temp directory from the runner temp volume', () => {
+    const file = '.github/workflows/windows-pr-tests.yml';
+    const workflow = Bun.YAML.parse(readText(file)) as {
+      jobs: Record<string, { steps: { name?: string; run?: string; uses?: string }[] }>;
+    };
+    const steps = workflow.jobs['windows-tests']?.steps ?? [];
+    const names = steps.map((step) => step.name ?? '');
+    const tempStep = steps.find(
+      (step) => step.name === 'Keep test fixtures on the workspace volume'
+    );
+    expect(tempStep, `${file} steps: ${names.join(' | ')}`).toBeDefined();
+    // os.tmpdir() reads TEMP, then TMP, on Windows: both must follow RUNNER_TEMP.
+    for (const variable of ['TEMP', 'TMP']) {
+      expect(tempStep?.run, `${file} ${variable} export`).toContain(
+        `printf '${variable}=%s\\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"`
+      );
+    }
+    const tempIndex = names.indexOf('Keep test fixtures on the workspace volume');
+    for (const lane of ['API unit lane', 'Root scripts lane']) {
+      expect(
+        tempIndex,
+        `${file}: expected the temp step before "${lane}" | received steps: ${names.join(' | ')}`
+      ).toBeLessThan(names.indexOf(lane));
+    }
+    // Setup and the runtime build keep the runner default; only the lanes move.
+    const runtimeBuildIndex = steps.findIndex((step) => step.uses?.includes('local-runtime'));
+    expect(runtimeBuildIndex, `${file}: expected a local-runtime step`).toBeGreaterThanOrEqual(0);
+    expect(tempIndex, `${file}: expected the temp step after the runtime build`).toBeGreaterThan(
+      runtimeBuildIndex
+    );
+  });
 });
