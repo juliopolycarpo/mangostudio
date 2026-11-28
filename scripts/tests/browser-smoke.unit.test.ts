@@ -5,6 +5,7 @@ import {
   BROWSER_SMOKE_SETUP_COMMAND,
   BROWSER_SMOKE_TEST_COMMAND,
 } from '../lib/browser-smoke';
+import { ROOT_DIR } from '../lib/config';
 import { readText } from './support/read-text';
 import { parseSmokeWorkflow } from './support/smoke-workflows';
 
@@ -102,5 +103,53 @@ describe('browser smoke setup', () => {
       expect(doc).toContain('Ubuntu 26.04');
       expect(doc).not.toContain('npx playwright');
     }
+  });
+});
+
+describe('Playwright CI flake policy', () => {
+  const CONFIGS = ['playwright.config.ts', 'playwright.production.config.ts'] as const;
+
+  /** Load a config in a child process, because it reads `CI` once at import. */
+  const loadPolicy = (config: (typeof CONFIGS)[number], ci: boolean) => {
+    const env: Record<string, string | undefined> = { ...process.env, CI: ci ? '1' : undefined };
+    const script = `
+      const { default: config } = await import(${JSON.stringify(`./${config}`)});
+      console.log(JSON.stringify({ retries: config.retries, failOnFlakyTests: config.failOnFlakyTests }));
+    `;
+    const run = Bun.spawnSync({ cmd: ['bun', '-e', script], cwd: ROOT_DIR, env });
+    if (run.exitCode !== 0) {
+      throw new Error(`expected ${config} to load | received: ${run.stderr.toString()}`);
+    }
+    return JSON.parse(run.stdout.toString()) as { retries: number; failOnFlakyTests: boolean };
+  };
+
+  // `retries: 1` alone makes a test that fails once and passes on retry green,
+  // and the trace of that retry is then never uploaded.
+  test.each(CONFIGS)('%s fails a CI run on a test that passes only on retry', (config) => {
+    expect(loadPolicy(config, true)).toEqual({ retries: 1, failOnFlakyTests: true });
+  });
+
+  test.each(CONFIGS)('%s keeps local runs retry-free and non-failing', (config) => {
+    expect(loadPolicy(config, false)).toEqual({ retries: 0, failOnFlakyTests: false });
+  });
+
+  // A flaky failure now exits non-zero; the diagnostics fire only if the step
+  // itself fails (pipefail through `tee`) and the uploads key off failure().
+  test('a flaky exit fails its step and reaches both failure-gated uploads', () => {
+    const workflow = parseSmokeWorkflow(readText('.github/workflows/browser-smoke.yml'));
+    const steps = workflow.jobs['browser-smoke']?.steps ?? [];
+    for (const marker of ['bun run test --e2e', 'bun run test:e2e:production']) {
+      const run = steps.find((step) => step.run?.includes(marker));
+      expect(run?.run, `expected "${marker}" step to run under pipefail`).toContain(
+        'set -o pipefail'
+      );
+      expect(run?.env?.CI, `expected "${marker}" step CI env to be set`).toBeDefined();
+    }
+    expect(steps.find((step) => step.name === 'Upload traces and screenshots on failure')?.if).toBe(
+      'failure()'
+    );
+    expect(steps.find((step) => step.name === 'Upload Playwright HTML report')?.if).toContain(
+      'failure()'
+    );
   });
 });

@@ -17,6 +17,11 @@ export default defineConfig({
   outputDir: '.mango/artifacts/playwright/test-results',
   timeout: 30_000,
   retries: process.env.CI ? 1 : 0,
+  // A test that fails and then passes on its retry is green by default, and the
+  // workflow uploads the retry's trace (`on-first-retry`) only when the step
+  // fails, so the evidence of the flake was dropped. Failing the run on a flaky
+  // result keeps the retry as a way to read the trace, not a way to hide it.
+  failOnFlakyTests: Boolean(process.env.CI),
   workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI
     ? [

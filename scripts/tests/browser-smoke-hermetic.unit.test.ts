@@ -102,6 +102,7 @@ describe('browser smoke lane hermeticity', () => {
     expect(productionConfig.use).toEqual(config.use);
     expect(productionConfig.timeout).toBe(config.timeout);
     expect(productionConfig.retries).toBe(config.retries);
+    expect(productionConfig.failOnFlakyTests).toBe(config.failOnFlakyTests);
     expect(productionConfig.workers).toBe(config.workers);
     expect(productionConfig.reporter).toEqual(config.reporter);
   });
