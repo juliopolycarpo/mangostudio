@@ -3,9 +3,11 @@
 // load from, so a cold start is paid and named here instead of inside a 15 s test (#2661).
 // Never fails the job: a missing tool or a slow disk is a log line, not a verdict.
 // Reasoning and the numbers behind it: scripts/lib/windows-cold-start.ts.
-import { dirname, join, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
+  findGitRoot,
   formatStartTiming,
   formatTreeRead,
   readTree,
@@ -34,8 +36,8 @@ const run: RunCommand = (command, env) => {
 
 const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
 const git = Bun.which('git');
-// `git` on PATH is `<Git>\cmd\git.exe`; the shell and the GNU tools sit beside `cmd`.
-const gitRoot = git ? resolve(dirname(git), '..') : undefined;
+const gitRoot = git ? findGitRoot(git, existsSync) : undefined;
+if (!gitRoot) console.log(`${PREFIX} no Git install root above ${git ?? 'git (not on PATH)'}`);
 const windowsPowerShell = join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0');
 
 const targets: StartTarget[] = [
@@ -104,7 +106,13 @@ const trees: { label: string; root: string }[] = [
   ...(gitRoot
     ? [
         { label: 'git-usr-bin', root: join(gitRoot, 'usr', 'bin') },
-        { label: 'git-mingw64-bin', root: join(gitRoot, 'mingw64', 'bin') },
+        // The native tool directory is named after the build's environment; only one exists.
+        ...['mingw64', 'ucrt64', 'clangarm64']
+          .map((environment) => ({
+            label: `git-${environment}-bin`,
+            root: join(gitRoot, environment, 'bin'),
+          }))
+          .filter(({ root }) => existsSync(root)),
       ]
     : []),
 ];
