@@ -235,6 +235,18 @@ export function parseCanaryPromotionReceipt(
     relevance.reason.length === 0
   )
     throw new Error('Invalid qualification relevance: expected cargo/protocol booleans and reason');
+  // Absent in receipts written before the CodeQL Rust legs could be skipped.
+  if (qualification.codeqlRust !== undefined) {
+    const codeqlRust = object(qualification.codeqlRust, 'qualification codeqlRust');
+    if (
+      typeof codeqlRust.analyzed !== 'boolean' ||
+      typeof codeqlRust.reason !== 'string' ||
+      codeqlRust.reason.length === 0
+    )
+      throw new Error(
+        `Invalid qualification codeqlRust: expected analyzed boolean and reason; received ${JSON.stringify(codeqlRust)}`
+      );
+  }
   if (!Array.isArray(qualification.siblings))
     throw new Error('Invalid qualification siblings: expected receipt array');
   const workflows = new Set<string>();

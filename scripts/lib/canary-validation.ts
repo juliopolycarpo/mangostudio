@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 
+import { rustCoverageFromGitHub } from './canary-codeql-coverage';
 import { touchesProtocolSurface } from './protocol';
 import { classifyChangedPaths } from './rust-lanes';
 
@@ -40,6 +41,15 @@ export interface CanaryValidationReceipt {
   readonly relevance: {
     readonly cargo: boolean;
     readonly protocol: boolean;
+    readonly reason: string;
+  };
+  /**
+   * How the CodeQL Rust analyses cover the source. Absent in receipts written
+   * before the Rust legs could be skipped; those always analyzed the SHA.
+   */
+  readonly codeqlRust?: {
+    /** True when both Rust legs succeeded on the source SHA itself. */
+    readonly analyzed: boolean;
     readonly reason: string;
   };
 }
@@ -89,6 +99,52 @@ function validateRun(
   return run;
 }
 
+function listRunJobs(
+  api: CanaryValidationApi,
+  repository: string,
+  runId: number
+): Record<string, unknown>[] {
+  return api
+    .list(`repos/${repository}/actions/runs/${runId}/jobs?filter=all&per_page=100`, 'jobs')
+    .map((job) => object(job, `run ${runId} job`));
+}
+
+/** Newest attempt of a named job through `attempt`; undefined when the run has none. */
+function latestJob(
+  jobs: readonly Record<string, unknown>[],
+  runId: number,
+  attempt: number,
+  name: string
+): Record<string, unknown> | undefined {
+  const eligible = jobs
+    .filter((job) => job.name === name)
+    .filter((job) => integer(job.run_attempt, `${name} attempt`) <= attempt);
+  eligible.sort((left, right) => Number(right.run_attempt) - Number(left.run_attempt));
+  if (eligible[1] && eligible[0]?.run_attempt === eligible[1].run_attempt) {
+    throw new Error(
+      `run ${runId} ${name}: expected exactly one latest producer through attempt ${attempt}; received ${JSON.stringify(eligible)}`
+    );
+  }
+  return eligible[0];
+}
+
+function successfulJobReceipt(
+  latest: Record<string, unknown>,
+  runId: number,
+  name: string
+): JobReceipt {
+  if (latest.status !== 'completed' || latest.conclusion !== 'success' || latest.run_id !== runId) {
+    throw new Error(
+      `run ${runId} ${name}: expected completed successful associated job; received ${JSON.stringify(latest)}`
+    );
+  }
+  return {
+    id: integer(latest.id, `${name} job ID`),
+    name,
+    attempt: integer(latest.run_attempt, `${name} attempt`),
+  };
+}
+
 function requireJobs(
   api: CanaryValidationApi,
   repository: string,
@@ -96,39 +152,78 @@ function requireJobs(
   attempt: number,
   names: readonly string[]
 ): JobReceipt[] {
-  const jobs = api.list(
-    `repos/${repository}/actions/runs/${runId}/jobs?filter=all&per_page=100`,
-    'jobs'
-  );
+  const jobs = listRunJobs(api, repository, runId);
   return names.map((name) => {
-    const matching = jobs
-      .map((job) => object(job, `run ${runId} job`))
-      .filter((job) => job.name === name);
-    const eligible = matching.filter(
-      (job) => integer(job.run_attempt, `${name} attempt`) <= attempt
-    );
-    eligible.sort((left, right) => Number(right.run_attempt) - Number(left.run_attempt));
-    const latest = eligible[0];
-    if (!latest || (eligible[1] && latest.run_attempt === eligible[1].run_attempt)) {
+    const latest = latestJob(jobs, runId, attempt, name);
+    if (!latest) {
       throw new Error(
-        `run ${runId} ${name}: expected exactly one latest producer through attempt ${attempt}; received ${JSON.stringify(eligible)}`
+        `run ${runId} ${name}: expected exactly one latest producer through attempt ${attempt}; received []`
       );
     }
-    if (
-      latest.status !== 'completed' ||
-      latest.conclusion !== 'success' ||
-      latest.run_id !== runId
-    ) {
-      throw new Error(
-        `run ${runId} ${name}: expected completed successful associated job; received ${JSON.stringify(latest)}`
-      );
-    }
-    return {
-      id: integer(latest.id, `${name} job ID`),
-      name,
-      attempt: integer(latest.run_attempt, `${name} attempt`),
-    };
+    return successfulJobReceipt(latest, runId, name);
   });
+}
+
+const CODEQL_RUST_JOBS = ['Analyze (rust)', 'Analyze (rust, windows)'] as const;
+
+/**
+ * Settle the two CodeQL Rust legs of a successful codeql.yml run. Both
+ * succeeded: analyzed on this SHA. Both were skipped by the workflow's
+ * relevance rule: accepted only when main's recorded Rust analyses cover the
+ * SHA, recomputed here instead of trusted from the run. Anything else is a
+ * partial or failed Rust verdict and fails closed.
+ */
+function settleCodeqlRust(
+  api: CanaryValidationApi,
+  source: CanaryValidationSource,
+  runId: number,
+  attempt: number
+): { jobs: JobReceipt[]; codeqlRust: NonNullable<CanaryValidationReceipt['codeqlRust']> } {
+  const runJobs = listRunJobs(api, source.repository, runId);
+  // A leg skipped by a job-level `if` can carry an unexpanded matrix name, so
+  // absence of the named job counts as skipped, never as a failure to find it.
+  const latest = CODEQL_RUST_JOBS.map((name) => latestJob(runJobs, runId, attempt, name));
+  const skipped = latest.map((job) => job === undefined || job.conclusion === 'skipped');
+  if (skipped.every((isSkipped) => !isSkipped)) {
+    return {
+      jobs: CODEQL_RUST_JOBS.map((name, index) =>
+        successfulJobReceipt(latest[index] as Record<string, unknown>, runId, name)
+      ),
+      codeqlRust: { analyzed: true, reason: `both Rust analyses ran on ${source.sourceSha}` },
+    };
+  }
+  if (!skipped.every(Boolean)) {
+    throw new Error(
+      `codeql.yml run ${runId}: expected both Rust analyses to succeed or both to be skipped; received ${JSON.stringify(latest)}`
+    );
+  }
+  // The relevance pattern decides what "no Rust change" means. Trust it only
+  // when the source carries the same predicate as this qualification revision.
+  const predicatePath = 'scripts/lib/ci-lanes.ts';
+  const predicate = object(
+    api.get(`repos/${source.repository}/contents/${predicatePath}?ref=${source.sourceSha}`),
+    `source ${predicatePath}`
+  );
+  const expectedPredicate = readFileSync(
+    new URL(`../../${predicatePath}`, import.meta.url),
+    'utf8'
+  );
+  if (
+    predicate.encoding !== 'base64' ||
+    typeof predicate.content !== 'string' ||
+    Buffer.from(predicate.content, 'base64').toString('utf8') !== expectedPredicate
+  ) {
+    throw new Error(
+      `codeql.yml run ${runId}: Rust analyses were skipped but ${predicatePath} at ${source.sourceSha} differs from the qualification revision; expected identical relevance predicate bytes or both Rust analyses on the SHA`
+    );
+  }
+  const coverage = rustCoverageFromGitHub(api, source.repository, source.sourceSha);
+  if (!coverage.covered) {
+    throw new Error(
+      `codeql.yml run ${runId}: Rust analyses were skipped for ${source.sourceSha} but no earlier or later main analysis covers it; expected a commit with ${CODEQL_RUST_JOBS.join(' and ')} analyses and no CodeQL-Rust-relevant path difference; received ${coverage.reason}`
+    );
+  }
+  return { jobs: [], codeqlRust: { analyzed: false, reason: coverage.reason } };
 }
 
 const CI_REQUIRED_JOBS = [
@@ -326,13 +421,16 @@ export function qualifyCanarySource(
   }
   const required = relevance(api, source);
   const siblings: CanaryValidationReceipt['siblings'][number][] = [];
+  let codeqlRust: CanaryValidationReceipt['codeqlRust'];
   for (const policy of [
     { workflow: 'cargo-shim.yml', required: required.cargo, jobs: ['Cargo Shim Gate'] },
     { workflow: 'protocol-ci.yml', required: required.protocol, jobs: ['Protocol Gate'] },
     {
       workflow: 'codeql.yml',
       required: true,
-      jobs: ['Analyze (javascript-typescript)', 'Analyze (rust)', 'Analyze (rust, windows)'],
+      // The Rust legs are settled separately: analyzed here or covered by an
+      // earlier analysis (settleCodeqlRust).
+      jobs: ['Analyze (javascript-typescript)'],
     },
   ]) {
     const workflow = object(
@@ -375,7 +473,12 @@ export function qualifyCanarySource(
     const runId = integer(run.id, `${policy.workflow} run ID`);
     const attempt = integer(run.run_attempt, `${policy.workflow} attempt`);
     const jobs = requireJobs(api, source.repository, runId, attempt, policy.jobs);
+    if (policy.workflow === 'codeql.yml') {
+      const rust = settleCodeqlRust(api, source, runId, attempt);
+      jobs.push(...rust.jobs);
+      codeqlRust = rust.codeqlRust;
+    }
     siblings.push({ workflow: policy.workflow, runId, attempt, result: 'success', jobs });
   }
-  return { source, builderAttempt, ciJobs, siblings, relevance: required };
+  return { source, builderAttempt, ciJobs, siblings, relevance: required, codeqlRust };
 }

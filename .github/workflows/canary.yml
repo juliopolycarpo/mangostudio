@@ -115,6 +115,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       actions: read # recover immutable source and approval artifacts
+      security-events: read # read main's CodeQL analyses that cover a skipped Rust leg
       contents: write # include push-capable visibility of unfinished release drafts
       attestations: write # verify prior provenance and attest frozen publication evidence
       id-token: write # mint provenance and npm Trusted Publishing tokens
@@ -211,6 +212,7 @@ jobs:
     timeout-minutes: 55
     permissions:
       actions: read # recover immutable source and approval artifacts
+      security-events: read # read main's CodeQL analyses that cover a skipped Rust leg
       contents: write # include push-capable visibility of unfinished release drafts
       attestations: read # verify original builder and approval provenance
       id-token: write # mint provenance and npm Trusted Publishing tokens
@@ -296,6 +298,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       actions: read # recover immutable source and approval artifacts
+      security-events: read # read main's CodeQL analyses that cover a skipped Rust leg
       contents: write # resume the approved canary draft and prune old prereleases
       attestations: write # verify prior provenance and attest frozen publication evidence
       id-token: write # mint provenance and npm Trusted Publishing tokens

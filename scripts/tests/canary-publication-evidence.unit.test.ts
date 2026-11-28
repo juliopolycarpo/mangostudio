@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 
 import {
@@ -194,6 +194,34 @@ test('validates full job and sibling receipt structures without authenticating t
   expect(() => parseCanaryPromotionReceipt(JSON.stringify(receipt), 'owner/repo', sha)).toThrow(
     'expected positive safe integer'
   );
+});
+
+describe('CodeQL Rust coverage in the persisted receipt', () => {
+  test('accepts a recorded covering analysis and still accepts receipts without the field', () => {
+    const { receipt, sha } = fixture();
+    expect(receipt.qualification.codeqlRust).toBeUndefined();
+    expect(parseCanaryPromotionReceipt(JSON.stringify(receipt), 'owner/repo', sha)).toEqual(
+      receipt
+    );
+    Object.assign(receipt.qualification, {
+      codeqlRust: { analyzed: false, reason: 'no Rust-relevant path differs' },
+    });
+    expect(parseCanaryPromotionReceipt(JSON.stringify(receipt), 'owner/repo', sha)).toEqual(
+      receipt
+    );
+  });
+
+  test.each([
+    { analyzed: 'yes', reason: 'covered' },
+    { analyzed: false, reason: '' },
+    { analyzed: false },
+  ])('refuses malformed coverage %j and names the received value', (codeqlRust) => {
+    const { receipt, sha } = fixture();
+    Object.assign(receipt.qualification, { codeqlRust });
+    expect(() => parseCanaryPromotionReceipt(JSON.stringify(receipt), 'owner/repo', sha)).toThrow(
+      'Invalid qualification codeqlRust: expected analyzed boolean and reason; received'
+    );
+  });
 });
 
 test('retains frozen workflow and run identity separately from publisher revision', () => {
