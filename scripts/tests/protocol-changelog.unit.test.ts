@@ -40,6 +40,9 @@ function renderCanaryFixture(tags: readonly string[]): string {
     git('config', 'user.email', 'changelog-fixture@example.com');
     git('config', 'user.name', 'Changelog Fixture');
     git('config', 'commit.gpgsign', 'false');
+    // A developer's `tag.gpgsign = true` turns `git tag <name>` into a signed
+    // annotated tag, which fails here with "no tag message?".
+    git('config', 'tag.gpgsign', 'false');
     writeFileSync(join(repo, 'a.txt'), 'a');
     git('add', '.');
     git('commit', '-q', '-m', 'feat: the released feature');

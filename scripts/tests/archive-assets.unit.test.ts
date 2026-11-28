@@ -20,6 +20,10 @@ import {
   FIXTURE_STOP_TIMEOUT_MS,
   FixtureCommands,
 } from './support/fixture-command';
+import { zipCreationUnavailable } from './support/host-tools';
+
+// Skipped on a developer machine without `zip`; CI throws instead (see host-tools.ts).
+const ZIP_UNAVAILABLE = zipCreationUnavailable();
 
 let tempDirs: string[] = [];
 // A fixture plan creates up to two platform archives and one frontend archive.
@@ -177,7 +181,7 @@ const createMuslReleasePlan = (options: {
 };
 
 describe.serial('archiveReleaseAssets', () => {
-  test(
+  test.skipIf(ZIP_UNAVAILABLE)(
     'writes a flat Windows ZIP with matching binaries and checksum',
     async () => {
       const rootDir = makeTempDir();

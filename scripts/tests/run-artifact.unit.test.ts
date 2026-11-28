@@ -26,6 +26,10 @@ import {
   selectRunArtifact,
   withAttempts,
 } from '../lib/run-artifact';
+import { zipCreationUnavailable } from './support/host-tools';
+
+// Skipped on a developer machine without `zip`; CI throws instead (see host-tools.ts).
+const ZIP_UNAVAILABLE = zipCreationUnavailable();
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
 const RUN_ID = 42;
@@ -257,32 +261,14 @@ describe('downloadRunArtifact', () => {
     });
   }
 
-  test('bundle mode retries a stalled transfer, then keeps only the verified tar', async () => {
-    const zipPath = join(directory, 'served.zip');
-    const digest = writeZip(zipPath, { 'linux-x64.tar': 'bundle bytes' });
-    const { run, commands } = ghFake(zipPath, digest, 1);
-    const logs: string[] = [];
-    await downloadRunArtifact({
-      repository: 'o/r',
-      runId: RUN_ID,
-      name: 'distribution-x',
-      destination: join(directory, 'out'),
-      mode: 'bundle',
-      scratchRoot: directory,
-      run,
-      log: (message) => logs.push(message),
-    });
-    expect(readFileSync(join(directory, 'out', 'linux-x64.tar'), 'utf8')).toBe('bundle bytes');
-    expect(commands.filter((command) => !command.includes('--method'))).toHaveLength(2);
-    expect(logs.join('\n')).toContain('attempt 1/2 failed: Artifact');
-  });
-
-  test('refuses a ZIP whose digest differs from the one recorded at upload', async () => {
-    const zipPath = join(directory, 'served.zip');
-    writeZip(zipPath, { 'linux-x64.tar': 'bundle bytes' });
-    const { run } = ghFake(zipPath, DIGEST, 0);
-    await expect(
-      downloadRunArtifact({
+  test.skipIf(ZIP_UNAVAILABLE)(
+    'bundle mode retries a stalled transfer, then keeps only the verified tar',
+    async () => {
+      const zipPath = join(directory, 'served.zip');
+      const digest = writeZip(zipPath, { 'linux-x64.tar': 'bundle bytes' });
+      const { run, commands } = ghFake(zipPath, digest, 1);
+      const logs: string[] = [];
+      await downloadRunArtifact({
         repository: 'o/r',
         runId: RUN_ID,
         name: 'distribution-x',
@@ -290,51 +276,81 @@ describe('downloadRunArtifact', () => {
         mode: 'bundle',
         scratchRoot: directory,
         run,
-        log: () => {},
-      })
-    ).rejects.toThrow(`ZIP digest: expected ${DIGEST} | received sha256:`);
-    expect(existsSync(join(directory, 'out', 'linux-x64.tar'))).toBe(false);
-  });
+        log: (message) => logs.push(message),
+      });
+      expect(readFileSync(join(directory, 'out', 'linux-x64.tar'), 'utf8')).toBe('bundle bytes');
+      expect(commands.filter((command) => !command.includes('--method'))).toHaveLength(2);
+      expect(logs.join('\n')).toContain('attempt 1/2 failed: Artifact');
+    }
+  );
 
-  test('tree mode overwrites existing files and leaves no scratch behind', async () => {
-    const zipPath = join(directory, 'served.zip');
-    const digest = writeZip(zipPath, { 'a.txt': 'fresh' });
-    const { run } = ghFake(zipPath, digest, 0);
-    const destination = join(directory, 'out');
-    mkdirSync(destination);
-    writeFileSync(join(destination, 'a.txt'), 'stale');
-    await downloadRunArtifact({
-      repository: 'o/r',
-      runId: RUN_ID,
-      name: 'distribution-x',
-      destination,
-      mode: 'tree',
-      scratchRoot: directory,
-      run,
-      log: () => {},
-    });
-    expect(readFileSync(join(destination, 'a.txt'), 'utf8')).toBe('fresh');
-    const leftovers = Array.from(
-      new Bun.Glob('run-artifact-*').scanSync({ cwd: directory, onlyFiles: false })
-    );
-    expect(leftovers, 'scratch directories left under the scratch root').toEqual([]);
-  });
+  test.skipIf(ZIP_UNAVAILABLE)(
+    'refuses a ZIP whose digest differs from the one recorded at upload',
+    async () => {
+      const zipPath = join(directory, 'served.zip');
+      writeZip(zipPath, { 'linux-x64.tar': 'bundle bytes' });
+      const { run } = ghFake(zipPath, DIGEST, 0);
+      await expect(
+        downloadRunArtifact({
+          repository: 'o/r',
+          runId: RUN_ID,
+          name: 'distribution-x',
+          destination: join(directory, 'out'),
+          mode: 'bundle',
+          scratchRoot: directory,
+          run,
+          log: () => {},
+        })
+      ).rejects.toThrow(`ZIP digest: expected ${DIGEST} | received sha256:`);
+      expect(existsSync(join(directory, 'out', 'linux-x64.tar'))).toBe(false);
+    }
+  );
 
-  test('bundle mode rejects a ZIP that holds anything but one flat tar', async () => {
-    const zipPath = join(directory, 'served.zip');
-    const digest = writeZip(zipPath, { 'a.tar': '1', 'b.tar': '2' });
-    const { run } = ghFake(zipPath, digest, 0);
-    await expect(
-      downloadRunArtifact({
+  test.skipIf(ZIP_UNAVAILABLE)(
+    'tree mode overwrites existing files and leaves no scratch behind',
+    async () => {
+      const zipPath = join(directory, 'served.zip');
+      const digest = writeZip(zipPath, { 'a.txt': 'fresh' });
+      const { run } = ghFake(zipPath, digest, 0);
+      const destination = join(directory, 'out');
+      mkdirSync(destination);
+      writeFileSync(join(destination, 'a.txt'), 'stale');
+      await downloadRunArtifact({
         repository: 'o/r',
         runId: RUN_ID,
         name: 'distribution-x',
-        destination: join(directory, 'out'),
-        mode: 'bundle',
+        destination,
+        mode: 'tree',
         scratchRoot: directory,
         run,
         log: () => {},
-      })
-    ).rejects.toThrow('expected one flat .tar or .tar.gz bundle');
-  });
+      });
+      expect(readFileSync(join(destination, 'a.txt'), 'utf8')).toBe('fresh');
+      const leftovers = Array.from(
+        new Bun.Glob('run-artifact-*').scanSync({ cwd: directory, onlyFiles: false })
+      );
+      expect(leftovers, 'scratch directories left under the scratch root').toEqual([]);
+    }
+  );
+
+  test.skipIf(ZIP_UNAVAILABLE)(
+    'bundle mode rejects a ZIP that holds anything but one flat tar',
+    async () => {
+      const zipPath = join(directory, 'served.zip');
+      const digest = writeZip(zipPath, { 'a.tar': '1', 'b.tar': '2' });
+      const { run } = ghFake(zipPath, digest, 0);
+      await expect(
+        downloadRunArtifact({
+          repository: 'o/r',
+          runId: RUN_ID,
+          name: 'distribution-x',
+          destination: join(directory, 'out'),
+          mode: 'bundle',
+          scratchRoot: directory,
+          run,
+          log: () => {},
+        })
+      ).rejects.toThrow('expected one flat .tar or .tar.gz bundle');
+    }
+  );
 });

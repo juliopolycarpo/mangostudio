@@ -15,6 +15,10 @@ import { join } from 'node:path';
 import { extractTarArchive, openTarArchive } from '../lib/archive';
 import { tarCreationCommand, zipCreationCommand } from '../lib/archive-creation';
 import { captureCommand } from '../lib/exec';
+import { zipCreationUnavailable } from './support/host-tools';
+
+// Skipped on a developer machine without `zip`; CI throws instead (see host-tools.ts).
+const ZIP_UNAVAILABLE = zipCreationUnavailable();
 
 let tempDirs: string[] = [];
 
@@ -109,7 +113,7 @@ describe('native archive reading', () => {
 
   // Documented so the constraint is discovered by a failing test rather than by
   // a release job: GNU tar auto-detects these, Bun.Archive does not read them.
-  test('reads gzip only, and never zip', async () => {
+  test.skipIf(ZIP_UNAVAILABLE)('reads gzip only, and never zip', async () => {
     const rootDir = makeTempDir();
     const sourceDir = join(rootDir, 'source');
     mkdirSync(sourceDir, { recursive: true });
