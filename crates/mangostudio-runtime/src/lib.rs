@@ -144,6 +144,7 @@ pub mod health;
 mod host_wiring_tests;
 mod install;
 mod library;
+pub mod release_stamp;
 pub mod supervisor;
 pub mod terminal;
 #[cfg(test)]

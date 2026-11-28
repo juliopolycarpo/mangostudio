@@ -27,12 +27,6 @@ import {
 const RUNTIME_CARGO_PACKAGE = 'mangostudio-runtime';
 
 /**
- * Compile-time variable the runtime reads through `option_env!` to report the
- * distribution's release version instead of its manifest version.
- */
-export const RUNTIME_RELEASE_VERSION_ENV = 'MANGOSTUDIO_RELEASE_VERSION';
-
-/**
  * The version a source checkout's hub reports, and so the one a runtime it
  * installs into a WSL distribution or mounts into a container must report:
  * the handshake only accepts a hub-managed runtime of the same release.

@@ -35,9 +35,9 @@ fn binary_path() -> &'static str {
     env!("CARGO_BIN_EXE_mangostudio-runtime")
 }
 
-/// The release the binary reports, the same expression as `src/main.rs`.
+/// The release the unstamped test binary reports: the manifest version.
 fn installed_version() -> &'static str {
-    option_env!("MANGOSTUDIO_RELEASE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+    env!("CARGO_PKG_VERSION")
 }
 
 fn runtime_file_name() -> &'static str {

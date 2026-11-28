@@ -5,8 +5,16 @@ import { dirname, join } from 'node:path';
 import { ROOT_DIR } from '../../lib/config';
 import { ALL_BINARY_TARGETS, type ReleasePlatformId } from '../../lib/release-targets';
 import { cargoRuntimeOutputPath } from '../../lib/runtime-build';
+import { RELEASE_STAMP_MAGIC, RELEASE_STAMP_SLOT_BYTES } from '../../lib/runtime-stamp';
 
 const SOURCE_SHA = 'abcdef0123456789abcdef0123456789abcdef01';
+
+/** The slot `src/main.rs` links in before stamping: the magic, then zeros. */
+function unstampedReleaseSlot(): Uint8Array {
+  const slot = new Uint8Array(RELEASE_STAMP_SLOT_BYTES);
+  slot.set(RELEASE_STAMP_MAGIC, 0);
+  return slot;
+}
 
 /** Minimal source inputs and named git/cargo/bun fakes for the real packaging CLI. */
 export class FakeNativeBuildInputs {
@@ -66,7 +74,21 @@ export class FakeNativeBuildInputs {
         buildType: 'production',
       })
     );
-    this.write('fake-runtime.ts', `console.log(${JSON.stringify(this.version)});\n`);
+    // The fake runtime embeds an unstamped release slot as a file and reports whatever the slot
+    // holds when it runs, so it prints the release version only after the build scripts stamp it
+    // (the real runtime reads `RELEASE_STAMP` the same way).
+    writeFileSync(join(this.root, 'release-slot.bin'), unstampedReleaseSlot());
+    this.write(
+      'fake-runtime.ts',
+      [
+        "import slotPath from './release-slot.bin' with { type: 'file' };",
+        'const slot = new Uint8Array(await Bun.file(slotPath).arrayBuffer());',
+        `const lengthAt = ${RELEASE_STAMP_MAGIC.length};`,
+        'const length = slot[lengthAt];',
+        "console.log(length === 0 ? '(unstamped)' : new TextDecoder().decode(slot.subarray(lengthAt + 1, lengthAt + 1 + length)));",
+        '',
+      ].join('\n')
+    );
     this.write('fake-bin/bun', '#!/bin/sh\necho "unexpected PATH compiler" >&2\nexit 91\n', true);
     this.write(
       'fake-bin/git',
