@@ -1,13 +1,18 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { resolveCanaryDistributionToFiles } from '../ci/resolve-canary-distribution';
+import { createCanaryGhApi } from '../lib/canary-gh-api';
 import {
   type CanaryPromotionApi,
   resolveCanaryPromotionSource,
 } from '../lib/canary-promotion-source';
+import { GitHubRetry, STANDARD_RETRY_POLICY } from '../lib/github-retry';
 import { fakeCliEnvironment, installFakeCli, removeFakeCliDirectory } from './support/fake-cli';
+import { ghFailure, ghServing, ScriptedGhRunner } from './support/scripted-gh-runner';
+import { RecordedRetryEnvironment } from './support/scripted-github-http';
 
 const source = { repository: 'owner/repo', runId: 100, runAttempt: 3, sourceSha: 'a'.repeat(40) };
 const version = '1.0.0-canary.aaaaaaa';
@@ -362,19 +367,22 @@ test.each([
       expect(existsSync(outputs)).toBe(false);
       if (mode === 'signed-get-failure' || mode === 'signed-list-failure') {
         const stderr = result.stderr.toString();
-        expect(stderr).not.toContain('fixture-signed-url-marker');
+        // The failure names the request and gh's exit; the URL and its query
+        // credential are redacted from the echoed stderr.
         expect(stderr).not.toContain('https://example.invalid/artifact.zip');
         expect(stderr).not.toContain('fixture-canary-credential');
-        const path =
+        const request =
           mode === 'signed-get-failure'
-            ? 'repos/owner/repo/actions/workflows/ci.yml'
-            : `repos/owner/repo/actions/runs/${source.runId}/jobs?filter=all&per_page=100`;
-        expect(stderr).toContain(`GitHub API ${path}: expected successful gh exit 0; received 7`);
+            ? 'GET repos/owner/repo/actions/workflows/ci.yml'
+            : `GET repos/owner/repo/actions/runs/${source.runId}/jobs?filter=all&per_page=100 (all pages)`;
+        expect(stderr).toContain(
+          `GitHub API ${request}: expected successful gh exit 0 | received: exit 7 | stderr: fixture-signed-url-marker <url>`
+        );
         return;
       }
       const message =
         mode === 'api-failure'
-          ? 'GitHub API repos/owner/repo/actions/workflows/ci.yml: expected successful gh exit 0; received 1'
+          ? 'GitHub API GET repos/owner/repo/actions/workflows/ci.yml: expected successful gh exit 0 | received: exit 1 | stderr: fixture denied API read'
           : mode === 'empty-pages'
             ? 'expected nonempty paginated array'
             : mode === 'malformed-page'
@@ -389,4 +397,75 @@ test.each([
   } finally {
     removeFakeCliDirectory(directory);
   }
+});
+
+describe('resolveCanaryDistributionToFiles over the shared retry client', () => {
+  const API_BASE = 'repos/owner/repo/actions/';
+  const WORKFLOW_ARGS = ['api', `${API_BASE}workflows/ci.yml`];
+  const BAD_GATEWAY = 'gh: Bad Gateway (HTTP 502)';
+
+  function setup() {
+    const directory = mkdtempSync(join(tmpdir(), 'fix-canary-resolve-retry-'));
+    const files = {
+      planPath: join(directory, 'plan.json'),
+      githubOutputPath: join(directory, 'out'),
+    };
+    const environment = new RecordedRetryEnvironment();
+    const runner = new ScriptedGhRunner(
+      ghServing(new FakePromotionApi().values, {
+        prefix: API_BASE,
+        collectionKey: (path) => (path.includes('/artifacts?') ? 'artifacts' : 'jobs'),
+      })
+    );
+    const api = createCanaryGhApi(runner, new GitHubRetry(STANDARD_RETRY_POLICY, environment));
+    return { directory, files, environment, runner, api };
+  }
+
+  test('a 502 on the first read is retried and the plan and outputs are written', () => {
+    const { directory, files, environment, runner, api } = setup();
+    try {
+      runner.script(WORKFLOW_ARGS, ghFailure(BAD_GATEWAY));
+      const plan = resolveCanaryDistributionToFiles(source, version, files, api);
+      expect(plan).toEqual(resolveCanaryPromotionSource(source, version, new FakePromotionApi()));
+      expect(JSON.parse(readFileSync(files.planPath, 'utf8'))).toEqual(plan);
+      expect(readFileSync(files.githubOutputPath, 'utf8')).toContain(
+        `builder_attempt=1\nbuilt_at=${completedAt}\n`
+      );
+      expect(runner.callsOf(WORKFLOW_ARGS)).toBe(2);
+      expect(environment.waits).toEqual([5_000]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('a persistent 502 on the jobs listing names the request and writes nothing', () => {
+    const { directory, files, environment, runner, api } = setup();
+    try {
+      const jobsArgs = ['api', '--paginate', '--slurp', `${API_BASE}${jobsPath}`];
+      runner.always(jobsArgs, ghFailure(BAD_GATEWAY));
+      expect(() => resolveCanaryDistributionToFiles(source, version, files, api)).toThrow(
+        `GitHub API GET ${API_BASE}${jobsPath} (all pages): expected successful gh exit 0 | received: exit 1 | stderr: ${BAD_GATEWAY}`
+      );
+      expect(runner.callsOf(jobsArgs)).toBe(3);
+      expect(environment.waits).toEqual([5_000, 10_000]);
+      expect(existsSync(files.planPath)).toBe(false);
+      expect(existsSync(files.githubOutputPath)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('a 404 is not retried', () => {
+    const { directory, files, environment, runner, api } = setup();
+    try {
+      runner.always(WORKFLOW_ARGS, ghFailure('gh: Not Found (HTTP 404)'));
+      expect(() => resolveCanaryDistributionToFiles(source, version, files, api)).toThrow(
+        `GitHub API GET ${API_BASE}workflows/ci.yml: expected successful gh exit 0 | received: exit 1 | stderr: gh: Not Found (HTTP 404)`
+      );
+      expect(runner.calls).toHaveLength(1);
+      expect(environment.waits).toEqual([]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
