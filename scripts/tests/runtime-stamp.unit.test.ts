@@ -265,6 +265,15 @@ describe('stampReleaseVersion on a Mach-O', () => {
   });
 });
 
+/**
+ * The permission bits a file reports after `chmod(requested)`. Windows keeps
+ * only the read-only attribute, so a writable file reports 0o666 whatever
+ * was requested.
+ */
+function permissionBitsAfterChmod(requested: number): number {
+  return process.platform === 'win32' ? 0o666 : requested;
+}
+
 describe('stampRuntimeFile', () => {
   let directory: string;
 
@@ -299,8 +308,6 @@ describe('stampRuntimeFile', () => {
       withTail(fakeSignedMachO('arm64', 'mangostudio_runtime-3f9a'), unstampedSlot())
     );
     chmodSync(path, 0o755);
-    // Read back rather than assumed: Windows has no execute bits and reports 0o666.
-    const modeBefore = statSync(path).mode;
     const codesign = new FakeCodesign();
 
     stampRuntimeFile(path, '0.1.1', { codesign: codesign.run });
@@ -313,7 +320,7 @@ describe('stampRuntimeFile', () => {
     expect(verify).toEqual(['--verify', temporary]);
     expect(readdirSync(directory)).toEqual(['runtime']);
     expect(readReleaseStamp(readFileSync(path)).version).toBe('0.1.1');
-    expect(statSync(path).mode).toBe(modeBefore);
+    expect(statSync(path).mode & 0o777).toBe(permissionBitsAfterChmod(0o755));
   });
 
   test('a failing codesign leaves the original bytes and no temporary file', () => {
@@ -383,13 +390,10 @@ describe('stampRuntimeFile', () => {
   test('an unstamped ELF stamped through a temporary file keeps its mode and leaves no sibling', () => {
     const path = write('runtime', elfWith(unstampedSlot()));
     chmodSync(path, 0o750);
-    // Read back rather than assumed: Windows has no execute bits and reports 0o666.
-    const modeBefore = statSync(path).mode;
 
     stampRuntimeFile(path, '0.1.1');
 
-    expect(statSync(path).mode).toBe(modeBefore);
-    if (process.platform !== 'win32') expect(modeBefore & 0o777).toBe(0o750);
+    expect(statSync(path).mode & 0o777).toBe(permissionBitsAfterChmod(0o750));
     expect(readdirSync(directory)).toEqual(['runtime']);
   });
 
