@@ -62,7 +62,7 @@ mangostudio-runtime-core = { path = "crates/mangostudio-runtime-core", version =
 # list. A member inherits `default-features` when it omits the key. Setting
 # `default-features = true` on a member enables defaults for that dependency.
 futures-util = { version = "0.3", default-features = false }
-jsonschema = { version = "0.61", default-features = false }
+jsonschema = { version = "0.63", default-features = false }
 # `signal` is the one feature both users need; the runtime adds its own.
 nix = { version = "0.32", default-features = false, features = ["signal"] }
 # Select `ring` to keep the `aws-lc-rs` backend and its build dependencies out
