@@ -93,6 +93,42 @@ function distributionProbeCalls(): Record<string, RuntimeCall> {
   return distributionCalls('runtime-probe.yml');
 }
 
+const LINUX_ARM64_PROBE_STEPS = {
+  download: 'Download the matching linux-arm64 Rust runtimes',
+  verify: 'Verify each linux-arm64 runtime version on the target host',
+  upload: 'Upload the linux-arm64 runtime version receipts',
+} as const;
+
+interface HubProbe {
+  readonly download: string;
+  readonly verify: string;
+  readonly upload: string;
+  /** Platforms the verify loop probes, in order. */
+  readonly platforms: string[];
+}
+
+/**
+ * The linux-arm64 runtime probe, which runs as three steps of the `hub` job instead of a
+ * runtime-probe.yml call. Throws when a step is missing or the verify step has no platform loop.
+ *
+ * @example linuxArm64HubProbe().platforms // ['linux-arm64', 'linux-arm64-musl']
+ */
+function linuxArm64HubProbe(
+  workflow = readText('.github/workflows/distribution-build.yml')
+): HubProbe {
+  const hub = extractJobBlock(workflow, 'hub');
+  const download = extractStepBlock(hub, LINUX_ARM64_PROBE_STEPS.download);
+  const verify = extractStepBlock(hub, LINUX_ARM64_PROBE_STEPS.verify);
+  const upload = extractStepBlock(hub, LINUX_ARM64_PROBE_STEPS.upload);
+  const loop = /for platform in ([^;\n]+); do/.exec(verify)?.[1];
+  if (loop === undefined) {
+    throw new Error(
+      `expected hub step "${LINUX_ARM64_PROBE_STEPS.verify}" to loop \`for platform in <ids>; do\` | received: ${verify}`
+    );
+  }
+  return { download, verify, upload, platforms: loop.trim().split(/\s+/) };
+}
+
 function parseNeeds(block: string): string[] {
   return (/\n {4}needs: \[([^\]]*)\]/.exec(block)?.[1] ?? '')
     .split(',')
@@ -521,11 +557,12 @@ describe('release workflow binary gate', () => {
     expect(hub).toContain('needs: [prepare, runtime, runtime-linux-arm64]');
     expect(hub).toContain('include-hidden-files: true');
     // A hub never pairs with a runtime: the one it downloads only runs beside its recording hub,
-    // and the upload below carries neither it nor the hub's receipts for it.
+    // and the upload below carries neither it nor the hub's receipts for it. The linux-arm64 probe
+    // is the only other reader: it downloads both ARM64 runtimes there to run `--version`.
     expect(
       hub.match(/\.mango\/runtime-prebuilt/g),
-      'the hub job names the runtime directory only to record'
-    ).toHaveLength(1);
+      'the hub job names the runtime directory only to record and to probe linux-arm64'
+    ).toHaveLength(2);
     expect(extractStepBlock(hub, 'Upload native hub and compiler receipt')).not.toContain(
       'runtime-prebuilt'
     );
@@ -570,17 +607,22 @@ describe('release workflow binary gate', () => {
       expect(extractJobBlock(workflow, job), job).toContain('record_receipts: true');
     }
     expect(runtimeVersion).toContain('bun --no-install ./scripts/release/verify-native-runtime.ts');
+    expect(linuxArm64HubProbe().verify).toContain(
+      'bun --no-install ./scripts/release/verify-native-runtime.ts'
+    );
     const crossTargets = [
       'linux-arm64',
       'linux-arm64-musl',
       'darwin-x64',
       'windows-arm64',
     ] as const;
-    // One probe per native host, running on that host; the hosts and the
-    // platforms each probes are pinned by the dedicated probe test below.
-    const probed = Object.values(distributionProbeCalls()).flatMap((call) =>
-      call.with.platforms.split(' ')
-    );
+    // One probe per native host, running on that host: a runtime-probe.yml call for darwin-x64 and
+    // windows-arm64, a step of the linux-arm64 hub entry for linux-arm64. The hosts and platforms
+    // each probes are pinned by the dedicated probe test below.
+    const probed = [
+      ...linuxArm64HubProbe().platforms,
+      ...Object.values(distributionProbeCalls()).flatMap((call) => call.with.platforms.split(' ')),
+    ];
     expect(probed).toEqual([...crossTargets]);
     for (const call of Object.values(distributionProbeCalls())) {
       const platform = call.with.host as keyof typeof runners;
@@ -696,17 +738,24 @@ describe('release workflow binary gate', () => {
   });
 
   test('a matching-host runtime probe can replace its receipt on a job retry', () => {
-    const workflow = readText('.github/workflows/runtime-probe.yml');
-    const probe = extractJobBlock(workflow, 'probe');
-    const upload = extractStepBlocks(probe).find((step) =>
-      step.includes('name: Upload the native runtime version receipts')
+    const upload = extractStepBlock(
+      extractJobBlock(readText('.github/workflows/runtime-probe.yml'), 'probe'),
+      'Upload the native runtime version receipts'
     );
-    expect(upload, 'expected the runtime version receipt upload').toBeDefined();
     expect(upload).toContain('uses: actions/upload-artifact@');
     expect(upload).toContain(
       'name: runtime-version-$' + '{{ inputs.source_sha }}-$' + '{{ inputs.host }}'
     );
     expect(upload, 'expected the source-and-host receipts to be replaceable on retry').toContain(
+      'overwrite: true'
+    );
+    // The linux-arm64 hub entry uploads the same artifact name and retries the same way.
+    const hubUpload = linuxArm64HubProbe().upload;
+    expect(hubUpload).toContain('uses: actions/upload-artifact@');
+    expect(hubUpload).toContain(
+      'name: runtime-version-$' + '{{ inputs.source_sha }}-linux-arm64\n'
+    );
+    expect(hubUpload, 'expected the hub receipts to be replaceable on retry').toContain(
       'overwrite: true'
     );
   });
@@ -745,11 +794,19 @@ describe('release workflow binary gate', () => {
 
   test('one probe per native host covers every cross-linked runtime target', () => {
     const probe = extractJobBlock(readText('.github/workflows/runtime-probe.yml'), 'probe');
-    const hosts = Object.values(distributionProbeCalls()).map((call) => ({
-      host: call.with.host as string,
-      platforms: call.with.platforms.split(' '),
-      runner: call.with.runner as string,
-    }));
+    const hubProbe = linuxArm64HubProbe();
+    const hubRunner = /- platform: linux-arm64\n\s+runner: (\S+)/.exec(
+      extractJobBlock(readText('.github/workflows/distribution-build.yml'), 'hub')
+    )?.[1];
+    const hosts = [
+      // The linux-arm64 hub entry runs on the same ARM64 runner type the standalone probe used.
+      { host: 'linux-arm64', platforms: hubProbe.platforms, runner: hubRunner },
+      ...Object.values(distributionProbeCalls()).map((call) => ({
+        host: call.with.host as string,
+        platforms: call.with.platforms.split(' '),
+        runner: call.with.runner as string,
+      })),
+    ];
     expect(hosts).toEqual([
       {
         host: 'linux-arm64',
@@ -776,6 +833,95 @@ describe('release workflow binary gate', () => {
     expect(probe).toContain('PLATFORMS: $' + '{{ inputs.platforms }}');
     expect(probe).toContain('for platform in $PLATFORMS; do');
     expect(probe).toContain('path: .mango/runtime-versions/*.json');
+    // The hub's copy downloads the same `runtime-<sha>-linux-arm64*` selection, reads the same
+    // receipts directory and invokes the verifier the same way as the standalone probe.
+    expect(hubProbe.download).toContain(
+      'pattern: runtime-$' + '{{ inputs.source_sha }}-linux-arm64*\n'
+    );
+    expect(hubProbe.download).toContain('path: .mango/runtime-prebuilt\n');
+    expect(hubProbe.upload).toContain('path: .mango/runtime-versions/*.json');
+    for (const line of [
+      'set -uo pipefail',
+      'PLATFORM="$platform" bun --no-install ./scripts/release/verify-native-runtime.ts || failed=1',
+      'exit "$failed"',
+    ]) {
+      expect(probe, 'runtime-probe.yml verify loop').toContain(line);
+      expect(hubProbe.verify, 'hub verify loop').toContain(line);
+    }
+  });
+
+  test('the linux-arm64 probe runs in its hub entry and keeps its proof', () => {
+    const workflow = readText('.github/workflows/distribution-build.yml');
+    const hub = extractJobBlock(workflow, 'hub');
+    const probe = linuxArm64HubProbe();
+    // No separate job: the folded probe must not also exist as a runtime-probe.yml call.
+    expect(
+      Object.keys(distributionProbeCalls()),
+      'expected runtime-probe.yml calls for the hosts that are not folded into a hub'
+    ).toEqual(['runtime-version-darwin-x64', 'runtime-version-windows-arm64']);
+    expect(probe.platforms, 'platforms the folded probe verifies').toEqual([
+      'linux-arm64',
+      'linux-arm64-musl',
+    ]);
+    // Only the glibc linux-arm64 entry runs it; it covers the musl runtime too, so the musl entry
+    // on the same runner type must not repeat it.
+    for (const step of [probe.download, probe.verify, probe.upload]) {
+      expect(step).toContain('if: $' + "{{ matrix.platform == 'linux-arm64' }}\n");
+    }
+    // The hub gates the aggregate build and already waits for the runtime call it probes.
+    expect(hub).toContain('needs: [prepare, runtime, runtime-linux-arm64]');
+    const buildNeeds = (Bun.YAML.parse(workflow) as { jobs: { build: { needs: string[] } } }).jobs
+      .build.needs;
+    expect(buildNeeds, 'the aggregate build must wait for the hub that runs the probe').toContain(
+      'hub'
+    );
+    // The step shares one identity with the runtimes this run built.
+    const identity = {
+      SOURCE_SHA: 'inputs.source_sha',
+      VERSION: 'inputs.version',
+      RUNTIME_PROFILE: 'inputs.runtime_profile',
+    };
+    for (const [name, expression] of Object.entries(identity)) {
+      expect(probe.verify, `expected the probe to receive ${name} from ${expression}`).toContain(
+        `          ${name}: $` + `{{ ${expression} }}\n`
+      );
+    }
+    // A wrong version fails the hub before it uploads, so a re-run of the failed job can upload
+    // again (the hub upload does not replace an existing artifact).
+    const names = extractStepBlocks(hub).map((block) => /name: (.+)/.exec(block)?.[1]);
+    const hubUpload = names.indexOf('Upload native hub and compiler receipt');
+    for (const name of Object.values(LINUX_ARM64_PROBE_STEPS)) {
+      expect(names.indexOf(name), `expected "${name}" after the hub build`).toBeGreaterThan(
+        names.indexOf('Build native musl hub in Alpine')
+      );
+      expect(names.indexOf(name), `expected "${name}" before the hub upload`).toBeLessThan(
+        hubUpload
+      );
+    }
+    expect(probe.verify, 'a failed probe must fail the hub').not.toContain('continue-on-error');
+  });
+
+  test('linuxArm64HubProbe rejects a hub missing a probe step or its platform loop', () => {
+    const step = (name: string, body: string): string => `      - name: ${name}\n        ${body}\n`;
+    const hubWith = (steps: string): string =>
+      `jobs:\n  hub:\n    name: Hub\n    steps:\n      - name: other\n        run: true\n${steps}`;
+    const { download, verify, upload } = LINUX_ARM64_PROBE_STEPS;
+    const loop = 'run: for platform in linux-arm64 linux-arm64-musl; do true; done';
+    expect(
+      linuxArm64HubProbe(
+        hubWith(step(download, 'run: true') + step(verify, loop) + step(upload, 'run: true'))
+      ).platforms
+    ).toEqual(['linux-arm64', 'linux-arm64-musl']);
+    expect(() => linuxArm64HubProbe(hubWith(step(download, 'run: true')))).toThrow(verify);
+    expect(() =>
+      linuxArm64HubProbe(
+        hubWith(
+          step(download, 'run: true') +
+            step(verify, 'run: bun verify.ts') +
+            step(upload, 'run: true')
+        )
+      )
+    ).toThrow('to loop `for platform in <ids>; do` | received:');
   });
 
   test('the runtime producer records one receipt per target for distribution pairing', () => {
