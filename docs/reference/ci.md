@@ -500,6 +500,13 @@ of these hold, and any read error or malformed payload says "full run" with the 
 The proof comes from git objects and the Actions API, never from anything the pull
 request run wrote. A merge after main moved fails check 6: the run tested an older base.
 
+The gate script already has the vocabulary a later stage would use, and no workflow sets
+it. `evaluate-gate.ts` reads `REUSED_SKIPS` (a job list, apart from `ALLOWED_SKIPS`),
+`REUSE_RUN` (the proving run) and `REUSE_TREE`. A listed job that skipped reports
+`skipped (reused: pull request run <id> tested tree <sha>)`. The gate fails when a job is
+listed with `REUSE_RUN` or `REUSE_TREE` empty, when a listed job did not skip, when it is
+not a gate dependency, or when it is also in `ALLOWED_SKIPS`.
+
 ## Pull request cache cleanup
 
 Per-PR cache saves (`...-turbo-pr-<N>-test|build|check-...`,

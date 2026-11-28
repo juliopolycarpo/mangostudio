@@ -125,11 +125,102 @@ export function renderLightSummary(verdict: GateVerdict): string {
   ].join('\n');
 }
 
+// Reused skips: a job that did not run because a pull request run already
+// tested this exact tree (docs/reference/ci.md, "Tree reuse shadow"). It is its
+// own vocabulary beside ALLOWED_SKIPS, which says "this lane is not relevant":
+// a reused skip is only as good as its proof, so it needs REUSE_RUN (the
+// proving run) and REUSE_TREE (what it tested) and must really be a skip. No
+// workflow sets any of the three yet.
+
+/** The `REUSED_SKIPS`, `REUSE_RUN` and `REUSE_TREE` inputs. */
+export interface ReuseInput {
+  readonly reusedSkips: ReadonlySet<string>;
+  /** ID of the pull request CI run that tested the tree; empty when there is no proof. */
+  readonly run: string;
+  /** The tree SHA that run tested. */
+  readonly tree: string;
+}
+
+/** Read the three reuse inputs from an environment; absent ones are empty, which means no reuse. */
+export function parseReuseInput(env: Readonly<Record<string, string | undefined>>): ReuseInput {
+  return {
+    reusedSkips: parseAllowedSkips(env.REUSED_SKIPS),
+    run: (env.REUSE_RUN ?? '').trim(),
+    tree: (env.REUSE_TREE ?? '').trim(),
+  };
+}
+
+/**
+ * `evaluateGate` plus reused skips. With no REUSED_SKIPS it is `evaluateGate`
+ * unchanged. A job listed there passes only as `skipped`, and only when the
+ * proof inputs are present; the gate fails when
+ *
+ * - REUSE_RUN or REUSE_TREE is empty (a reused skip with no proof),
+ * - the job did not skip (the reuse decision and the job disagree), whatever it did instead,
+ * - the job is not a gate dependency (stale configuration), or
+ * - the job is also in ALLOWED_SKIPS (two reasons for one skip).
+ *
+ * Reused jobs are judged here and left out of the ordinary evaluation, so
+ * `evaluateGate` and its message for an unexpected skip stay as they are.
+ */
+export function evaluateGateWithReuse(
+  results: Readonly<Record<string, NeedResult>>,
+  allowedSkips: ReadonlySet<string>,
+  reuse: ReuseInput,
+  laneSet: LaneSet = 'full'
+): GateVerdict {
+  if (reuse.reusedSkips.size === 0) return evaluateGate(results, allowedSkips, laneSet);
+
+  const ordinary: Record<string, NeedResult> = {};
+  for (const [job, result] of Object.entries(results)) {
+    if (!reuse.reusedSkips.has(job)) ordinary[job] = result;
+  }
+  const base = evaluateGate(ordinary, allowedSkips, laneSet);
+
+  const lines = [...base.lines];
+  let ok = base.ok;
+  // One verdict line naming the missing proof beats one per job.
+  const missing = [
+    reuse.run === '' ? 'REUSE_RUN' : undefined,
+    reuse.tree === '' ? 'REUSE_TREE' : undefined,
+  ].filter((name) => name !== undefined);
+  if (missing.length > 0) {
+    ok = false;
+    lines.push(
+      `REUSED_SKIPS lists ${[...reuse.reusedSkips].join(', ')} but ${missing.join(' and ')} is empty; a reused skip needs the proving run and tree`
+    );
+  }
+
+  for (const job of reuse.reusedSkips) {
+    const result = results[job];
+    if (result === undefined) {
+      ok = false;
+      lines.push(`reused-skip job "${job}" is not a gate dependency; fix REUSED_SKIPS or needs`);
+    } else if (allowedSkips.has(job)) {
+      ok = false;
+      lines.push(`${job}: listed in both ALLOWED_SKIPS and REUSED_SKIPS; a skip has one reason`);
+    } else if (result !== 'skipped') {
+      ok = false;
+      lines.push(`${job}: ${result} — listed in REUSED_SKIPS but did not skip`);
+    } else if (missing.length > 0) {
+      lines.push(`${job}: skipped — reused skip without proof`);
+    } else {
+      lines.push(
+        `${job}: skipped (reused: pull request run ${reuse.run} tested tree ${reuse.tree})`
+      );
+    }
+  }
+
+  // The lane-set fields of the ordinary verdict pass through unchanged.
+  return { ...base, ok, lines };
+}
+
 if (import.meta.main) {
   try {
-    const verdict = evaluateGate(
+    const verdict = evaluateGateWithReuse(
       parseNeeds(process.env.NEEDS),
       parseAllowedSkips(process.env.ALLOWED_SKIPS),
+      parseReuseInput(process.env),
       parseLaneSet(process.env.LANE_SET)
     );
     for (const line of verdict.lines) console.log(line);

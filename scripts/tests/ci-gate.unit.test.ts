@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
-import { evaluateGate, parseAllowedSkips, parseNeeds } from '../ci/evaluate-gate';
+import {
+  evaluateGate,
+  evaluateGateWithReuse,
+  parseAllowedSkips,
+  parseNeeds,
+  parseReuseInput,
+} from '../ci/evaluate-gate';
 import { ROOT_DIR } from '../lib/config';
 import { classifyChangedPaths } from '../lib/rust-lanes';
 import { LANE_SET_OS_MATRIX } from './support/lane-set-workflows';
@@ -151,6 +157,112 @@ describe('gate result evaluation', () => {
     expect(() => parseNeeds('[]')).toThrow('JSON object form');
     expect(() => parseNeeds('{"check":{}}')).toThrow('unrecognized result');
     expect(() => parseNeeds('{"check":{"result":"green"}}')).toThrow('unrecognized result');
+  });
+});
+
+describe('gate reused skips (REUSED_SKIPS)', () => {
+  const PROOF = { run: '46108381115', tree: 'b3e771d4d65c66398d5c1e308e4986df70fb3441' };
+  const reuse = (jobs: string, proof: { run: string; tree: string } = PROOF) => ({
+    reusedSkips: parseAllowedSkips(jobs),
+    ...proof,
+  });
+  const needs = { check: 'success', 'browser-smoke': 'skipped' } as const;
+
+  test('parseReuseInput reads the three inputs and treats absent ones as empty', () => {
+    expect(parseReuseInput({ REUSED_SKIPS: 'a, b', REUSE_RUN: ' 12 ', REUSE_TREE: 'abc' })).toEqual(
+      { reusedSkips: new Set(['a', 'b']), run: '12', tree: 'abc' }
+    );
+    expect(parseReuseInput({})).toEqual({ reusedSkips: new Set(), run: '', tree: '' });
+  });
+
+  test('without REUSED_SKIPS it is evaluateGate, proof inputs ignored', () => {
+    const none = reuse('', { run: '', tree: '' });
+    expect(evaluateGateWithReuse({ check: 'success' }, new Set(), none)).toEqual(
+      evaluateGate({ check: 'success' }, new Set())
+    );
+    // An unlisted skip is still an unexpected skip, whatever proof is on offer.
+    expect(evaluateGateWithReuse(needs, new Set(), reuse('', PROOF)).ok).toBe(false);
+  });
+
+  test('a listed job that skipped, with proof, passes with its own reason line', () => {
+    const verdict = evaluateGateWithReuse(needs, new Set(), reuse('browser-smoke'));
+    expect(verdict.ok).toBe(true);
+    expect(verdict.lines).toContain(
+      `browser-smoke: skipped (reused: pull request run ${PROOF.run} tested tree ${PROOF.tree})`
+    );
+    expect(verdict.lines).toContain('check: success');
+  });
+
+  test.each([
+    ['REUSE_RUN', { run: '', tree: PROOF.tree }],
+    ['REUSE_TREE', { run: PROOF.run, tree: '' }],
+    ['REUSE_RUN and REUSE_TREE', { run: '', tree: '' }],
+  ])('fails when %s is empty: a reused skip with no proof', (missing, proof) => {
+    const verdict = evaluateGateWithReuse(needs, new Set(), reuse('browser-smoke', proof));
+    expect(verdict.ok).toBe(false);
+    const text = verdict.lines.join('\n');
+    expect(text).toContain(`but ${missing} is empty`);
+    expect(text).toContain('browser-smoke: skipped — reused skip without proof');
+    expect(text).not.toContain('(reused:');
+  });
+
+  test.each(['success', 'failure', 'cancelled'] as const)(
+    'fails when a listed job is %s instead of skipped',
+    (result) => {
+      const verdict = evaluateGateWithReuse(
+        { check: 'success', 'browser-smoke': result },
+        new Set(),
+        reuse('browser-smoke')
+      );
+      expect(verdict.ok).toBe(false);
+      expect(verdict.lines).toContain(
+        `browser-smoke: ${result} — listed in REUSED_SKIPS but did not skip`
+      );
+    }
+  );
+
+  test('fails when a listed job is not a gate dependency', () => {
+    const verdict = evaluateGateWithReuse(needs, new Set(), reuse('browser-smoke renamed-job'));
+    expect(verdict.ok).toBe(false);
+    expect(verdict.lines.join('\n')).toContain(
+      'reused-skip job "renamed-job" is not a gate dependency'
+    );
+  });
+
+  test('fails when one skip has two reasons', () => {
+    const verdict = evaluateGateWithReuse(
+      needs,
+      parseAllowedSkips('browser-smoke'),
+      reuse('browser-smoke')
+    );
+    expect(verdict.ok).toBe(false);
+    expect(verdict.lines.join('\n')).toContain('listed in both ALLOWED_SKIPS and REUSED_SKIPS');
+  });
+
+  test('a reused skip does not excuse another job that failed or skipped unexpectedly', () => {
+    expect(
+      evaluateGateWithReuse(
+        { check: 'failure', 'browser-smoke': 'skipped' },
+        new Set(),
+        reuse('browser-smoke')
+      ).ok
+    ).toBe(false);
+    expect(
+      evaluateGateWithReuse(
+        { check: 'success', qa: 'skipped', 'browser-smoke': 'skipped' },
+        new Set(),
+        reuse('browser-smoke')
+      ).ok
+    ).toBe(false);
+  });
+
+  test('an allowed skip still works beside a reused one', () => {
+    const verdict = evaluateGateWithReuse(
+      { check: 'success', qa: 'skipped', 'browser-smoke': 'skipped' },
+      parseAllowedSkips('qa'),
+      reuse('browser-smoke')
+    );
+    expect(verdict.ok).toBe(true);
   });
 });
 

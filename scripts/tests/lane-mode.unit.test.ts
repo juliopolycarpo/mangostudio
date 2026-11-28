@@ -576,7 +576,7 @@ describe('workflow wiring of the light lane set', () => {
     (_name, workflow) => {
       const changes = extractJobBlock(workflow, 'changes');
       expect(changes).toMatch(
-        /permissions:\n {6}contents: read\n {6}pull-requests: read # [^\n]+\n {4}outputs:/
+        /permissions:\n {6}contents: read\n(?: {6}actions: read # [^\n]+\n)? {6}pull-requests: read # [^\n]+\n {4}outputs:/
       );
       expect(changes).not.toMatch(/: write\b/);
       expect(changes).not.toContain('secrets.');

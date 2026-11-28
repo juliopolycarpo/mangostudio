@@ -396,6 +396,14 @@ A prova vem de objetos git e da API do Actions, nunca de algo que a execução d
 request escreveu. Um merge depois que a main andou falha na verificação 6: a execução
 testou uma base mais antiga.
 
+O script do gate já tem o vocabulário que uma etapa futura usaria, e nenhum workflow o
+define. `evaluate-gate.ts` lê `REUSED_SKIPS` (uma lista de jobs, separada de
+`ALLOWED_SKIPS`), `REUSE_RUN` (a execução que prova) e `REUSE_TREE`. Um job listado que
+foi pulado reporta `skipped (reused: pull request run <id> tested tree <sha>)`. O gate
+falha quando um job é listado com `REUSE_RUN` ou `REUSE_TREE` vazio, quando um job listado
+não foi pulado, quando ele não é dependência do gate ou quando também está em
+`ALLOWED_SKIPS`.
+
 ## Limpeza de caches de pull request
 
 Os caches por PR (`...-turbo-pr-<N>-test|build|check-...`,

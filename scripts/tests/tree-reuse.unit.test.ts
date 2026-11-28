@@ -654,7 +654,7 @@ describe('ci.yml shadow step policy', () => {
 
   test('the job grants only the two extra reads and keeps the settle environment', () => {
     expect(preflight).toContain(
-      "permissions:\n      contents: read\n      actions: read # the merged pull request's CI run and its jobs\n      pull-requests: read # the pull requests of the pushed commit"
+      "permissions:\n      contents: read\n      actions: read # tree-reuse shadow: the merged pull request's CI run and its jobs\n      pull-requests: read # the PR's labels (lane set); the pushed commit's pull requests"
     );
     expect(preflight).toContain(
       `name: ${EXPR} github.event_name == 'push' && 'main-ci-settle' || '' }}`
