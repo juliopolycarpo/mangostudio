@@ -32,9 +32,11 @@ function familyIdentity(entry: RustCacheEntry): string | undefined {
   return [generation, family, os, arch, environment, entry.version].join(':');
 }
 
-// The environment hash is left out: pruning the runner image's toolchain moved it for every family
-// at once, so a manifest-generation entry never shares an environment with its profile-generation
-// successor. What must match is what the entry was for.
+// The environment hash is left out on purpose, and the family does not make up for it: the shipping
+// and light runtime builds share one family (`runtime-build-<platform>`) and differ only by their
+// environment hash (the job-level CARGO_PROFILE_RELEASE_* overrides). Pruning the runner image's
+// toolchain moved that hash for every family at once, so an old hash cannot be matched to a new
+// one, and no key says which profile an entry was built for.
 function platformIdentity(entry: RustCacheEntry): string | undefined {
   const parsed = readEntry(entry);
   if (!parsed) return;
@@ -42,10 +44,18 @@ function platformIdentity(entry: RustCacheEntry): string | undefined {
 }
 
 /**
- * Entries of the retired `v0-rust-<hashFiles('Cargo.toml')>` generation. No workflow restores that
- * prefix any more, so each one is dead weight once a profile-generation entry exists for the same
- * family, runner and archive version. Until one does, the entry stays: it is the only warm copy
- * an in-flight run on an older workflow revision could still read.
+ * Entries of the retired `v0-rust-<hashFiles('Cargo.toml')>` generation. An entry is retired when
+ * a `v0-rust-profile-` entry exists on main for the same family, OS, architecture and archive
+ * version, whatever either entry's environment hash. Until one does, the entry stays.
+ *
+ * Two consequences, both accepted:
+ * - A new entry of one profile retires the old entries of both. The shipping and light runtime
+ *   builds share a family and differ only by environment hash, which cannot be compared across
+ *   generations, so a new light entry also retires the old shipping entry of that platform. Only
+ *   an older workflow revision could restore it: current main never restores a shipping entry.
+ * - A pull request still running an older workflow revision restores only old-prefix keys. Once
+ *   its family has a new-generation entry that PR goes cold until it is rebased; the old entry is
+ *   not kept for it.
  */
 function retiredManifestGenerations(entries: readonly RustCacheEntry[]): RustCacheDeletion[] {
   const successors = new Map<string, RustCacheEntry>();

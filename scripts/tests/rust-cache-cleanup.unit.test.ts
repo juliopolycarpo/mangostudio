@@ -122,6 +122,33 @@ describe('Rust cache generation selection', () => {
       expect(ids([successor, NEW, lightOld]).sort()).toEqual([2, NEW.id].sort());
     });
 
+    // Documents the limit of the rule: nothing in a key names the profile, so one new entry
+    // retires the old entries of both.
+    test('the family does not separate light from shipping, so one new entry retires both', () => {
+      const shipping = NEW;
+      const light = changedEntry(OLD, { id: 2, key: OLD.key.replace('b9e20461', '1234abcd') });
+      const parsed = [shipping, light].map((entry) => parseRustCacheKey(entry.key));
+      expect(parsed[0]?.family, 'expected one family for both profiles').toBe(parsed[1]?.family);
+      expect(parsed[0]?.environment, 'expected the environment hash to differ').not.toBe(
+        parsed[1]?.environment
+      );
+      // Only a light entry exists in the new generation; the old shipping entry still goes.
+      const newLight = profileEntry(light, { id: 9 });
+      expect(
+        ids([newLight, shipping, light]).sort(),
+        `expected the old shipping and light entries retired | received: ${ids([newLight, shipping, light])}`
+      ).toEqual([2, NEW.id].sort());
+    });
+
+    test('an un-rebased pull request loses its old entry once the family has a new one', () => {
+      // The old entry is the only one a PR on an older workflow revision can restore.
+      expect(ids([NEW]), 'expected it to stay while the family has no new entry').toEqual([]);
+      expect(
+        ids([NEW, profileEntry(NEW, { id: 9 })]),
+        'expected it retired as soon as the family has a new-generation entry'
+      ).toEqual([NEW.id]);
+    });
+
     test('keeps a manifest entry until a profile entry exists for its family', () => {
       const otherFamily = profileEntry(
         changedEntry(NEW, { key: NEW.key.replace('runtime-build-linux-arm64', 'workspace') }),
