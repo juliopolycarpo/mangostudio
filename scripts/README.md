@@ -829,6 +829,9 @@ Nothing under `generated/` is formatted; see `bunfig.toml` for the current exclu
 `bun run code-health:production` to check dependency placement in shipped workspaces.
 Register runtime-loaded files as narrow workspace entries in `knip.json`; dependency
 ignores require execution evidence documented in `docs/reference/testing.md`.
+Knip never reports an explicit entry as unused, so `tests/knip-entry-references.unit.test.ts`
+fails for a file named under `scripts/ci` or `scripts/release` that no workflow, composite action,
+`package.json` script, doc or other script references.
 
 A local `bun run check` passes Knip `--cache`, with a directory per pass under
 `.mango/knip-cache/<generation>/`: 5.3 s to 1.8 s per pass on an unchanged tree, same
