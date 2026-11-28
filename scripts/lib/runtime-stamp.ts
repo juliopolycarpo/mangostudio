@@ -15,7 +15,9 @@
 // whose code-signature page hashes no longer match.
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { chmodSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 
 import {
   type ExecutableFormat,
@@ -196,10 +198,13 @@ export interface CodesignResult {
 /** Runs `codesign` with these arguments. Injected so tests never need a macOS host. */
 export type CodesignRunner = (args: readonly string[]) => CodesignResult;
 
+/** The exit code a runner reports for "codesign is not installed", as a shell does. */
+const CODESIGN_NOT_INSTALLED = 127;
+
 /** Runs the host's `codesign`; exit code 127 stands for "not installed", as in a shell. */
 const hostCodesign: CodesignRunner = (args) => {
   const result = spawnSync('codesign', [...args], { encoding: 'utf8' });
-  if (result.error) return { exitCode: 127, output: result.error.message };
+  if (result.error) return { exitCode: CODESIGN_NOT_INSTALLED, output: result.error.message };
   return { exitCode: result.status ?? 1, output: `${result.stdout}${result.stderr}`.trim() };
 };
 
@@ -231,26 +236,58 @@ export function stampRuntimeFile(
   version: string,
   options: { readonly codesign?: CodesignRunner } = {}
 ): StampOutcome {
+  const codesign = options.codesign ?? hostCodesign;
   const bytes = readFileSync(path);
   const outcome = stampReleaseVersion(bytes, version);
-  if (!outcome.changed) return outcome;
-  writeFileSync(path, bytes);
+  const signed = outcome.format === 'macho' && outcome.signatureIdentifier !== null;
 
-  if (outcome.format === 'macho' && outcome.signatureIdentifier !== null) {
-    const codesign = options.codesign ?? hostCodesign;
-    const signed = codesign(codesignArguments(path, outcome.signatureIdentifier));
-    if (signed.exitCode !== 0) {
-      throw new Error(
-        `expected codesign to re-sign ${path} as ${outcome.signatureIdentifier} after stamping (darwin runtimes build on macOS; discard the file, its signature no longer matches) | received: exit ${signed.exitCode}${signed.output ? `: ${signed.output}` : ''}`
-      );
+  if (!outcome.changed) {
+    // Already stamped: a signed Mach-O must still verify, or an earlier run left a broken one.
+    // A host without codesign (a Linux packager staging a darwin runtime stamped on macOS)
+    // cannot check, and the CI job that stamped it already did.
+    if (signed) {
+      const verified = codesign(['--verify', path]);
+      if (verified.exitCode !== 0 && verified.exitCode !== CODESIGN_NOT_INSTALLED) {
+        throw new Error(
+          `expected ${path} to carry a valid code signature | received: codesign --verify exit ${verified.exitCode}${verified.output ? `: ${verified.output}` : ''}`
+        );
+      }
     }
+    return outcome;
   }
 
-  const stamped = readReleaseStamp(readFileSync(path));
-  if (stamped.version !== version) {
-    throw new Error(
-      `expected ${path} to carry release stamp ${version} after writing | received: ${stamped.version ?? 'unstamped'}`
-    );
+  // Patch a sibling temporary file and rename it over `path` only once it is signed, verified and
+  // reads back the version, so a failure leaves the original bytes and no temporary file behind.
+  const temporary = join(dirname(path), `.${basename(path)}.stamp-${process.pid}-${randomUUID()}`);
+  try {
+    writeFileSync(temporary, bytes);
+    chmodSync(temporary, statSync(path).mode & 0o7777);
+
+    if (signed && outcome.signatureIdentifier !== null) {
+      const resigned = codesign(codesignArguments(temporary, outcome.signatureIdentifier));
+      if (resigned.exitCode !== 0) {
+        throw new Error(
+          `expected codesign to re-sign ${path} as ${outcome.signatureIdentifier} after stamping (darwin runtimes build on macOS) | received: exit ${resigned.exitCode}${resigned.output ? `: ${resigned.output}` : ''}`
+        );
+      }
+      const verified = codesign(['--verify', temporary]);
+      if (verified.exitCode !== 0) {
+        throw new Error(
+          `expected the re-signed ${path} to verify | received: codesign --verify exit ${verified.exitCode}${verified.output ? `: ${verified.output}` : ''}`
+        );
+      }
+    }
+
+    const stamped = readReleaseStamp(readFileSync(temporary));
+    if (stamped.version !== version) {
+      throw new Error(
+        `expected ${path} to carry release stamp ${version} after writing | received: ${stamped.version ?? 'unstamped'}`
+      );
+    }
+    renameSync(temporary, path);
+  } catch (caught) {
+    rmSync(temporary, { force: true });
+    throw caught;
   }
   return outcome;
 }

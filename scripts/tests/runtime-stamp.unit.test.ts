@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { readMachOSignature, readPeCheckSum } from '../lib/executable-header';
 import {
@@ -53,15 +61,23 @@ function differingOffsets(left: Uint8Array, right: Uint8Array): number[] {
   return offsets;
 }
 
-/** Named fake of the `codesign` invocation: records every call and answers with `result`. */
+/**
+ * Named fake of the `codesign` invocation: records every call and answers `--verify` with
+ * `verify` and everything else (a signing call) with `sign`; both succeed by default.
+ */
 class FakeCodesign {
   readonly calls: (readonly string[])[] = [];
+  private readonly sign: CodesignResult;
+  private readonly verify: CodesignResult;
 
-  constructor(private readonly result: CodesignResult = { exitCode: 0, output: '' }) {}
+  constructor(answers: { sign?: CodesignResult; verify?: CodesignResult } = {}) {
+    this.sign = answers.sign ?? { exitCode: 0, output: '' };
+    this.verify = answers.verify ?? { exitCode: 0, output: '' };
+  }
 
   readonly run: CodesignRunner = (args) => {
     this.calls.push(args);
-    return this.result;
+    return args[0] === '--verify' ? this.verify : this.sign;
   };
 }
 
@@ -277,31 +293,64 @@ describe('stampRuntimeFile', () => {
     expect(codesign.calls).toEqual([]);
   });
 
-  test('re-signs a signed Mach-O ad hoc under its own identifier after stamping', () => {
+  test('re-signs and verifies a signed Mach-O in a temporary file, then renames it over the original', () => {
     const path = write(
       'runtime',
       withTail(fakeSignedMachO('arm64', 'mangostudio_runtime-3f9a'), unstampedSlot())
     );
+    chmodSync(path, 0o755);
     const codesign = new FakeCodesign();
 
     stampRuntimeFile(path, '0.1.1', { codesign: codesign.run });
 
-    expect(codesign.calls).toEqual([
-      ['--force', '--sign', '-', '--identifier', 'mangostudio_runtime-3f9a', path],
-    ]);
-    expect(codesign.calls[0]).toEqual(codesignArguments(path, 'mangostudio_runtime-3f9a'));
+    const [sign, verify] = codesign.calls;
+    const temporary = sign.at(-1) ?? '';
+    expect(dirname(temporary)).toBe(directory);
+    expect(temporary).not.toBe(path);
+    expect(sign).toEqual(codesignArguments(temporary, 'mangostudio_runtime-3f9a'));
+    expect(verify).toEqual(['--verify', temporary]);
+    expect(readdirSync(directory)).toEqual(['runtime']);
+    expect(readReleaseStamp(readFileSync(path)).version).toBe('0.1.1');
+    expect(statSync(path).mode & 0o777).toBe(0o755);
   });
 
-  test('a failing codesign fails the stamp with the exit code and its output', () => {
+  test('a failing codesign leaves the original bytes and no temporary file', () => {
     const path = write('runtime', withTail(fakeSignedMachO('arm64', 'id'), unstampedSlot()));
-    const codesign = new FakeCodesign({ exitCode: 127, output: 'spawn codesign ENOENT' });
+    const before = readFileSync(path);
+    const codesign = new FakeCodesign({
+      sign: { exitCode: 1, output: 'resource fork, Finder information, or similar detritus' },
+    });
 
     expect(() => stampRuntimeFile(path, '0.1.1', { codesign: codesign.run })).toThrow(
-      `expected codesign to re-sign ${path} as id after stamping (darwin runtimes build on macOS; discard the file, its signature no longer matches) | received: exit 127: spawn codesign ENOENT`
+      `expected codesign to re-sign ${path} as id after stamping (darwin runtimes build on macOS) | received: exit 1: resource fork, Finder information, or similar detritus`
     );
+    expect(differingOffsets(before, readFileSync(path))).toEqual([]);
+    expect(readdirSync(directory)).toEqual(['runtime']);
   });
 
-  test('an already stamped runtime is neither rewritten nor re-signed', () => {
+  test('a missing codesign fails the stamp of a signed Mach-O the same way', () => {
+    const path = write('runtime', withTail(fakeSignedMachO('arm64', 'id'), unstampedSlot()));
+    const codesign = new FakeCodesign({ sign: { exitCode: 127, output: 'spawn codesign ENOENT' } });
+
+    expect(() => stampRuntimeFile(path, '0.1.1', { codesign: codesign.run })).toThrow(
+      'received: exit 127: spawn codesign ENOENT'
+    );
+    expect(readdirSync(directory)).toEqual(['runtime']);
+  });
+
+  test('a re-signed file that does not verify is never renamed over the original', () => {
+    const path = write('runtime', withTail(fakeSignedMachO('arm64', 'id'), unstampedSlot()));
+    const before = readFileSync(path);
+    const codesign = new FakeCodesign({ verify: { exitCode: 1, output: 'invalid signature' } });
+
+    expect(() => stampRuntimeFile(path, '0.1.1', { codesign: codesign.run })).toThrow(
+      `expected the re-signed ${path} to verify | received: codesign --verify exit 1: invalid signature`
+    );
+    expect(differingOffsets(before, readFileSync(path))).toEqual([]);
+    expect(readdirSync(directory)).toEqual(['runtime']);
+  });
+
+  test('an already stamped Mach-O is verified, not rewritten or re-signed', () => {
     const path = write('runtime', withTail(fakeSignedMachO('arm64', 'id'), stampedSlot('0.1.1')));
     const before = readFileSync(path);
     const codesign = new FakeCodesign();
@@ -309,8 +358,34 @@ describe('stampRuntimeFile', () => {
     const outcome = stampRuntimeFile(path, '0.1.1', { codesign: codesign.run });
 
     expect(outcome.changed).toBe(false);
-    expect(codesign.calls).toEqual([]);
+    expect(codesign.calls).toEqual([['--verify', path]]);
     expect(differingOffsets(before, readFileSync(path))).toEqual([]);
+  });
+
+  test('an already stamped Mach-O whose signature fails verification throws', () => {
+    const path = write('runtime', withTail(fakeSignedMachO('arm64', 'id'), stampedSlot('0.1.1')));
+    const codesign = new FakeCodesign({ verify: { exitCode: 1, output: 'invalid signature' } });
+
+    expect(() => stampRuntimeFile(path, '0.1.1', { codesign: codesign.run })).toThrow(
+      `expected ${path} to carry a valid code signature | received: codesign --verify exit 1: invalid signature`
+    );
+  });
+
+  test('an already stamped Mach-O passes on a host without codesign, which cannot check it', () => {
+    const path = write('runtime', withTail(fakeSignedMachO('arm64', 'id'), stampedSlot('0.1.1')));
+    const codesign = new FakeCodesign({ verify: { exitCode: 127, output: 'not found' } });
+
+    expect(stampRuntimeFile(path, '0.1.1', { codesign: codesign.run }).changed).toBe(false);
+  });
+
+  test('an unstamped ELF stamped through a temporary file keeps its mode and leaves no sibling', () => {
+    const path = write('runtime', elfWith(unstampedSlot()));
+    chmodSync(path, 0o750);
+
+    stampRuntimeFile(path, '0.1.1');
+
+    expect(statSync(path).mode & 0o777).toBe(0o750);
+    expect(readdirSync(directory)).toEqual(['runtime']);
   });
 
   test('a refused stamp leaves the file untouched', () => {
