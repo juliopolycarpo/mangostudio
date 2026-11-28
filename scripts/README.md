@@ -23,6 +23,8 @@ scripts/
 ├── test.ts           Run unit/integration/e2e/coverage lanes, whole, sharded, or --changed (bun run test; --rust adds nextest and doctests)
 ├── run-test-workers.ts
 │                     Run one test lane in worker processes with one merged report (API unit/integration, root test:scripts:workers)
+├── run-weighted-shard.ts
+│                     Run a lane's bun test command for one CI shard by tracked weights (API integration test:coverage:integration)
 ├── verify.ts         check → test --coverage → build --all (bun run verify)
 ├── clean.ts          Remove build artifacts (bun run clean; --rust adds the cargo target directories)
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)
@@ -75,7 +77,8 @@ importing the specific module in new code:
 | `runtime-build.ts`        | Cargo runtime per release target: triple map, glibc floor, prebuilt-dir resolution, staged-binary checks |
 | `executable-header.ts`    | ELF / Mach-O / PE header reader: format, CPU, ELF interpreter, highest `GLIBC_` version                  |
 | `test-workers.ts`         | Test-lane worker plan, weighted partition, strict verdict, JUnit merge (+ test-worker-process.ts)        |
-| `test-lane-weights.ts`    | Tracked per-file weights that balance the root and API integration lanes' workers                        |
+| `test-lane-weights.ts`    | Tracked per-file weights that balance the root and API integration lanes' workers and CI shards          |
+| `weighted-shard.ts`       | Rewrites a `--shard=i/N` lane command into the shard's weighted file list                                |
 | `junit-report.ts`         | Reads Bun's JUnit XML; shared by the QA gate and the worker lanes                                        |
 | `actions-lint/`           | Pinned workflow static analysis: manifest, bootstrap, tasks                                              |
 | `pass-stamp.ts`           | Local "this task passed for these inputs" stamps: key, read, write, run-or-replay                        |

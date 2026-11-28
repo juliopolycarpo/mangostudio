@@ -926,20 +926,36 @@ Round-robin is derived by each shard from the file set alone, so the same commit
 always produces the same partition and a leak is reproducible from the SHA.
 Measured on the 101-file lane (Bun 1.4.0, 85.3s total, `--shard=i/8`):
 
-| Split                            | Critical shard | Reproducible |
-| -------------------------------- | -------------- | ------------ |
-| `--timings`, balanced (rotates)  | 20.3s          | no           |
-| Round-robin (what CI shards run) | 29.9s          | yes          |
+| Split                           | Critical shard | Reproducible |
+| ------------------------------- | -------------- | ------------ |
+| `--timings`, balanced (rotates) | 20.3s          | no           |
+| Round-robin (`--shard=i/N`)     | 29.9s          | yes          |
 
-+9.6s, and cheap because one file (`spawn-runtime-child`, 20.3s) is 24% of the
-lane and is the floor under _any_ split — the balancing had little left to win.
-Determinism verified rather than assumed: two consecutive no-timings runs
-produced byte-identical partitions, union 101 files, no duplicates.
+The rule is that the partition is a function of the commit, and round-robin was
+one way to meet it. The tracked weights are another: they are committed, like the
+file list, so the CI coverage shards now split by them too (see
+[Balancing workers by tracked weights](#balancing-workers-by-tracked-weights)).
+The same commit gives the same files in the same shard and the same order inside
+it, and no timings snapshot goes into the split, so a retried shard gets its
+first attempt's partition.
+
+The round-robin cost showed up at two shards. The lane has 168 files, and the
+JUnit `time` of each file, averaged over four main CI runs (2026-11-27, 236 s
+in all), puts 65 s and 171 s on the two round-robin shards: one of them holds
+`slow-route-idle-timeout`, `terminal-socket` and `rust-runtime-qualification`.
+The same per-file times give 118 s and 118 s on the two weighted shards, and
+57 s to 61 s on four. Those are sums of measured file times under the new
+partition, not a measured weighted run.
+`scripts/tests/weighted-shard.unit.test.ts` pins the partition for the current
+file set: every file in one shard, the same partition on a second call and on a
+reversed file list, and, for 2 to 8 shards, a spread of no more than the heaviest
+file and no shard more than 5% above the mean.
 
 Two things this does **not** buy, so do not read more into it:
 
-- The partition is stable for a given file set, not across them. Adding or
-  deleting an integration file shifts the whole stride.
+- The partition is stable for a given file set and weight table, not across them.
+  Adding a file or changing a weight moves files between shards, and so changes
+  their companions once.
 - Determinism is not immunity. It makes a leak reproducible; it does not stop
   one. Detection is [the randomized-order nightly](#randomized-order)'s job, and
   a soak of 48 shard runs across six partitions (two round-robin, four rotated)
@@ -951,17 +967,18 @@ escalation is to unshard `api-integration` and run it whole in its own CI job th
 way the frontend lane does — correct by construction, at 85.3s on the critical
 path instead of 29.9s.
 
-The rule is that the partition is a function of the commit. Round-robin is one
-way to meet it, and the plain `test:integration` run now meets it with tracked
-weights: the same commit gives the same files in the same workers and the same
-order inside each worker (path order, which Bun keeps; the contract test pins
-it). The split changes every file's companions once, and a worker's companions
-are no longer those of a CI `--shard=i/N` shard of the same width. Eight runs of
-the weighted lane (three measured, five more as a soak) had no failure and ran
-the same 1,309 cases as the round-robin lane. If a weighted run fails where a
-round-robin run passes, the cause is a leak the old companions hid. Report it
-with the files that shared the worker, and put the lane back on `--shard` by
-removing its entry from `LANE_WEIGHTS` while the leak is fixed.
+The plain `test:integration` run meets the same rule with the same weights: the
+same commit gives the same files in the same workers and the same order inside
+each worker (path order, which Bun keeps; the contract test pins it), and a
+worker of width N holds the files of CI shard i/N, so `MANGO_TEST_WORKERS=2`
+reproduces a two-shard CI split. The split changes every file's companions once.
+Eight runs of the weighted worker lane (three measured, five more as a soak) had
+no failure and ran the same 1,309 cases as the round-robin lane. If a weighted
+run fails where a round-robin run passes, the cause is a leak the old companions
+hid. Report it with the files that shared the worker or shard, and put the lane
+back on `--shard` by removing its entry from `LANE_WEIGHTS` while the leak is
+fixed (`scripts/run-weighted-shard.ts` leaves a lane without weights on Bun's
+split).
 
 #### Balancing workers by tracked weights
 
@@ -997,8 +1014,11 @@ integration lanes now balance by weights that are source:
   (`--changed` or a name filter, one process), Windows at one worker (the serial
   command, the default except for the root lane) and the API unit lane (`--shard`).
   Windows at two or more workers splits by `WINDOWS_LANE_WEIGHTS`, and a lane without
-  an entry there uses its `LANE_WEIGHTS` table. CI's
-  shards and both coverage scripts also stay on `--shard`, with Bun's timings.
+  an entry there uses its `LANE_WEIGHTS` table. CI's shards of the api-integration lane
+  split by the same weights: `test:coverage:integration` runs through
+  `scripts/run-weighted-shard.ts`, which swaps `--shard=i/N` and the lane directory for
+  that shard's `./path` files (and fails on a malformed `--shard` instead of running the
+  lane whole). The other coverage scripts stay on `--shard`, with Bun's timings.
 - No test asserts a timing. `test-lane-weights.unit.test.ts` checks that every
   listed path is a file the lane owns, each weight is an integer above 1, the keys
   are in path order, the split is the same whatever order the files arrive in, and
@@ -1007,7 +1027,10 @@ integration lanes now balance by weights that are source:
 
 To refresh the weights, run the lane three times, average each file's
 `<testsuite time>` in `.mango/artifacts/test-workers/<lane>.xml`, round as above
-and keep the keys sorted. A refresh is optional.
+and keep the keys sorted. A refresh is manual and nothing automates it or flags a
+stale table: `test-lane-weights.unit.test.ts` pins only that listed paths exist,
+and `weighted-shard.unit.test.ts` pins the balance the table gives the current file
+set. A file added since the last refresh weighs 1 until someone lists it.
 
 Measured on a 28-CPU host shared with other work (load average 4 to 25 at the
 start of a run), median of three runs, each lane run directly:
