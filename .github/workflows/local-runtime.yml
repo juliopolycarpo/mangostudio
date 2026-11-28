@@ -21,6 +21,10 @@ jobs:
   build:
     name: Build (linux-x64)
     runs-on: ubuntu-latest
+    # Settle timer on a main push; see Preflight in ci.yml.
+    environment:
+      name: ${{ github.event_name == 'push' && 'main-ci-settle' || '' }}
+      deployment: false
     timeout-minutes: 20
     outputs:
       artifact: local-runtime-linux-x64

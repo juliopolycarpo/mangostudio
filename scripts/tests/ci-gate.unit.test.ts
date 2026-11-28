@@ -201,28 +201,60 @@ describe('ci.yml trigger and concurrency policy', () => {
     expect(setting, `expected ${name}.yml workflow cancel-in-progress: ${expected}`).toBe(expected);
   });
 
-  // A superseded main run should be cancelled before it takes a runner. Only
-  // the first job can hold the run back, and only a push may wait: a pull
-  // request waiting five minutes per commit would cost more than it saves.
-  test('a main push waits out the settle timer before Preflight takes a runner', () => {
-    const preflight = extractJobBlock(workflow, 'changes');
-    const environment = /^ {4}environment:\n {6}name: (.+)\n {6}deployment: (.+)$/m.exec(preflight);
+  // A superseded main run should be cancelled before it takes a runner. A job
+  // without `needs` starts with the run, so every one of them must wait, in
+  // ci.yml and in the workflows it calls; a job with `needs` waits through
+  // them. Only a push may wait: a pull request waiting five minutes per commit
+  // would cost more than it saves.
+  test('every job a main push starts first waits out the settle timer', () => {
+    const SETTLE_NAME = `${EXPR} github.event_name == 'push' && 'main-ci-settle' || '' }}`;
+    const settleProblems = (file: string, job: string, block: string): string[] => {
+      const environment = /^ {4}environment:\n {6}name: (.+)\n {6}deployment: (.+)$/m.exec(block);
+      const where = `(${file} ${job}.environment)`;
+      if (environment?.[1] !== SETTLE_NAME) {
+        return [`${where}: expected name ${SETTLE_NAME} | received: ${environment?.[1] ?? 'none'}`];
+      }
+      // Without `deployment: false` every main push would add a deployment record.
+      return environment[2] === 'false'
+        ? []
+        : [`${where}: expected deployment: false | received: ${environment[2]}`];
+    };
+    const isRoot = (block: string): boolean => !/^ {4}needs:/m.test(block);
 
-    expect(
-      environment?.[1],
-      `(ci.yml changes.environment.name): expected the settle environment on push only | received: ${environment?.[1]}`
-    ).toBe(`${EXPR} github.event_name == 'push' && 'main-ci-settle' || '' }}`);
-    // Without `deployment: false` every main push would add a deployment record.
-    expect(environment?.[2]).toBe('false');
-    expect(preflight, 'Preflight is the first job: nothing may run before the timer').not.toMatch(
-      /^ {4}needs:/m
-    );
-    const others = extractJobBlocks(workflow).filter(({ job }) => job !== 'changes');
-    for (const { job, block } of others) {
-      expect(block, `${job}: only Preflight names the settle environment`).not.toContain(
-        'main-ci-settle'
+    const problems: string[] = [];
+    const settled: string[] = [];
+    for (const { job, block } of extractJobBlocks(workflow)) {
+      if (!isRoot(block)) {
+        if (block.includes('main-ci-settle')) {
+          problems.push(`(ci.yml ${job}): a job with needs must not wait a second five minutes`);
+        }
+        continue;
+      }
+      const called = /^ {4}uses: \$\/\.github\/workflows\/(.+\.yml)$/m.exec(block)?.[1];
+      if (called === undefined) {
+        problems.push(...settleProblems('ci.yml', job, block));
+        settled.push(job);
+        continue;
+      }
+      const calledRoots = extractJobBlocks(readText(`.github/workflows/${called}`)).filter(
+        (calledJob) => isRoot(calledJob.block)
       );
+      for (const calledJob of calledRoots) {
+        problems.push(...settleProblems(called, calledJob.job, calledJob.block));
+        settled.push(`${job}/${calledJob.job}`);
+      }
     }
+
+    expect(problems).toEqual([]);
+    // The list also proves the scan found the jobs: an empty scan cannot pass.
+    expect(settled.sort()).toEqual([
+      'changes',
+      'check/check',
+      'cross-runtimes',
+      'dependency-audit/audit',
+      'dependency-audit/cargo-audit',
+      'local-runtime/build',
+    ]);
   });
 
   test.each(['smoke-binary', 'browser-smoke'])(

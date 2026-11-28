@@ -27,6 +27,10 @@ jobs:
   audit:
     name: Dependency Audit
     runs-on: ubuntu-latest
+    # Settle timer on a main push; see Preflight in ci.yml.
+    environment:
+      name: ${{ github.event_name == 'push' && 'main-ci-settle' || '' }}
+      deployment: false
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -50,6 +54,10 @@ jobs:
     # Reuse deny.toml's RustSec policy; the protocol lane owns the other checks.
     name: Cargo Advisory Audit
     runs-on: ubuntu-latest
+    # Settle timer on a main push; see Preflight in ci.yml.
+    environment:
+      name: ${{ github.event_name == 'push' && 'main-ci-settle' || '' }}
+      deployment: false
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
