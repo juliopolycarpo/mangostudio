@@ -5,7 +5,7 @@
 // legs run this once per OS family; it verifies every binary it produces from
 // its header, and asks it its version when this machine can run it.
 // Dependency-free: CI runs it with `bun --no-install`.
-// Usage: bun run build:runtime [--platform <ids>] [--os linux|darwin|windows] [--zig] [--rustup] [--dev] [--out <dir>]
+// Usage: bun run build:runtime [--platform <ids>] [--os linux|darwin|windows] [--zig] [--rustup] [--dev] [--out <dir>] [--prebuilt-unstamped <path>]
 
 import { chmodSync, copyFileSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
@@ -19,6 +19,7 @@ import type { BinaryTarget } from './lib/release-targets';
 import { resolveReleaseVersion } from './lib/release-version';
 import { type RuntimeArtifactIdentity, writeRuntimeArtifactReceipt } from './lib/runtime-artifact';
 import {
+  assertUnstampedRuntime,
   cargoRuntimeBuildCommand,
   cargoRuntimeOutputPath,
   cargoTargetDir,
@@ -44,6 +45,8 @@ Flags:
   --dev             Stamp the runtime \`dev\`, the version a source checkout's hub accepts
   --out <dir>       Output directory (default: .mango/runtime)
   --artifact-profile <profile>  Record a verified artifact for a clean checkout at SOURCE_SHA
+  --prebuilt-unstamped <path>  Use this unstamped runtime instead of running cargo (one platform).
+                    Staging, stamping and every verification still run.
   --help            Show this help message`);
   process.exit(0);
 }
@@ -56,25 +59,40 @@ async function buildOne(
     zig: boolean;
     rustup: boolean;
     artifact?: RuntimeArtifactIdentity;
+    /** An already verified unstamped binary that stands in for cargo's output. */
+    prebuiltUnstamped?: string;
   }
 ): Promise<void> {
-  const command = cargoRuntimeBuildCommand(target.arch, { zig: context.zig });
-  header(`Runtime ${target.arch} (${command.at(-1)})`);
-  if (context.rustup) {
-    const triple = rustTargetTriple(target.arch);
-    const added = await runCommand(`rustup:${triple}`, ['rustup', 'target', 'add', triple], {
-      cwd: ROOT_DIR,
-    });
-    if (added.exitCode !== 0) fatal(`rustup target add ${triple} exited ${added.exitCode}.`);
-  }
-  // The release version is not a compile input: cargo builds the same bytes for any version, and
-  // the stamp is written into the staged copy below, so cargo's own output stays unstamped.
-  const result = await runCommand(`runtime:${target.arch}`, command, { cwd: ROOT_DIR });
-  if (result.exitCode !== 0) {
-    fatal(`cargo exited ${result.exitCode} building the ${target.arch} runtime.`);
+  let built: string;
+  if (context.prebuiltUnstamped === undefined) {
+    const command = cargoRuntimeBuildCommand(target.arch, { zig: context.zig });
+    header(`Runtime ${target.arch} (${command.at(-1)})`);
+    if (context.rustup) {
+      const triple = rustTargetTriple(target.arch);
+      const added = await runCommand(`rustup:${triple}`, ['rustup', 'target', 'add', triple], {
+        cwd: ROOT_DIR,
+      });
+      if (added.exitCode !== 0) fatal(`rustup target add ${triple} exited ${added.exitCode}.`);
+    }
+    // The release version is not a compile input: cargo builds the same bytes for any version, and
+    // the stamp is written into the staged copy below, so cargo's own output stays unstamped.
+    const result = await runCommand(`runtime:${target.arch}`, command, { cwd: ROOT_DIR });
+    if (result.exitCode !== 0) {
+      fatal(`cargo exited ${result.exitCode} building the ${target.arch} runtime.`);
+    }
+    built = cargoRuntimeOutputPath(cargoTargetDir(ROOT_DIR), target);
+  } else {
+    // Only the compilation is skipped: the copy, the stamp, the slot read-back and every
+    // verification below run on a reused base exactly as on cargo's output.
+    built = context.prebuiltUnstamped;
+    header(`Runtime ${target.arch} (prebuilt unstamped base ${built})`);
+    try {
+      assertUnstampedRuntime(built);
+    } catch (caught) {
+      fatal(caught instanceof Error ? caught.message : String(caught));
+    }
   }
 
-  const built = cargoRuntimeOutputPath(cargoTargetDir(ROOT_DIR), target);
   const staged = prebuiltRuntimePath(context.outDir, target);
   mkdirSync(dirname(staged), { recursive: true });
   copyFileSync(built, staged);
@@ -114,7 +132,7 @@ async function buildOne(
 if (import.meta.main) {
   const { flags, values, positional } = parseArgs({
     booleanFlags: ['--zig', '--rustup', '--dev'],
-    valueFlags: ['--platform', '--os', '--out', '--artifact-profile'],
+    valueFlags: ['--platform', '--os', '--out', '--artifact-profile', '--prebuilt-unstamped'],
   });
   if (flags['--help']) printHelp();
   assertNoUnexpectedArguments(positional);
@@ -155,6 +173,13 @@ if (import.meta.main) {
     fatal(caught instanceof Error ? caught.message : String(caught));
   }
   if (targets.length === 0) fatal('No runtime platform matches --platform and --os.');
+  const prebuiltUnstamped = values['--prebuilt-unstamped'];
+  // One file cannot stand in for several platforms' cargo output.
+  if (prebuiltUnstamped !== undefined && targets.length !== 1) {
+    fatal(
+      `expected --prebuilt-unstamped with exactly one platform | received: ${targets.map((target) => target.arch).join(', ')}`
+    );
+  }
 
   const out = values['--out'] ?? join('.mango', 'runtime');
   const outDir = isAbsolute(out) ? out : join(ROOT_DIR, out);
@@ -165,6 +190,7 @@ if (import.meta.main) {
       zig: flags['--zig'] ?? false,
       rustup: flags['--rustup'] ?? false,
       artifact,
+      prebuiltUnstamped,
     });
   }
   success(`Built ${targets.length} runtime(s) at v${version} into ${outDir}`);

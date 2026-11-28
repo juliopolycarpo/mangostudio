@@ -234,6 +234,24 @@ export function cargoRuntimeOutputPath(targetDir: string, target: BinaryTarget):
 }
 
 /**
+ * Throws unless `path` holds exactly one release stamp slot and it is still
+ * empty. A prebuilt base stands in for cargo's own output, which is always
+ * unstamped; `stampRuntimeFile` returns early when the slot already holds the
+ * requested version, so a stamped base would otherwise pass without a word.
+ *
+ * @example
+ * assertUnstampedRuntime('/tmp/base/mangostudio-runtime'); // throws if the slot holds a version
+ */
+export function assertUnstampedRuntime(path: string): void {
+  const stamp = readReleaseStamp(readFileSync(path));
+  if (stamp.version !== null) {
+    throw new Error(
+      `expected an unstamped runtime at ${path} | received release stamp: ${stamp.version}`
+    );
+  }
+}
+
+/**
  * The release platform this machine is, or `null` when no release targets it.
  * Linux hosts are taken to be glibc: the musl platforms are built on purpose,
  * never implied by the machine running the build.
