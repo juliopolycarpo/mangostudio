@@ -246,6 +246,10 @@ arquivos e o layout de dois binários permanecem iguais. Os toolchains Rust são
   vem do Visual C++ Redistributable e não do Windows, e o runtime não iniciaria
   numa máquina sem ele. A verificação de staging rejeita qualquer runtime
   Windows que importe DLLs `VCRUNTIME*`/`MSVCP*`.
+- **Link reproduzível no Windows.** A mesma tabela passa `/Brepro` ao
+  `link.exe`, que deriva o timestamp do PE e os carimbos do diretório de debug
+  da própria imagem, não do relógio. Sem ele, dois builds das mesmas entradas
+  diferiam em 24 bytes.
 - **Perfil de release.** O `[profile.release]` do workspace constrói o runtime com
   `opt-level = 3`, LTO fat, uma codegen unit e `strip = true`; veja
   [runtime-metrics.md](runtime-metrics.md) para o custo em tamanho e tempo de

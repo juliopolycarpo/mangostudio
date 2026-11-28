@@ -365,6 +365,10 @@ stay the same. Rust toolchains remain:
   the gap). The Bun hub has no such import either. A `RUSTFLAGS` override
   replaces that setting, so the staging check also rejects any Windows runtime
   importing `VCRUNTIME*`/`MSVCP*` DLLs.
+- **Reproducible link on Windows.** The same table passes `/Brepro` to
+  `link.exe`, which derives the PE timestamp and the debug-directory stamps from
+  the image instead of the clock. Without it two builds of the same inputs
+  differed in 24 bytes.
 - **Release profile.** The workspace `[profile.release]` builds the runtime with
   `opt-level = 3`, fat LTO, one codegen unit, and `strip = true`; see
   [runtime-metrics.md](runtime-metrics.md) for the size and build-time
