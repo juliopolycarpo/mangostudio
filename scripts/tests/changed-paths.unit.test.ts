@@ -332,6 +332,9 @@ describe('relevance policy parity', () => {
     'scripts/lib/ci-lanes.ts',
     'scripts/lib/changed-paths.ts',
     'scripts/ci/changed-paths.ts',
+    // The push coverage rule decides whether the legs run, so a change to it is analyzed too.
+    'scripts/lib/codeql-rust-coverage.ts',
+    'scripts/ci/codeql-rust-coverage.ts',
   ])('a change to %j selects the CodeQL Rust legs', (path) => {
     expect(codeqlRustRelevant([path]), path).toBe(true);
     expect(codeqlRustRelevant(['docs/guide.md', path]), `docs/guide.md + ${path}`).toBe(true);

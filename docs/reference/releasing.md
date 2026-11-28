@@ -683,8 +683,9 @@ individually and keep no window.
 
 The `approve` job promotes the existing shipping distribution from that CI
 run; Canary never compiles it again. It qualifies the CI Gate, shipping builder,
-six native binary smoke jobs, container smoke, same-source CodeQL analyses and
-relevant Cargo Shim/Protocol workflows. The main runtime cache seed remains
+six native binary smoke jobs, container smoke, same-source CodeQL analyses (the
+Rust ones may instead be covered by an earlier main analysis) and relevant Cargo
+Shim/Protocol workflows. The main runtime cache seed remains
 mandatory through the successful whole-CI verdict. See
 [the qualification policy](canary-validation.md) for exact job identities.
 

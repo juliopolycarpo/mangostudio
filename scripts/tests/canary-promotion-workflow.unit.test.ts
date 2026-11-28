@@ -58,6 +58,23 @@ test('every publishing job rechecks registry state after acquiring its approval 
   }
 });
 
+test('every job that qualifies the source can read the CodeQL analyses that cover a skipped Rust leg', () => {
+  // prepare-canary-approval.ts qualifies in these three jobs; a skipped Rust leg is
+  // accepted only after reading main's code scanning analyses, which needs this grant.
+  const value = workflow();
+  const qualifying = Object.entries(value.jobs).filter(([, job]) =>
+    (job.steps ?? []).some((step) => step.run?.includes('prepare-canary-approval.ts'))
+  );
+  expect(qualifying.map(([name]) => name).sort()).toEqual([
+    'approve',
+    'github-release-canary',
+    'npm-canary',
+  ]);
+  for (const [name, job] of qualifying) {
+    expect(job.permissions?.['security-events'], `${name}: security-events`).toBe('read');
+  }
+});
+
 test('a successful approval always reserves its original archive after attestation', () => {
   const job = workflow().jobs.approve;
   expect(job?.name).toBe(

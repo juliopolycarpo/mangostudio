@@ -13,7 +13,7 @@ This helper does not publish packages or releases.
 | `.github/workflows/ci.yml`          | `CI Gate`, `Distribution / Build immutable distribution`, all six native `Smoke — Binary / Binary <platform>` legs, and `Smoke — Container / Container transport` |
 | `.github/workflows/cargo-shim.yml`  | `Cargo Shim Gate` when the push touches its qualification paths                                                                                                   |
 | `.github/workflows/protocol-ci.yml` | `Protocol Gate` when the push touches its protocol paths                                                                                                          |
-| `.github/workflows/codeql.yml`      | `Analyze (javascript-typescript)`, `Analyze (rust)`, and `Analyze (rust, windows)` on every main push                                                             |
+| `.github/workflows/codeql.yml`      | `Analyze (javascript-typescript)` on every main push; `Analyze (rust)` and `Analyze (rust, windows)` on the SHA, or a covering earlier analysis (see below)       |
 
 Each run must belong to this repository and its expected workflow ID/path, use
 `push` on `main`, name the selected SHA, and finish successfully. The qualifier
@@ -73,8 +73,36 @@ first parent alone is insufficient. The qualifier uses the canonical Cargo Shim
 and Protocol predicates. If those predicate files differ at the selected source,
 if the exact push range is unknown/divergent, or if GitHub's 300-file comparison
 limit could truncate it, both siblings are required conservatively. An existing
-sibling run is checked even when its path filter was irrelevant. CodeQL is always
-required.
+sibling run is checked even when its path filter was irrelevant. The CodeQL run
+and its JavaScript analysis are always required.
+
+The two CodeQL Rust analyses follow a separate rule, because `codeql.yml` skips
+them on a main push whose Rust inputs match an earlier analysis. The qualifier
+accepts either both Rust jobs succeeded on the SHA, or both skipped and covered.
+It never trusts the run's own skip decision. Instead it reads main's code
+scanning analyses (`GET /code-scanning/analyses?ref=refs/heads/main`, newest
+first, at most five pages), keeps commits whose `CodeQL` analyses from the
+`analyze-rust` job have no upload error in both `/language:rust` and
+`/language:rust/windows`, and tries the newest five. Those rows only nominate
+candidates, because an uploader chooses a row's ref, commit and category. A
+candidate counts only with Actions evidence: a completed `codeql.yml` run in
+this repository on `main` for that exact SHA (push, schedule or manual dispatch)
+whose latest attempt has `Analyze (rust)` and `Analyze (rust, windows)` both
+successful, from a workflow file with the qualification revision's bytes. A
+candidate covers the SHA when it is the SHA itself, or when the compare API shows
+a complete linear range (either direction, under 300 files, both sides of
+renames) with no path matching `CODEQL_RUST_PATTERN`. The comparison is against the last analyzed commit, never
+the push's parent: a superseded main run can leave a Rust change without an
+analysis, and the next commit then differs from the last analyzed one by that
+change. A skipped, uncovered SHA is rejected, as is any lookup failure, a partial
+Rust verdict (one leg ran, one skipped) and a source whose `scripts/lib/ci-lanes.ts`
+differs from the qualification revision. The receipt records the outcome in
+`codeqlRust`. This lookup needs `security-events: read` in the three `canary.yml`
+jobs that qualify.
+
+Cargo Shim and Protocol CI do not have this protection: their push path filter
+compares the push's own range, so a Rust change whose run was cancelled does not
+force the next push to rerun them.
 
 Authentication failures, failed API calls, malformed pages and missing mandatory
 results fail closed. The receipt records source identity, job IDs and attempts,

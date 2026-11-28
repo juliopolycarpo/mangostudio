@@ -116,11 +116,94 @@ class FakeQualificationApi implements CanaryValidationApi {
       this.values.set(`actions/runs/${id}/jobs?filter=all&per_page=100`, jobs(id, names));
     }
   }
+  readonly failures = new Map<string, string>();
   get(path: string): unknown {
     this.requests.push(path);
     const key = path.replace('repos/owner/repo/', '');
+    const failure = this.failures.get(key);
+    if (failure) throw new Error(failure);
     if (!this.values.has(key)) throw new Error(`Unexpected GitHub API request: ${path}`);
     return this.values.get(key);
+  }
+  /** The CodeQL run succeeded with the Rust legs skipped by the relevance rule. */
+  skipRustLegs() {
+    // The runner keeps the unexpanded matrix expression as the name of a job skipped by `if`.
+    const unexpanded = `Analyze (${'$'}{{ matrix.label }})`;
+    const skipped = [unexpanded, unexpanded].map((name, index) => ({
+      id: 4590 + index,
+      run_id: 45,
+      name,
+      run_attempt: 1,
+      status: 'completed',
+      conclusion: 'skipped',
+    }));
+    this.values.set('actions/runs/45/jobs?filter=all&per_page=100', [
+      ...jobs(45, ['Analyze (javascript-typescript)']),
+      ...skipped,
+    ]);
+  }
+  /** Main's recorded analyses: one entry per category for each listed commit. */
+  recordRustAnalyses(entries: readonly { commit: string; categories?: readonly string[] }[]) {
+    this.values.set(
+      'code-scanning/analyses?ref=refs/heads/main&tool_name=CodeQL&per_page=100&page=1',
+      entries.flatMap(
+        ({ commit, categories = ['/language:rust', '/language:rust/windows'] }, index) =>
+          categories.map((category) => ({
+            ref: 'refs/heads/main',
+            commit_sha: commit,
+            analysis_key: '.github/workflows/codeql.yml:analyze-rust',
+            category,
+            error: '',
+            created_at: new Date(Date.UTC(2026, 10, 27, 12 - index)).toISOString(),
+            tool: { name: 'CodeQL' },
+          }))
+      )
+    );
+  }
+  /**
+   * The Actions side of a candidate: the codeql.yml run for `commit` with its Rust jobs and
+   * the pinned workflow bytes. Defaults describe a green push run on main.
+   */
+  recordCandidateRun(
+    commit: string,
+    options: {
+      branch?: string;
+      event?: string;
+      rustConclusion?: string;
+      windowsConclusion?: string;
+      workflowBytes?: string;
+    } = {}
+  ) {
+    const runId = 7000 + parseInt(commit.slice(0, 2), 16);
+    this.values.set(`contents/.github/workflows/codeql.yml?ref=${commit}`, {
+      encoding: 'base64',
+      content: Buffer.from(
+        options.workflowBytes ?? readFileSync('.github/workflows/codeql.yml', 'utf8')
+      ).toString('base64'),
+    });
+    this.values.set(`actions/workflows/45/runs?branch=main&head_sha=${commit}&per_page=100`, [
+      run(runId, 'codeql.yml', 45, {
+        head_sha: commit,
+        head_branch: options.branch ?? 'main',
+        event: options.event ?? 'push',
+      }),
+    ]);
+    this.values.set(
+      `actions/runs/${runId}/jobs?filter=all&per_page=100`,
+      jobs(runId, ['Analyze (rust)', 'Analyze (rust, windows)']).map((job, index) => ({
+        ...job,
+        conclusion: (index === 0 ? options.rustConclusion : options.windowsConclusion) ?? 'success',
+      }))
+    );
+  }
+  /** `ancestor...descendant` as a clean, linear range changing `files`. */
+  recordRange(ancestor: string, descendant: string, files: readonly string[]) {
+    this.values.set(`compare/${ancestor}...${descendant}`, {
+      status: files.length === 0 ? 'identical' : 'ahead',
+      base_commit: { sha: ancestor },
+      merge_base_commit: { sha: ancestor },
+      files: files.map((filename) => ({ filename, status: 'modified' })),
+    });
   }
   list(path: string, _key: string): readonly unknown[] {
     const value = this.get(path);
@@ -299,6 +382,286 @@ describe('canary required validation producers', () => {
     const api = new FakeQualificationApi();
     api.absent(45);
     expect(() => qualifyCanarySource(source, api)).toThrow('codeql.yml: expected same-SHA');
+  });
+  describe('CodeQL Rust legs skipped by the relevance rule', () => {
+    const analyzed = 'e'.repeat(40);
+
+    function skippedApi() {
+      const api = new FakeQualificationApi();
+      api.skipRustLegs();
+      api.values.set(`contents/scripts/lib/ci-lanes.ts?ref=${source.sourceSha}`, {
+        encoding: 'base64',
+        content: readFileSync('scripts/lib/ci-lanes.ts').toString('base64'),
+      });
+      return api;
+    }
+
+    test('both Rust legs analyzed on the SHA never consult the analyses API', () => {
+      const api = new FakeQualificationApi();
+      const receipt = qualifyCanarySource(source, api);
+      expect(receipt.codeqlRust).toMatchObject({ analyzed: true });
+      expect(api.requests.filter((path) => path.includes('code-scanning'))).toEqual([]);
+    });
+
+    test('accepts skipped legs when an earlier analysis differs only by non-Rust paths', () => {
+      const api = skippedApi();
+      api.recordRustAnalyses([{ commit: analyzed }]);
+      api.recordCandidateRun(analyzed);
+      api.recordRange(analyzed, source.sourceSha, ['docs/guide.md', 'apps/api/src/index.ts']);
+      const receipt = qualifyCanarySource(source, api);
+      expect(receipt.codeqlRust).toMatchObject({ analyzed: false });
+      expect(receipt.codeqlRust?.reason).toContain(analyzed);
+      expect(
+        receipt.siblings
+          .find((sibling) => sibling.workflow === 'codeql.yml')
+          ?.jobs.map((job) => job.name)
+      ).toEqual(['Analyze (javascript-typescript)']);
+    });
+
+    test('accepts a later analysis whose Rust inputs equal the source', () => {
+      const api = skippedApi();
+      const later = 'd'.repeat(40);
+      api.recordRustAnalyses([{ commit: later }]);
+      api.recordCandidateRun(later, { event: 'schedule' });
+      // Source is the ancestor: compare later...source is 'behind', source...later is the real range.
+      api.values.set(`compare/${later}...${source.sourceSha}`, {
+        status: 'behind',
+        base_commit: { sha: later },
+        merge_base_commit: { sha: source.sourceSha },
+        files: [],
+      });
+      api.recordRange(source.sourceSha, later, ['README.md']);
+      expect(qualifyCanarySource(source, api).codeqlRust?.analyzed).toBe(false);
+    });
+
+    describe('code scanning rows are nominations, never the proof', () => {
+      /** Rows say X is analyzed and the range to the source is docs-only; Actions evidence is the variable. */
+      function nominatedApi() {
+        const api = skippedApi();
+        api.recordRustAnalyses([{ commit: analyzed }]);
+        api.recordRange(analyzed, source.sourceSha, ['docs/guide.md']);
+        return api;
+      }
+      const missingEvidence = (reason: string) => `${analyzed} (no Actions evidence: ${reason}`;
+
+      test('forged rows without any codeql.yml run for the candidate are rejected', () => {
+        // An uploader can post an empty SARIF for X under refs/heads/main; X's Rust code never ran.
+        const api = nominatedApi();
+        api.values.set(`contents/.github/workflows/codeql.yml?ref=${analyzed}`, {
+          encoding: 'base64',
+          content: readFileSync('.github/workflows/codeql.yml').toString('base64'),
+        });
+        api.values.set(
+          `actions/workflows/45/runs?branch=main&head_sha=${analyzed}&per_page=100`,
+          []
+        );
+        expect(() => qualifyCanarySource(source, api)).toThrow(
+          missingEvidence(
+            `expected a completed codeql.yml run on main for ${analyzed} (push, schedule or workflow_dispatch); received none`
+          )
+        );
+      });
+
+      test.each(['failure', 'cancelled', 'skipped'])(
+        'rows plus a run whose Rust job was %s are rejected',
+        (conclusion) => {
+          const api = nominatedApi();
+          api.recordCandidateRun(analyzed, { windowsConclusion: conclusion });
+          expect(() => qualifyCanarySource(source, api)).toThrow(
+            `${analyzed} (no Actions evidence: Analyze (rust) and Analyze (rust, windows) did not both succeed in a codeql.yml run on main for ${analyzed}; received run`
+          );
+        }
+      );
+
+      test('rows plus a Linux-only success are rejected', () => {
+        const api = nominatedApi();
+        api.recordCandidateRun(analyzed, { windowsConclusion: 'cancelled' });
+        expect(() => qualifyCanarySource(source, api)).toThrow('Analyze (rust, windows)');
+      });
+
+      test('rows plus a green run on a non-main branch are rejected', () => {
+        const api = nominatedApi();
+        api.recordCandidateRun(analyzed, { branch: 'attacker-branch' });
+        expect(() => qualifyCanarySource(source, api)).toThrow(
+          missingEvidence(`expected a completed codeql.yml run on main for ${analyzed}`)
+        );
+      });
+
+      test('rows plus a green pull request run are rejected', () => {
+        const api = nominatedApi();
+        api.recordCandidateRun(analyzed, { event: 'pull_request' });
+        expect(() => qualifyCanarySource(source, api)).toThrow(
+          missingEvidence(`expected a completed codeql.yml run on main for ${analyzed}`)
+        );
+      });
+
+      test('rows plus a green run from a workflow file with other bytes are rejected', () => {
+        const api = nominatedApi();
+        api.recordCandidateRun(analyzed, { workflowBytes: 'name: CodeQL\njobs: {}\n' });
+        expect(() => qualifyCanarySource(source, api)).toThrow(
+          missingEvidence(
+            `.github/workflows/codeql.yml at ${analyzed} differs from the qualification revision`
+          )
+        );
+      });
+
+      test('a manually dispatched green run on main is evidence', () => {
+        const api = nominatedApi();
+        api.recordCandidateRun(analyzed, { event: 'workflow_dispatch' });
+        expect(qualifyCanarySource(source, api).codeqlRust?.analyzed).toBe(false);
+      });
+
+      test('a forged newest candidate falls back to a genuinely evidenced older one', () => {
+        const forged = 'c'.repeat(40);
+        const api = skippedApi();
+        api.recordRustAnalyses([{ commit: forged }, { commit: analyzed }]);
+        api.recordCandidateRun(analyzed);
+        api.values.set(`contents/.github/workflows/codeql.yml?ref=${forged}`, {
+          encoding: 'base64',
+          content: readFileSync('.github/workflows/codeql.yml').toString('base64'),
+        });
+        api.values.set(`actions/workflows/45/runs?branch=main&head_sha=${forged}&per_page=100`, []);
+        api.recordRange(forged, source.sourceSha, ['docs/a.md']);
+        api.recordRange(analyzed, source.sourceSha, ['docs/b.md']);
+        const receipt = qualifyCanarySource(source, api);
+        expect(receipt.codeqlRust?.reason).toContain(analyzed);
+        expect(receipt.codeqlRust?.reason).not.toContain(forged);
+      });
+    });
+
+    test('rejects a Rust change whose own analysis was cancelled and a docs commit followed', () => {
+      // A (Rust) was superseded before analyzing; the SHA is docs-only after A. The
+      // last analyzed commit differs from the SHA by A's Rust file, so the SHA is not covered.
+      const api = skippedApi();
+      api.recordRustAnalyses([{ commit: analyzed }]);
+      api.recordRange(analyzed, source.sourceSha, [
+        'docs/guide.md',
+        'crates/mango-protocol/src/lib.rs',
+      ]);
+      expect(() => qualifyCanarySource(source, api)).toThrow(
+        `no earlier or later main analysis covers it; expected a commit with Analyze (rust) and Analyze (rust, windows) analyses and no CodeQL-Rust-relevant path difference; received no candidate covers ${source.sourceSha}: ${analyzed} (Rust-relevant change)`
+      );
+    });
+
+    test('rejects when no commit has both Rust analyses', () => {
+      const api = skippedApi();
+      api.recordRustAnalyses([{ commit: analyzed, categories: ['/language:rust'] }]);
+      expect(() => qualifyCanarySource(source, api)).toThrow(
+        'received no main commit has an error-free analysis in both Rust categories'
+      );
+    });
+
+    test('rejects a diverged candidate because its compare file list is not the real diff', () => {
+      const api = skippedApi();
+      api.recordRustAnalyses([{ commit: analyzed }]);
+      for (const range of [
+        `compare/${analyzed}...${source.sourceSha}`,
+        `compare/${source.sourceSha}...${analyzed}`,
+      ])
+        api.values.set(range, { status: 'diverged', files: [{ filename: 'README.md' }] });
+      expect(() => qualifyCanarySource(source, api)).toThrow(`${analyzed} (difference unproven)`);
+    });
+
+    test('rejects a comparison that may be truncated at 300 files', () => {
+      const api = skippedApi();
+      api.recordRustAnalyses([{ commit: analyzed }]);
+      api.values.set(`compare/${analyzed}...${source.sourceSha}`, {
+        status: 'ahead',
+        base_commit: { sha: analyzed },
+        merge_base_commit: { sha: analyzed },
+        files: Array.from({ length: 300 }, () => ({ filename: 'README.md' })),
+      });
+      api.values.set(`compare/${source.sourceSha}...${analyzed}`, { status: 'diverged' });
+      expect(() => qualifyCanarySource(source, api)).toThrow(`${analyzed} (difference unproven)`);
+    });
+
+    test('a file renamed from a Rust-relevant path to a non-Rust path is Rust-relevant', () => {
+      // The new name is docs, but the old side removed Rust source: both sides count.
+      const api = skippedApi();
+      api.recordRustAnalyses([{ commit: analyzed }]);
+      api.recordCandidateRun(analyzed);
+      api.values.set(`compare/${analyzed}...${source.sourceSha}`, {
+        status: 'ahead',
+        base_commit: { sha: analyzed },
+        merge_base_commit: { sha: analyzed },
+        files: [
+          {
+            filename: 'docs/old-runtime.md',
+            status: 'renamed',
+            previous_filename: 'crates/mangostudio-runtime/src/lib.rs',
+          },
+        ],
+      });
+      expect(() => qualifyCanarySource(source, api)).toThrow(`${analyzed} (Rust-relevant change)`);
+    });
+
+    test('a renamed entry without previous_filename is unproven, not irrelevant', () => {
+      const api = skippedApi();
+      api.recordRustAnalyses([{ commit: analyzed }]);
+      api.recordCandidateRun(analyzed);
+      api.values.set(`compare/${analyzed}...${source.sourceSha}`, {
+        status: 'ahead',
+        base_commit: { sha: analyzed },
+        merge_base_commit: { sha: analyzed },
+        files: [{ filename: 'docs/old-runtime.md', status: 'renamed' }],
+      });
+      api.values.set(`compare/${source.sourceSha}...${analyzed}`, { status: 'diverged' });
+      expect(() => qualifyCanarySource(source, api)).toThrow(`${analyzed} (difference unproven)`);
+    });
+
+    test('rejects when the analyses lookup fails instead of assuming coverage', () => {
+      const api = skippedApi();
+      api.failures.set(
+        'code-scanning/analyses?ref=refs/heads/main&tool_name=CodeQL&per_page=100&page=1',
+        'HTTP 403: Resource not accessible by integration'
+      );
+      expect(() => qualifyCanarySource(source, api)).toThrow('HTTP 403');
+    });
+
+    test('rejects a source whose relevance predicate differs from the qualification revision', () => {
+      const api = skippedApi();
+      api.values.set(`contents/scripts/lib/ci-lanes.ts?ref=${source.sourceSha}`, {
+        encoding: 'base64',
+        content: Buffer.from('const CODEQL_RUST_PATTERN = /nothing/;').toString('base64'),
+      });
+      api.recordRustAnalyses([{ commit: analyzed }]);
+      api.recordRange(analyzed, source.sourceSha, ['docs/guide.md']);
+      expect(() => qualifyCanarySource(source, api)).toThrow(
+        `scripts/lib/ci-lanes.ts at ${source.sourceSha} differs from the qualification revision`
+      );
+    });
+
+    test('a failed Rust leg is never treated as skipped', () => {
+      const api = skippedApi();
+      api.values.set('actions/runs/45/jobs?filter=all&per_page=100', [
+        ...jobs(45, ['Analyze (javascript-typescript)', 'Analyze (rust)']),
+        { ...jobs(45, ['Analyze (rust, windows)'])[0], conclusion: 'failure' },
+      ]);
+      expect(() => qualifyCanarySource(source, api)).toThrow(
+        'expected completed successful associated job'
+      );
+    });
+
+    test('one analyzed and one skipped Rust leg is a partial verdict', () => {
+      const api = skippedApi();
+      api.values.set('actions/runs/45/jobs?filter=all&per_page=100', [
+        ...jobs(45, ['Analyze (javascript-typescript)', 'Analyze (rust)']),
+        { ...jobs(45, ['Analyze (rust, windows)'])[0], conclusion: 'skipped' },
+      ]);
+      expect(() => qualifyCanarySource(source, api)).toThrow(
+        'expected both Rust analyses to succeed or both to be skipped'
+      );
+    });
+
+    test('the JavaScript analysis stays required when the Rust legs are skipped', () => {
+      const api = skippedApi();
+      api.values.set('actions/runs/45/jobs?filter=all&per_page=100', []);
+      api.recordRustAnalyses([{ commit: analyzed }]);
+      api.recordRange(analyzed, source.sourceSha, ['docs/guide.md']);
+      expect(() => qualifyCanarySource(source, api)).toThrow(
+        'Analyze (javascript-typescript): expected exactly one latest producer'
+      );
+    });
   });
   for (const comparison of [
     { status: 'diverged' },
