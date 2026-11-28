@@ -363,7 +363,8 @@ describe('runtime reuse callers', () => {
   test('stable releases always build from source', () => {
     const release = readText(RELEASE_WORKFLOW);
     // The release workflow never names the input or the variable ...
-    expect(release).not.toMatch(/^\s+reuse:|RUNTIME_REUSE/m);
+    expect(release).not.toMatch(/^\s+reuse:/m);
+    expect(release).not.toContain('RUNTIME_REUSE');
     // ... reaches the runtime build only through its `build` job ...
     expect(extractJobBlock(release, 'build')).toContain(
       'uses: $/.github/workflows/distribution-build.yml'
