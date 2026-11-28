@@ -48,13 +48,13 @@ import { toolIdentityRoutes } from './modules/tool-identity/http/tool-identity-r
 import { workspaceRoutes } from './modules/workspaces/http/workspace-routes';
 import { apiKeyGuard } from './plugins/api-key-guard';
 import { apiKeyVerifier } from './plugins/api-key-verification';
+import { closedBodies } from './plugins/closed-bodies';
 import { errorHandler } from './plugins/error-handler';
 import { handlerIdleTimeout } from './plugins/handler-idle-timeout';
 import { rateLimit } from './plugins/rate-limit';
 import { createRateLimitClientIdResolver } from './plugins/rate-limit-client-id';
 import { classifyRateLimit } from './plugins/rate-limit-policy';
 import { responseCompression } from './plugins/response-compression';
-import { strictBodies } from './plugins/strict-body';
 import { authRoutes } from './routes/auth';
 import { createGeneratedImageRoutes } from './routes/generated-images';
 import { hubControlRoutes } from './routes/hub-control';
@@ -102,7 +102,7 @@ const api = new Elysia({ prefix: '/api' })
   .use(errorHandler)
   // A body with a field its closed schema does not declare stays a 422, as in
   // Elysia rc.4; rc.5 strips it by default. Before every route it governs.
-  .use(strictBodies)
+  .use(closedBodies)
   // gzip for the routes in `COMPRESSED_API_ROUTES`, to non-loopback peers only;
   // see the plugin for the rules. Registered after the error handler so error
   // bodies are already final.

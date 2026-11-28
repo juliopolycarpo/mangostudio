@@ -163,6 +163,59 @@ export function withProblemDetailsMedia<T>(document: T): T {
   return amended as T;
 }
 
+/** `{ not: {} }`, the schema `Type.Never()` serializes to: nothing is valid. */
+function isNeverSchema(schema: unknown): boolean {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return false;
+  const keys = Object.keys(schema);
+  if (keys.length !== 1 || keys[0] !== 'not') return false;
+  const inner = (schema as { not: unknown }).not;
+  return !!inner && typeof inner === 'object' && Object.keys(inner).length === 0;
+}
+
+/** Rewrites, in place, every `additionalProperties: { not: {} }` under `node` to `false`. */
+function closeNeverProperties(node: unknown): void {
+  if (!node || typeof node !== 'object') return;
+  if (Array.isArray(node)) {
+    for (const item of node) closeNeverProperties(item);
+    return;
+  }
+  const record = node as Record<string, unknown>;
+  if (isNeverSchema(record.additionalProperties)) record.additionalProperties = false;
+  for (const child of Object.values(record)) closeNeverProperties(child);
+}
+
+/**
+ * Document a closed request body as `additionalProperties: false`.
+ *
+ * `closedBodies` compiles each route with `additionalProperties: Type.Never()`
+ * in place of `false`, so Elysia rejects an unknown field instead of stripping
+ * it, and the generator reads the compiled schema. The two mean the same, but
+ * `false` is what the contract always said and what client generators read best
+ * (`{ not: {} }` becomes an index signature of `never` in some). Only request
+ * bodies are rewritten: a response schema was never compiled that way. A route
+ * that already spelled it with `Type.Never()` is rewritten too, which changes
+ * how it is written and not what it says.
+ *
+ * Pure and idempotent, like `withProblemDetailsMedia`.
+ */
+export function withClosedRequestBodies<T>(document: T): T {
+  if (!document || typeof document !== 'object') return document;
+
+  const amended = structuredClone(document) as OpenApiDocument & {
+    paths?: Record<string, Record<string, OperationObject & { requestBody?: unknown }>>;
+  };
+
+  for (const methods of Object.values(amended.paths ?? {})) {
+    if (!methods || typeof methods !== 'object') continue;
+    for (const [method, operation] of Object.entries(methods)) {
+      if (!HTTP_METHODS.has(method.toLowerCase())) continue;
+      closeNeverProperties(operation?.requestBody);
+    }
+  }
+
+  return amended as T;
+}
+
 /**
  * Spec-route hooks: amend the document, and sanitize a failed generation.
  *
@@ -205,9 +258,12 @@ export const openapiProblemDetails = new Elysia({ name: 'openapi-problem-details
       return negotiateErrorRepresentation(request, set, responseValue);
     }
 
-    return new Response(JSON.stringify(withProblemDetailsMedia(responseValue)), {
-      headers: { 'content-type': 'application/json;charset=utf-8' },
-    });
+    return new Response(
+      JSON.stringify(withClosedRequestBodies(withProblemDetailsMedia(responseValue))),
+      {
+        headers: { 'content-type': 'application/json;charset=utf-8' },
+      }
+    );
   })
   .onError('global', ({ error, path }): ElysiaStatus<500, ApiErrorResponse> | undefined => {
     // Scoped to the document route this module owns. A miss on that path —
