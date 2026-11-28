@@ -7,6 +7,7 @@ import { getAuthSecretValidationMessage, getConfig } from '../../../src/lib/conf
 import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
 import { closedBodies } from '../../../src/plugins/closed-bodies';
 import { assertTestEnvironmentReady } from '../setup/test-environment';
+import { closedResponses } from './closed-responses';
 type ApiTestPlugin = Parameters<Elysia['use']>[0];
 
 /**
@@ -24,7 +25,12 @@ export function createApiTestApp(...plugins: ApiTestPlugin[]) {
   // inert for the suites that never open a socket.
   // `closedBodies` is the body-strictness `app.ts` mounts on `/api`; it has to be
   // here, ahead of the plugins, or a route test would see Elysia's stripping.
-  const app = new Elysia().use(websocket(REALTIME_WEBSOCKET_OPTIONS)).use(closedBodies);
+  // `closedResponses` is test-only: an undeclared response key fails the test, as
+  // it did on rc.4, where production now strips it.
+  const app = new Elysia()
+    .use(websocket(REALTIME_WEBSOCKET_OPTIONS))
+    .use(closedBodies)
+    .use(closedResponses);
 
   for (const plugin of plugins) {
     app.use(plugin);

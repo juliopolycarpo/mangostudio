@@ -25,7 +25,9 @@ For per-task file maps, use `docs/reference/agent-playbooks.md`.
   as before; the shared schema is not changed. Do not set `normalize: false` to get the rejection back:
   it is global and also closes open schemas, rejects query extras and turns response extras into a 500.
   `tests/integration/routes/strict-body-contract.integration.test.ts` walks every body route; a
-  route with an open root schema is listed, with a reason, in `tests/support/fixtures/strict-body-routes.ts`.- Prefer Kysely builder in application code. Use `kysely/sql` only when a migration or SQLite edge requires it.
+  route with an open root schema is listed, with a reason, in `tests/support/fixtures/strict-body-routes.ts`.
+  `createApiTestApp` also fails a response with an undeclared key (`tests/support/harness/closed-responses.ts`);
+  production strips it.- Prefer Kysely builder in application code. Use `kysely/sql` only when a migration or SQLite edge requires it.
 - Reuse config, secret-store, and provider abstractions before adding new env parsing or credential logic.
 - Keep auth, connector, and provider errors explicit and logged with context.
 
