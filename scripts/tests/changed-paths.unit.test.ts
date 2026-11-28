@@ -379,6 +379,9 @@ describe('relevance policy parity', () => {
       expect(distributionRelevant([path]), path).toBe(
         !standaloneRootTest && !new RegExp(baseline.policies.distribution).test(path)
       );
+      // Added after the baseline was captured: the rust-cache composite is a lane input of
+      // every Rust lane, like setup-zigbuild, so an edit to it must select each of them.
+      const rustCacheAction = path.startsWith('.github/actions/rust-cache/');
       const sharedDetectorInputs = [
         'scripts/lib/changed-paths.ts',
         'scripts/lib/ci-lanes.ts',
@@ -391,13 +394,15 @@ describe('relevance policy parity', () => {
           path === 'scripts/ci/dry-run-artifacts.ts' ||
           path === 'tsconfig.json' ||
           path === 'tsconfig.native-build.json' ||
-          path.startsWith('.github/actions/download-distribution/'),
+          path.startsWith('.github/actions/download-distribution/') ||
+          rustCacheAction,
         launcher:
           new RegExp(baseline.policies.launcher).test(path) || sharedDetectorInputs.includes(path),
       });
       expect(touchesProtocolSurface([path]), path).toBe(
         new RegExp(baseline.policies.protocol).test(path) ||
-          [...sharedDetectorInputs, 'scripts/ci/protocol-lanes.ts'].includes(path)
+          [...sharedDetectorInputs, 'scripts/ci/protocol-lanes.ts'].includes(path) ||
+          rustCacheAction
       );
       const rustDetectorInputs = [
         ...sharedDetectorInputs,
@@ -409,9 +414,14 @@ describe('relevance policy parity', () => {
       const matches = (globs: readonly string[]) =>
         globs.some((glob) => new Bun.Glob(glob).match(path));
       expect(classifyChangedPaths([path]), path).toEqual({
-        rust: matches(baseline.rustPaths.workspace) || rustDetectorInputs.includes(path),
+        rust:
+          matches(baseline.rustPaths.workspace) ||
+          rustDetectorInputs.includes(path) ||
+          rustCacheAction,
         qualification:
-          matches(baseline.rustPaths.qualification) || rustDetectorInputs.includes(path),
+          matches(baseline.rustPaths.qualification) ||
+          rustDetectorInputs.includes(path) ||
+          rustCacheAction,
       });
     }
   });

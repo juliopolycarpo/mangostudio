@@ -14,7 +14,10 @@ import { join } from 'node:path';
 
 import { SCOPED_CACHE_FAMILIES } from '../ci/cache-families';
 import { RUST_CACHE_FAMILIES, RUST_CACHE_WRITERS } from '../ci/rust-cache/families';
+import { RELEASE_PATTERN } from '../lib/ci-lanes';
 import { ROOT_DIR } from '../lib/config';
+import { PROTOCOL_TRIGGER_FILES } from '../lib/protocol';
+import { RUST_WORKSPACE_PATHS } from '../lib/rust-lanes';
 import { evaluateWriteScope, runCompositeStep } from './support/cache-scoped-steps';
 import { readText } from './support/read-text';
 import {
@@ -583,6 +586,46 @@ describe('CI cache policy', () => {
         [undefined, 'true'],
         `${step.file}: expected read-only to be absent or true | received: ${readOnly}`
       ).toContain(readOnly);
+    }
+  });
+
+  // The composite's scripts decide every Rust job's cache key. A change to it that selected no
+  // lane would merge unexercised (the Gate accepts the skip), so each lane's relevance list names
+  // it beside setup-zigbuild, the other composite every Rust lane runs.
+  test('every Rust lane relevance list names the rust-cache composite', () => {
+    const composite = '.github/actions/rust-cache';
+    const filterPaths = (file: string) =>
+      [...extractOnBlock(readText(file)).matchAll(/^ {6}- ['"]?([^'"\s]+)['"]?\s*$/gm)].map(
+        (match) => match[1]
+      );
+    const lists: readonly { name: string; names: boolean }[] = [
+      {
+        name: 'RUST_WORKSPACE_PATHS (scripts/lib/rust-lanes.ts)',
+        names: RUST_WORKSPACE_PATHS.includes(`${composite}/**`),
+      },
+      {
+        name: 'cargo-shim.yml push paths',
+        names: filterPaths('.github/workflows/cargo-shim.yml').includes(`${composite}/**`),
+      },
+      {
+        name: 'RELEASE_PATTERN (scripts/lib/ci-lanes.ts)',
+        names: RELEASE_PATTERN.test(`${composite}/action.yml`),
+      },
+      {
+        name: 'windows-pr-tests.yml paths',
+        names: filterPaths('.github/workflows/windows-pr-tests.yml').includes(`${composite}/**`),
+      },
+      {
+        name: 'PROTOCOL_TRIGGER_FILES (scripts/lib/protocol.ts)',
+        names: PROTOCOL_TRIGGER_FILES.includes(`${composite}/action.yml`),
+      },
+      {
+        name: 'protocol-ci.yml push paths',
+        names: filterPaths('.github/workflows/protocol-ci.yml').includes(`${composite}/action.yml`),
+      },
+    ];
+    for (const { name, names } of lists) {
+      expect(names, `expected ${name} to name ${composite} | received: not listed`).toBe(true);
     }
   });
 

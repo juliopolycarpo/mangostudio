@@ -121,6 +121,8 @@ export const PROTOCOL_TRIGGER_FILES: readonly string[] = [
   ...PROTOCOL_ROOT_FILES,
   ...PROTOCOL_TOOLING_FILES,
   '.github/workflows/protocol-ci.yml',
+  // Its Rust jobs restore the cargo cache through this composite, which is one file.
+  '.github/actions/rust-cache/action.yml',
 ];
 
 /**

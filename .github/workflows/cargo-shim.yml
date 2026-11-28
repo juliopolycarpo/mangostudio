@@ -46,6 +46,7 @@ on:
       - ".github/workflows/cargo-shim.yml"
       - ".github/workflows/rust-coverage.yml"
       - ".github/actions/setup-zigbuild/**"
+      - ".github/actions/rust-cache/**"
       - "scripts/bench/rust-test-inventory.ts"
       - "scripts/lib/rust-lanes.ts"
       - "scripts/ci/rust-lanes.ts"

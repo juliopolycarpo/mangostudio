@@ -33,6 +33,7 @@ on:
       - "scripts/ci/changed-paths.ts"
       - "scripts/lib/ci-lanes.ts"
       - ".github/workflows/protocol-ci.yml"
+      - ".github/actions/rust-cache/action.yml"
   workflow_dispatch:
 
 permissions:

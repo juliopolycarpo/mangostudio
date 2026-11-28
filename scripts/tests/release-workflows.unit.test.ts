@@ -1420,6 +1420,7 @@ describe('release workflow binary gate', () => {
     expect('rust-toolchain.toml').toMatch(pattern);
     expect('.cargo/config.toml').toMatch(pattern);
     expect('.github/actions/setup-zigbuild/action.yml').toMatch(pattern);
+    expect('.github/actions/rust-cache/action.yml').toMatch(pattern);
 
     // …while unrelated app code does not.
     expect('apps/api/src/app.ts').not.toMatch(pattern);
