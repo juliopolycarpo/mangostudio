@@ -222,6 +222,65 @@ describe('rust-cache action: profile digest', () => {
     expect(await digestOf(edited)).toBe(before);
   });
 
+  test('a trailing comment on a profile line, a header or rust-version does not change it', async () => {
+    const before = await digestOf(manifest());
+    const edited = manifest({
+      edit: (t) =>
+        t
+          .replace('lto = "fat"', 'lto = "fat" # a note')
+          .replace('[profile.release]', '[profile.release] # shipping')
+          .replace('rust-version = "1.100.0"', 'rust-version = "1.100.0" # msrv'),
+    });
+    expect(await digestOf(edited)).toBe(before);
+    expect(
+      await digestOf(manifest({ edit: (t) => t.replace('lto = "fat"', 'lto = "fat" # other') })),
+      'a different comment text'
+    ).toBe(before);
+  });
+
+  test('spacing around the first = does not change it', async () => {
+    const before = await digestOf(manifest());
+    const edited = manifest({
+      edit: (t) =>
+        t
+          .replace('lto = "fat"', 'lto="fat"')
+          .replace('opt-level = "s"', '  opt-level   =   "s"  ')
+          .replace('rust-version = "1.100.0"', 'rust-version="1.100.0"')
+          .replace(
+            '[profile.release.package.regex-syntax]',
+            '[ profile.release.package.regex-syntax ]'
+          ),
+    });
+    expect(await digestOf(edited)).toBe(before);
+  });
+
+  test('a # or = inside a quoted value is part of the value', async () => {
+    const withValue = (value: string, quote = '"') =>
+      manifest({
+        edit: (t) => t.replace('lto = "fat"', `lto = "fat"\nnote = ${quote}${value}${quote}`),
+      });
+    const before = await digestOf(withValue('a # b = c'));
+    expect(await digestOf(withValue('a # d = c')), 'text after a quoted # still counts').not.toBe(
+      before
+    );
+    expect(await digestOf(withValue('a # b = d')), 'text after a quoted = still counts').not.toBe(
+      before
+    );
+    expect(await digestOf(withValue('a # b = c', "'")), 'a TOML literal string').not.toBe(
+      await digestOf(withValue('a # d = c', "'"))
+    );
+    expect(
+      await digestOf(
+        manifest({ edit: (t) => t.replace('lto = "fat"', 'lto = "fat"\nnote = "say \\" # hi"') })
+      ),
+      'a # after an escaped quote is still inside the string'
+    ).not.toBe(
+      await digestOf(
+        manifest({ edit: (t) => t.replace('lto = "fat"', 'lto = "fat"\nnote = "say \\" # ho"') })
+      )
+    );
+  });
+
   test('a member list or workspace version edit does not', async () => {
     const before = await digestOf(manifest());
     const edited = manifest({
