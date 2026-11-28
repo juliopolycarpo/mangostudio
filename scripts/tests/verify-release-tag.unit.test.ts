@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { existsSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { TEST_LANES } from '../lib/test-lanes';
 import { verifyReleaseTag } from '../release/verify-release-tag';
 import { readText } from './support/read-text';
 import { extractJobBlock, extractStepBlocks, runScriptLines } from './support/workflow-blocks';
@@ -357,10 +359,34 @@ describe('release signature gates', () => {
     expect(publication).toContain('--verify-tag');
   });
 
-  test('release dry-run runs cryptographic acceptance and rejection fixtures', () => {
+  // The cryptographic acceptance and rejection fixtures run once per PR, in the
+  // Test workflow's root lane. Release Dry Run used to repeat them in its detect
+  // job, which put a second copy on every PR's tail.
+  test('the root test lane runs the tag signature fixtures', () => {
+    const rootLane = TEST_LANES.find((lane) => lane.id === 'root');
+    const testDir = rootLane?.workers?.testDir;
+    const file = 'scripts/tests/verify-release-tag.unit.test.ts';
+    expect(testDir, 'expected the root lane to declare a testDir | received none').toBeDefined();
+    expect(
+      file.startsWith(`${testDir}/`),
+      `expected ${file} under the root lane's testDir | received: ${testDir}`
+    ).toBe(true);
+    // The lane takes every file under its directory, so an existing file is a
+    // file the lane runs; the weights table lists only the Windows balance.
+    expect(
+      existsSync(file),
+      `expected ${file} to exist for the root lane to run | received: missing`
+    ).toBe(true);
+  });
+
+  test('release dry-run does not repeat the tag signature fixtures', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
-    expect(extractJobBlock(workflow, 'changes')).toContain(
-      'bun test scripts/tests/verify-release-tag.unit.test.ts'
-    );
+    const runs = runScriptLines(workflow)
+      .map(({ text }) => text)
+      .filter((text) => text.includes('verify-release-tag.unit.test.ts'));
+    expect(
+      runs,
+      'expected no run: line naming verify-release-tag.unit.test.ts in release-dry-run.yml'
+    ).toEqual([]);
   });
 });

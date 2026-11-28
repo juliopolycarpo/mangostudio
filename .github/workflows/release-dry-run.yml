@@ -82,9 +82,9 @@ jobs:
 
       - uses: ./.github/actions/setup-bun # zizmor: ignore[self-repository] load the action from the selected source checkout
 
-      - name: Qualify trusted and untrusted release tag signatures
-        run: bun test scripts/tests/verify-release-tag.unit.test.ts
-
+      # The release-tag signature fixtures (scripts/tests/verify-release-tag.unit.test.ts)
+      # run in the Test workflow's root lane on every PR and main push, so this
+      # job does not repeat them.
       - id: changed
         name: Check release and launcher paths
         env:
