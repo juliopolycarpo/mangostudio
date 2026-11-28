@@ -12,6 +12,7 @@
 
 import { appendFileSync } from 'node:fs';
 
+import { GitHubRetry } from '../lib/github-retry';
 import {
   cleanupPullRequestCaches,
   formatPullRequestCacheReport,
@@ -51,11 +52,18 @@ async function main(): Promise<void> {
   const repository = process.env.GITHUB_REPOSITORY;
   if (!repository)
     throw new Error(`Invalid GITHUB_REPOSITORY ${JSON.stringify(repository)}; expected owner/repo`);
-  const api = new GithubPullRequestCacheApi(repository, process.env.GITHUB_TOKEN ?? '');
+  // One runtime for the API client and the cleanup: they spend a single wait budget.
+  const retry = new GitHubRetry();
+  const api = new GithubPullRequestCacheApi(
+    repository,
+    process.env.GITHUB_TOKEN ?? '',
+    undefined,
+    retry
+  );
   const result =
     command.kind === 'all-closed'
-      ? await sweepClosedPullRequestCaches(api, command)
-      : await cleanupPullRequestCaches(api, command.pullRequest, command);
+      ? await sweepClosedPullRequestCaches(api, { apply: command.apply, retry })
+      : await cleanupPullRequestCaches(api, command.pullRequest, { apply: command.apply, retry });
   console.log(formatPullRequestCacheReport(result));
   if (process.env.GITHUB_STEP_SUMMARY)
     appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary(result));

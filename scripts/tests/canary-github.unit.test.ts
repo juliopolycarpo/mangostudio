@@ -5,7 +5,6 @@ import {
   describeGhStderr,
   type GhCommandResult,
   type GhCommandRunner,
-  isTransientGhFailure,
 } from '../lib/canary-github';
 
 class FakeGhRunner implements GhCommandRunner {
@@ -72,7 +71,9 @@ class SequencedGhRunner implements GhCommandRunner {
 }
 function fixture() {
   const runner = new FakeGhRunner();
-  return { runner, client: new CanaryGitHub('owner/repo', runner) };
+  // Every fixture client records its waits, so a retried read never sleeps for real.
+  const sleeper = new RecordingSleeper();
+  return { runner, sleeper, client: new CanaryGitHub('owner/repo', runner, sleeper.sleep) };
 }
 const failure = (stderr: string): GhCommandResult => ({
   exitCode: 1,
@@ -150,7 +151,12 @@ test.each([200, 401, 403, 429, 500, 503])(
     const body = status === 200 ? { id: 33 } : { message: 'fixture denied read' };
     runner.json(`${BASE}/releases/tags/v1.0.0`, body, status);
     expect(await client.getRelease('v1.0.0')).toEqual({ status, body });
-    expect(runner.calls).toEqual([['api', '--include', `${BASE}/releases/tags/v1.0.0`]]);
+    // Rate limits and 5xx are read three times before the status is returned; none
+    // of them falls through to the draft listing, which only a real 404 does.
+    const reads = [429, 500, 503].includes(status) ? 3 : 1;
+    expect(runner.calls).toEqual(
+      Array.from({ length: reads }, () => ['api', '--include', `${BASE}/releases/tags/v1.0.0`])
+    );
   }
 );
 
@@ -551,14 +557,25 @@ test.each([
 });
 
 test.each([
-  ['gh: Server Error (HTTP 502)', true],
-  ['gh: rate limit (HTTP 429)', true],
-  ['Get "<url>": unexpected EOF', true],
-  ['gh: Resource not accessible by integration (HTTP 403)', false],
-  ['gh: Not Found (HTTP 404)', false],
-  ['', false],
-])('isTransientGhFailure(%j) is %p', (stderr, expected) => {
-  expect(isTransientGhFailure(stderr)).toBe(expected);
+  'gh: Server Error (HTTP 502)',
+  'gh: rate limit (HTTP 429)',
+  'Get "<url>": unexpected EOF',
+])('a paginated read is reread after transient stderr %j', async (stderr) => {
+  const runner = new SequencedGhRunner([failure(stderr), goodPages]);
+  const client = new CanaryGitHub('owner/repo', runner, new RecordingSleeper().sleep);
+  expect(await client.list(`${BASE}/test`)).toEqual([{ id: 1 }]);
+  expect(runner.calls).toBe(2);
+});
+
+test.each([
+  'gh: Resource not accessible by integration (HTTP 403)',
+  'gh: Not Found (HTTP 404)',
+  '',
+])('a paginated read is not reread after stderr %j', async (stderr) => {
+  const runner = new SequencedGhRunner([failure(stderr), goodPages]);
+  const client = new CanaryGitHub('owner/repo', runner, new RecordingSleeper().sleep);
+  await expect(client.list(`${BASE}/test`)).rejects.toThrow('expected successful gh exit');
+  expect(runner.calls).toBe(1);
 });
 
 test('a transient paginated failure is reread with growing backoff', async () => {
@@ -592,4 +609,157 @@ test('a non-transient paginated failure is not reread', async () => {
   await expect(client.list(`${BASE}/test`)).rejects.toThrow('HTTP 403');
   expect(runner.calls).toBe(1);
   expect(sleeper.delays).toEqual([]);
+});
+
+const incompleteCountedPage = [
+  { total_count: 2, jobs: [{ id: 1 }] },
+  { total_count: 2, jobs: [] },
+].map((page) => page);
+const completeCountedPages = [
+  { total_count: 2, jobs: [{ id: 1 }] },
+  { total_count: 2, jobs: [{ id: 2 }] },
+];
+
+/** Answers each paginated read with the next scripted page set; the last one repeats. */
+class SequencedPagesRunner implements GhCommandRunner {
+  calls = 0;
+  constructor(private readonly pageSets: unknown[]) {}
+  run(): GhCommandResult {
+    const pages = this.pageSets[Math.min(this.calls++, this.pageSets.length - 1)];
+    return { exitCode: 0, stdout: Buffer.from(JSON.stringify(pages)), stderr: '' };
+  }
+}
+
+test('two incomplete counted listings then a complete one return the complete listing', async () => {
+  const sleeper = new RecordingSleeper();
+  const runner = new SequencedPagesRunner([
+    incompleteCountedPage,
+    incompleteCountedPage,
+    completeCountedPages,
+  ]);
+  const client = new CanaryGitHub('owner/repo', runner, sleeper.sleep);
+  expect(await client.list(`${BASE}/test`, 'jobs')).toEqual([{ id: 1 }, { id: 2 }]);
+  expect(runner.calls).toBe(3);
+  expect(sleeper.delays).toEqual([5_000, 10_000]);
+});
+
+test('a counted listing that stays incomplete fails closed after three reads', async () => {
+  const sleeper = new RecordingSleeper();
+  const runner = new SequencedPagesRunner([incompleteCountedPage]);
+  const client = new CanaryGitHub('owner/repo', runner, sleeper.sleep);
+  await expect(client.list(`${BASE}/test`, 'jobs')).rejects.toThrow(
+    'Incomplete GitHub pages: expected 2 entries; received 1'
+  );
+  expect(runner.calls).toBe(3);
+  expect(sleeper.delays).toEqual([5_000, 10_000]);
+});
+
+test('a duplicate entry from a listing that shifted between pages is read again', async () => {
+  const sleeper = new RecordingSleeper();
+  const runner = new SequencedPagesRunner([
+    [[{ id: 1 }], [{ id: 1 }]],
+    [[{ id: 1 }], [{ id: 2 }]],
+  ]);
+  const client = new CanaryGitHub('owner/repo', runner, sleeper.sleep);
+  expect(await client.list(`${BASE}/test`)).toEqual([{ id: 1 }, { id: 2 }]);
+  expect(sleeper.delays).toEqual([5_000]);
+});
+
+/** gh --include output for a status with extra headers, as gh prints it before exiting 1. */
+function includeReply(status: number, body: string, extraHeaders = ''): GhCommandResult {
+  return http(status, body, '\r\n', extraHeaders);
+}
+
+test('a 502 on a single read is repeated and the later 200 returned', async () => {
+  const sleeper = new RecordingSleeper();
+  const runner = new SequencedGhRunner([
+    includeReply(502, '{"message":"Bad Gateway"}'),
+    includeReply(200, '{"id":1}'),
+  ]);
+  const client = new CanaryGitHub('owner/repo', runner, sleeper.sleep);
+  expect(await client.getJson(`${BASE}/test`)).toEqual({ status: 200, body: { id: 1 } });
+  expect(sleeper.delays).toEqual([5_000]);
+});
+
+test.each([
+  { label: 'getJson', read: (client: CanaryGitHub) => client.getJson(`${BASE}/test`) },
+  { label: 'readBytes', read: (client: CanaryGitHub) => client.readBytes(`${BASE}/test`) },
+  { label: 'readAsset', read: (client: CanaryGitHub) => client.readAsset(9) },
+])('$label rereads after a gh transport failure that printed no status line', async ({ read }) => {
+  const sleeper = new RecordingSleeper();
+  const runner = new SequencedGhRunner([
+    failure('Get "https://api.github.com/x": net/http: TLS handshake timeout'),
+    includeReply(200, '{"id":1}'),
+  ]);
+  const client = new CanaryGitHub('owner/repo', runner, sleeper.sleep);
+  expect((await read(client)).status).toBe(200);
+  expect(runner.calls).toBe(2);
+  expect(sleeper.delays).toEqual([5_000]);
+});
+
+test('a transport failure that persists fails closed with the status-line error after three reads', async () => {
+  const runner = new SequencedGhRunner([failure('dial tcp: connection reset by peer')]);
+  const client = new CanaryGitHub('owner/repo', runner, new RecordingSleeper().sleep);
+  await expect(client.getJson(`${BASE}/test`)).rejects.toThrow(
+    'GitHub response: expected HTTP status headers; received gh exit1'
+  );
+  expect(runner.calls).toBe(3);
+});
+
+test('a missing status line with stderr that names no transport failure is not reread', async () => {
+  const runner = new SequencedGhRunner([
+    failure('gh: authentication required'),
+    includeReply(200, '{}'),
+  ]);
+  const client = new CanaryGitHub('owner/repo', runner, new RecordingSleeper().sleep);
+  await expect(client.getJson(`${BASE}/test`)).rejects.toThrow('expected HTTP status headers');
+  expect(runner.calls).toBe(1);
+});
+
+test('a read honors Retry-After from the gh headers on a rate limit', async () => {
+  const sleeper = new RecordingSleeper();
+  const runner = new SequencedGhRunner([
+    includeReply(429, '{"message":"slow down"}', 'Retry-After: 17\r\n'),
+    includeReply(200, '{"id":1}'),
+  ]);
+  const client = new CanaryGitHub('owner/repo', runner, sleeper.sleep);
+  expect((await client.getJson(`${BASE}/test`)).status).toBe(200);
+  expect(sleeper.delays).toEqual([17_000]);
+});
+
+test('a read that stays 503 returns that status after three reads for the caller to judge', async () => {
+  const sleeper = new RecordingSleeper();
+  const runner = new SequencedGhRunner([includeReply(503, '{"message":"down"}')]);
+  const client = new CanaryGitHub('owner/repo', runner, sleeper.sleep);
+  expect(await client.getJson(`${BASE}/test`)).toEqual({ status: 503, body: { message: 'down' } });
+  expect(runner.calls).toBe(3);
+});
+
+test('a 404 read is not repeated', async () => {
+  const runner = new SequencedGhRunner([includeReply(404, '{}'), includeReply(200, '{}')]);
+  const client = new CanaryGitHub('owner/repo', runner, new RecordingSleeper().sleep);
+  expect((await client.getJson(`${BASE}/test`)).status).toBe(404);
+  expect(runner.calls).toBe(1);
+});
+
+test('a write command is never repeated after a transient failure', () => {
+  const runner = new SequencedGhRunner([failure('gh: Bad Gateway (HTTP 502)')]);
+  const client = new CanaryGitHub('owner/repo', runner, new RecordingSleeper().sleep);
+  expect(() => client.writeCommand(['release', 'create', 'v1'])).toThrow('HTTP 502');
+  expect(runner.calls).toBe(1);
+});
+
+test('malformed JSON names the request and shows the truncated body received', async () => {
+  const { runner, client } = fixture();
+  runner.respond(
+    ['api', '--include', `${BASE}/test`],
+    http(200, `<html>${'x'.repeat(400)}</html>`)
+  );
+  const failureMessage = await client
+    .getJson(`${BASE}/test`)
+    .catch((error: Error) => error.message);
+  expect(failureMessage).toContain(
+    `Invalid GET ${BASE}/test; expected valid JSON for HTTP200 | received <html>xxx`
+  );
+  expect(failureMessage).toContain('(413 chars)');
 });

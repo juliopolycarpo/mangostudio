@@ -1,8 +1,8 @@
+import { type GithubFetch, type GitHubRetry, parseJsonReply } from '../../lib/github-retry';
 import {
   type ActionsCacheEntry,
   deleteActionsCache,
   GithubActionsClient,
-  type GithubFetch,
   listActionsCaches,
   record,
 } from '../actions-api/client';
@@ -26,8 +26,8 @@ export interface PullRequestCacheApi {
 export class GithubPullRequestCacheApi implements PullRequestCacheApi {
   private readonly client: GithubActionsClient;
 
-  constructor(repository: string, token: string, request?: GithubFetch) {
-    this.client = new GithubActionsClient(repository, token, request);
+  constructor(repository: string, token: string, request?: GithubFetch, retry?: GitHubRetry) {
+    this.client = new GithubActionsClient(repository, token, request, retry);
   }
 
   listCachesOnRef(ref: string): Promise<ActionsCacheEntry[]> {
@@ -43,7 +43,11 @@ export class GithubPullRequestCacheApi implements PullRequestCacheApi {
       throw new Error(`Invalid pull request number ${pullRequest}; expected a positive integer`);
     const response = await this.client.repositoryResponse(`/pulls/${pullRequest}`);
     if (response.status === 404) return undefined;
-    const body: unknown = await response.json();
+    const body = parseJsonReply(
+      response,
+      { request: `GET /pulls/${pullRequest}` },
+      'a pull request object'
+    );
     if (!record(body) || (body.state !== 'open' && body.state !== 'closed')) {
       throw new Error(
         `Invalid pull request ${pullRequest} state ${JSON.stringify(record(body) ? body.state : body)}; expected "open" or "closed"`

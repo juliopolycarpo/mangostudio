@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 
+import { ARTIFACT_DOWNLOAD_RETRY_POLICY } from '../lib/github-retry';
 import { ARCHIVE_TIMEOUT_MS, DOWNLOAD_ATTEMPTS, METADATA_TIMEOUT_MS } from '../lib/run-artifact';
 
 // actions/download-artifact stayed alive for a whole step deadline after it
@@ -93,9 +94,11 @@ describe('same-run distribution fetch', () => {
     expect([METADATA_TIMEOUT_MS, ARCHIVE_TIMEOUT_MS, DOWNLOAD_ATTEMPTS]).toEqual([
       15_000, 70_000, 2,
     ]);
-    expect(DOWNLOAD_ATTEMPTS * (METADATA_TIMEOUT_MS + ARCHIVE_TIMEOUT_MS)).toBeLessThanOrEqual(
-      180_000
-    );
+    // Two bounded attempts plus the 2 s pause between them.
+    expect(
+      DOWNLOAD_ATTEMPTS * (METADATA_TIMEOUT_MS + ARCHIVE_TIMEOUT_MS) +
+        ARTIFACT_DOWNLOAD_RETRY_POLICY.maxTotalWaitMs
+    ).toBeLessThanOrEqual(180_000);
   });
 
   test('every job that fetches with gh can read Actions', () => {

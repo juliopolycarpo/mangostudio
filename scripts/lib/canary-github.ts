@@ -1,3 +1,14 @@
+import type { GitHubNetworkFailure } from './github-retry';
+import {
+  failureFromGhStderr,
+  GitHubHttpFailure,
+  GitHubRetry,
+  IncompleteListing,
+  malformedResponse,
+  STANDARD_RETRY_POLICY,
+  UnstableListing,
+} from './github-retry';
+
 /** Captured gh result; credentials stay in gh's normal environment and keychain. */
 export interface GhCommandResult {
   readonly exitCode: number;
@@ -31,16 +42,6 @@ const ghRunner: GhCommandRunner = {
 };
 
 const STDERR_LIMIT = 300;
-const READ_ATTEMPTS = 3;
-const READ_BACKOFF_MS = 5_000;
-// Server errors, rate limiting and dropped connections; 4xx auth/not-found stay fatal.
-const TRANSIENT_STDERR =
-  /HTTP (?:5\d\d|429)\b|\b(?:timeout|timed out|EOF|connection reset|connection refused|temporar(?:y|ily)|unexpected end)\b/i;
-
-/** Whether gh stderr describes a failure worth rereading. Example: isTransientGhFailure('gh: Bad Gateway (HTTP 502)'). */
-export function isTransientGhFailure(stderr: string): boolean {
-  return TRANSIENT_STDERR.test(stderr);
-}
 
 /**
  * Render gh stderr for an error message without leaking secrets: URLs (signed
@@ -62,17 +63,24 @@ export function describeGhStderr(stderr: string): string {
 /** GitHub reads and controlled CLI writes for canary recovery. Example: const client = new CanaryGitHub('owner/repo'). */
 export class CanaryGitHub {
   private readonly base: string;
+  // Reads retry transient failures and unsettled listings under the standard
+  // policy: three attempts, 5 s then 10 s apart, at most 60 s of waiting per
+  // client. Writes (`writeCommand`) never retry.
+  private readonly retry: GitHubRetry;
 
   constructor(
     repository: string,
     private readonly runner: GhCommandRunner = ghRunner,
-    private readonly sleep: (milliseconds: number) => Promise<void> = (milliseconds) =>
-      Bun.sleep(milliseconds)
+    sleep?: (milliseconds: number) => Promise<void>
   ) {
     if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
       throw new Error(`Invalid GitHub repository: ${repository}; expected owner/repository`);
     }
     this.base = `repos/${repository}`;
+    this.retry = new GitHubRetry(
+      STANDARD_RETRY_POLICY,
+      sleep ? { sleep, now: () => Date.now() } : undefined
+    );
   }
 
   /**
@@ -145,11 +153,16 @@ export class CanaryGitHub {
   /** Read repository JSON with actual status; callers must reject non200/non404 responses. Example: await client.getJson('repos/owner/repo/actions/runs/123'). */
   async getJson(path: string): Promise<GitHubResponse<unknown>> {
     const response = await Promise.resolve(this.read(path));
+    const text = Buffer.from(response.body).toString('utf8');
     let body: unknown;
     try {
-      body = JSON.parse(Buffer.from(response.body).toString('utf8'));
+      body = JSON.parse(text);
     } catch {
-      throw new Error(`GitHub JSON response: expected valid JSON for HTTP${response.status}`);
+      throw malformedResponse(
+        { request: `GET ${path}` },
+        `valid JSON for HTTP${response.status}`,
+        text
+      );
     }
     return { status: response.status, body };
   }
@@ -170,29 +183,31 @@ export class CanaryGitHub {
   /** Read paginated array responses, or counted object collections. Example: await client.list('repos/owner/repo/releases?per_page=100'). */
   async list(path: string, key?: string): Promise<readonly unknown[]> {
     this.requireRepositoryPath(path);
+    // One level of listing retry around the whole read, and the transient-
+    // failure retry inside it: both spend the same wait budget.
+    return this.retry.listing(`GET ${path}`, () => this.readListing(path, key));
+  }
+
+  private async readListing(path: string, key?: string): Promise<readonly unknown[]> {
     // A paginated read restarts from page one: a late 5xx must not discard earlier pages for good.
-    let result = await Promise.resolve(this.runner.run(['api', '--paginate', '--slurp', path]));
-    for (
-      let attempt = 1;
-      attempt < READ_ATTEMPTS && result.exitCode !== 0 && isTransientGhFailure(result.stderr);
-      attempt++
-    ) {
-      await this.sleep(READ_BACKOFF_MS * attempt);
-      result = await Promise.resolve(this.runner.run(['api', '--paginate', '--slurp', path]));
-    }
+    const result = await this.retry.ghCommand(() =>
+      this.runner.run(['api', '--paginate', '--slurp', path])
+    );
     if (result.exitCode !== 0) {
       throw new Error(
         `GitHub paginated read: expected successful gh exit | received: exit ${result.exitCode} for ${path} | stderr: ${describeGhStderr(result.stderr)}`
       );
     }
+    const text = Buffer.from(result.stdout).toString('utf8');
+    const site = { request: `paginated GET ${path}` };
     let pages: unknown;
     try {
-      pages = JSON.parse(Buffer.from(result.stdout).toString('utf8'));
+      pages = JSON.parse(text);
     } catch {
-      throw new Error('GitHub paginated read: expected JSON page collection');
+      throw malformedResponse(site, 'JSON page collection', text);
     }
     if (!Array.isArray(pages) || pages.length === 0) {
-      throw new Error('GitHub paginated read: expected nonempty array of pages');
+      throw malformedResponse(site, 'nonempty array of pages', text);
     }
     let total: number | undefined;
     const entries: unknown[] = [];
@@ -208,7 +223,7 @@ export class CanaryGitHub {
           );
         }
         if (total !== undefined && total !== collection.total_count) {
-          throw new Error(
+          throw new UnstableListing(
             `GitHub page total_count changed: expected ${total}; received ${String(collection.total_count)}`
           );
         }
@@ -220,7 +235,7 @@ export class CanaryGitHub {
       entries.push(...values);
     }
     if (total !== undefined && entries.length !== total) {
-      throw new Error(
+      throw new IncompleteListing(
         `Incomplete GitHub pages: expected ${total} entries; received ${entries.length}`
       );
     }
@@ -228,8 +243,9 @@ export class CanaryGitHub {
     for (const entry of entries) {
       if (!entry || typeof entry !== 'object' || !('id' in entry)) continue;
       positiveId(entry.id, 'paginated entry ID');
+      // An entry shifting to the next page while the listing is being read shows up as a repeat.
       if (seen.has(Number(entry.id)))
-        throw new Error(`Duplicate GitHub paginated entry ID: ${String(entry.id)}`);
+        throw new UnstableListing(`Duplicate GitHub paginated entry ID: ${String(entry.id)}`);
       seen.add(Number(entry.id));
     }
     return entries;
@@ -251,14 +267,53 @@ export class CanaryGitHub {
     return result;
   }
 
-  private read(path: string, accept?: string): GitHubResponse<Uint8Array> {
+  /**
+   * One read with its status. A 5xx, a 429 or a rate-limited 403 is read again
+   * under the policy, honoring Retry-After from the `--include` headers; the
+   * last answer is returned either way, so callers keep deciding on the status.
+   */
+  private async read(path: string, accept?: string): Promise<GitHubResponse<Uint8Array>> {
     this.requireRepositoryPath(path);
-    const result = this.runner.run([
-      'api',
-      '--include',
-      ...(accept ? ['--header', `Accept: ${accept}`] : []),
-      path,
-    ]);
+    const args = ['api', '--include', ...(accept ? ['--header', `Accept: ${accept}`] : []), path];
+    const attempt = (): ReadAttempt => {
+      const result = this.runner.run(args);
+      try {
+        return { parsed: this.parseResponse(result) };
+      } catch (error) {
+        // gh printed no status line at all: a transport failure (reset, timeout)
+        // names itself on stderr and is read again. Anything else still fails
+        // closed with the parse error.
+        const failure =
+          result.exitCode !== 0 && !startsWithHttpStatusLine(result.stdout)
+            ? failureFromGhStderr(result.stderr)
+            : undefined;
+        if (failure === undefined) throw error;
+        return { unanswered: error, failure };
+      }
+    };
+    const last = await this.retry.outcome(
+      attempt,
+      (read) => {
+        if ('failure' in read) return read.failure;
+        const { parsed } = read;
+        return parsed.status >= 400
+          ? new GitHubHttpFailure(
+              `HTTP ${parsed.status}`,
+              parsed.status,
+              (name) => parsed.headers.get(name),
+              Buffer.from(parsed.body.subarray(0, 1_000)).toString('utf8')
+            )
+          : undefined;
+      },
+      true
+    );
+    if ('failure' in last) throw last.unanswered;
+    return { status: last.parsed.status, body: last.parsed.body };
+  }
+
+  private parseResponse(result: GhCommandResult): GitHubResponse<Uint8Array> & {
+    readonly headers: ReadonlyMap<string, string>;
+  } {
     const bytes = Buffer.from(result.stdout);
     const statusLineEnd = bytes.indexOf(10);
     const statusLine = bytes.subarray(0, statusLineEnd).toString('ascii').trimEnd();
@@ -306,7 +361,7 @@ export class CanaryGitHub {
         );
       }
     }
-    return { status, body };
+    return { status, body, headers };
   }
 
   private requireRepositoryPath(path: string): void {
@@ -318,6 +373,19 @@ export class CanaryGitHub {
       throw new Error(`Invalid GitHub API path: expected path inside ${this.base}`);
     }
   }
+}
+
+type ReadAttempt =
+  | {
+      readonly parsed: GitHubResponse<Uint8Array> & {
+        readonly headers: ReadonlyMap<string, string>;
+      };
+    }
+  | { readonly unanswered: unknown; readonly failure: GitHubHttpFailure | GitHubNetworkFailure };
+
+/** `gh api --include` prints `HTTP/<version> <status>` first whenever the server answered. */
+function startsWithHttpStatusLine(stdout: Uint8Array): boolean {
+  return /^HTTP\/\d/.test(Buffer.from(stdout.subarray(0, 8)).toString('ascii'));
 }
 
 function requireOk(status: number, name: string): void {

@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { zipCreationCommand } from '../lib/archive-creation';
+import { ARTIFACT_DOWNLOAD_RETRY_POLICY, GitHubRetry } from '../lib/github-retry';
 import {
   ARCHIVE_TIMEOUT_MS,
   assertSafeZipEntries,
@@ -24,9 +25,9 @@ import {
   METADATA_TIMEOUT_MS,
   runBounded,
   selectRunArtifact,
-  withAttempts,
 } from '../lib/run-artifact';
 import { zipCreationUnavailable } from './support/host-tools';
+import { RecordedRetryEnvironment } from './support/scripted-github-http';
 
 // Skipped on a developer machine without `zip`; CI throws instead (see host-tools.ts).
 const ZIP_UNAVAILABLE = zipCreationUnavailable();
@@ -134,6 +135,24 @@ describe('findRunArtifact', () => {
     expect(seen).toEqual([METADATA_TIMEOUT_MS]);
   });
 
+  test.each([
+    {
+      name: 'non-JSON output',
+      stdout: '<html>Unicorn</html>',
+      expected: 'an artifact listing object as JSON | received <html>Unicorn</html>',
+    },
+    {
+      name: 'an object without artifacts',
+      stdout: '{"message":"Not Found"}',
+      expected: 'an object with an "artifacts" array | received {"message":"Not Found"}',
+    },
+  ])('names the request and the body for $name', async ({ stdout, expected }) => {
+    const { run } = fakeRunner(() => ({ exitCode: 0, stdout }));
+    await expect(
+      findRunArtifact({ repository: 'o/r', runId: RUN_ID, name: 'x', run })
+    ).rejects.toThrow(`Invalid GET runs/${RUN_ID}/artifacts; expected ${expected}`);
+  });
+
   test('names a timed-out listing', async () => {
     const { run } = fakeRunner(() => ({ timedOut: true, exitCode: 1 }));
     await expect(
@@ -191,39 +210,14 @@ describe('runBounded', () => {
   });
 });
 
-describe('withAttempts', () => {
-  test('retries once after a failure and returns the second result', async () => {
-    const logs: string[] = [];
-    const result = await withAttempts(
-      2,
-      'Artifact x',
-      (number) => (number === 1 ? Promise.reject(new Error('stalled')) : Promise.resolve('ok')),
-      (message) => logs.push(message)
-    );
-    expect(result).toBe('ok');
-    expect(logs).toEqual(['::warning::Artifact x attempt 1/2 failed: stalled']);
-  });
-
-  test('rethrows the last failure once every attempt failed', async () => {
-    let calls = 0;
-    await expect(
-      withAttempts(
-        2,
-        'Artifact x',
-        () => {
-          calls += 1;
-          return Promise.reject(new Error(`failure ${calls}`));
-        },
-        () => {}
-      )
-    ).rejects.toThrow('failure 2');
-    expect(calls).toBe(DOWNLOAD_ATTEMPTS);
-  });
-
-  test('keeps both attempts inside the 3-minute step deadline callers declare', () => {
-    expect(DOWNLOAD_ATTEMPTS * (METADATA_TIMEOUT_MS + ARCHIVE_TIMEOUT_MS)).toBeLessThanOrEqual(
-      180_000
-    );
+describe('download retry budget', () => {
+  test('keeps both attempts and the pause between them inside the 3-minute step deadline callers declare', () => {
+    expect(DOWNLOAD_ATTEMPTS).toBe(2);
+    const worstCaseMs =
+      DOWNLOAD_ATTEMPTS * (METADATA_TIMEOUT_MS + ARCHIVE_TIMEOUT_MS) +
+      ARTIFACT_DOWNLOAD_RETRY_POLICY.maxTotalWaitMs;
+    expect(worstCaseMs).toBe(172_000);
+    expect(worstCaseMs).toBeLessThanOrEqual(180_000);
   });
 });
 
@@ -268,6 +262,7 @@ describe('downloadRunArtifact', () => {
       const digest = writeZip(zipPath, { 'linux-x64.tar': 'bundle bytes' });
       const { run, commands } = ghFake(zipPath, digest, 1);
       const logs: string[] = [];
+      const environment = new RecordedRetryEnvironment();
       await downloadRunArtifact({
         repository: 'o/r',
         runId: RUN_ID,
@@ -276,8 +271,11 @@ describe('downloadRunArtifact', () => {
         mode: 'bundle',
         scratchRoot: directory,
         run,
+        retry: new GitHubRetry(ARTIFACT_DOWNLOAD_RETRY_POLICY, environment),
         log: (message) => logs.push(message),
       });
+      // The retry waits 2 s instead of starting at once.
+      expect(environment.waits).toEqual([2_000]);
       expect(readFileSync(join(directory, 'out', 'linux-x64.tar'), 'utf8')).toBe('bundle bytes');
       expect(commands.filter((command) => !command.includes('--method'))).toHaveLength(2);
       expect(logs.join('\n')).toContain('attempt 1/2 failed: Artifact');

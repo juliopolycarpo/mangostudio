@@ -8,7 +8,8 @@ import {
   distributionBundleMember,
   validateArtifactEvidence,
 } from '../lib/distribution-artifact';
-import { DOWNLOAD_ATTEMPTS, fetchArtifactZip, withAttempts } from '../lib/run-artifact';
+import { ARTIFACT_DOWNLOAD_RETRY_POLICY, GitHubRetry } from '../lib/github-retry';
+import { fetchArtifactZip } from '../lib/run-artifact';
 
 // The cross-run promotion path deliberately requires unzip (Ubuntu consumers).
 // Same-run consumers go through download-run-artifact.ts, which shares the
@@ -61,13 +62,15 @@ if (!directory) throw new Error('DOWNLOAD_DIR: expected download directory | rec
 mkdirSync(directory, { recursive: true });
 const archive = join(directory, `artifact-${approval.artifactId}.zip`);
 // Bounded and retried once, and the ZIP bytes must match the approved digest.
-await withAttempts(DOWNLOAD_ATTEMPTS, `Artifact ${approval.artifactId}`, () =>
-  fetchArtifactZip({
-    repository: approval.repository,
-    artifactId: approval.artifactId,
-    digest: approval.digest,
-    archive,
-  })
+await new GitHubRetry(ARTIFACT_DOWNLOAD_RETRY_POLICY).anyFailure(
+  `Artifact ${approval.artifactId}`,
+  () =>
+    fetchArtifactZip({
+      repository: approval.repository,
+      artifactId: approval.artifactId,
+      digest: approval.digest,
+      archive,
+    })
 );
 const actual = approval.digest;
 const listing = Bun.spawnSync(['unzip', '-Z1', archive]);

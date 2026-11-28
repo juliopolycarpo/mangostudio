@@ -1,10 +1,9 @@
+import type { GithubFetch, GitHubRetry } from '../../lib/github-retry';
 import {
   deleteActionsCache,
   GithubActionsClient,
-  type GithubFetch,
   listActionsCaches,
   record,
-  retryIncompleteListing,
 } from '../actions-api/client';
 import { MAIN_CACHE_REF, MAIN_WRITER_EVENTS, RUST_CACHE_WRITERS } from './families';
 import type { RustCacheEntry } from './selection';
@@ -73,9 +72,10 @@ export class GithubRustCacheApi implements RustCacheApi {
   constructor(
     private readonly repository: string,
     token: string,
-    request?: GithubFetch
+    request?: GithubFetch,
+    retry?: GitHubRetry
   ) {
-    this.client = new GithubActionsClient(repository, token, request);
+    this.client = new GithubActionsClient(repository, token, request, retry);
   }
 
   /**
@@ -85,7 +85,7 @@ export class GithubRustCacheApi implements RustCacheApi {
   async getRun(id: number): Promise<CacheWriterRun> {
     if (!Number.isSafeInteger(id) || id < 1)
       throw new Error(`Invalid run ID ${id}; expected a positive integer`);
-    const run = parseRun(await (await this.client.response(`/runs/${id}`)).json());
+    const run = parseRun(await this.client.json(`/runs/${id}`, 'a workflow run object'));
     if (run.id !== id) throw new Error(`Unexpected run ID ${run.id}; expected ${id}`);
     return run;
   }
@@ -99,16 +99,12 @@ export class GithubRustCacheApi implements RustCacheApi {
   }
 
   /**
-   * Audit active main writers and ignore readers such as PR QA Report.
-   * Restart the audit once if GitHub returns an incomplete listing.
+   * Audit active main writers and ignore readers such as PR QA Report. One
+   * pass: an incomplete listing throws, and the cleanup restarts the audit
+   * together with the cache revalidation it guards, so no layer repeats it twice.
    * @example await api.activeWriters();
    */
   async activeWriters(): Promise<CacheWriterRun[]> {
-    // A writer can change status between requests, so discard the partial audit.
-    return retryIncompleteListing('workflow_runs', () => this.readActiveWriters());
-  }
-
-  private async readActiveWriters(): Promise<CacheWriterRun[]> {
     const runs = new Map<number, CacheWriterRun>();
     for (const status of ACTIVE_STATUSES) {
       const query = new URLSearchParams({ branch: 'main', status, exclude_pull_requests: 'true' });

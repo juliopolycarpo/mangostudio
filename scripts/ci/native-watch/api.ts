@@ -1,6 +1,14 @@
 // The GitHub surface the native platform watch touches, as one interface so
 // tests drive the decisions through a named fake instead of the network.
 
+import {
+  type GithubFetch,
+  GitHubRetry,
+  malformedResponse,
+  parseJsonReply,
+  sendGitHubRequest,
+} from '../../lib/github-retry';
+
 export interface TrackingIssue {
   readonly number: number;
   readonly body: string;
@@ -25,10 +33,22 @@ export interface NativeWatchApi {
   closeIssue(issueNumber: number): Promise<void>;
 }
 
-export type GithubFetch = (url: string, init: RequestInit) => Promise<Response>;
-
 const PAGE_SIZE = 100;
 const MAX_PAGES = 10;
+
+/**
+ * Per-attempt timeout. The gate and report jobs have 9 minutes, of which Bun
+ * setup may take four, and a failed attempt costs its whole timeout. With the
+ * standard policy (60 s of waiting, 5 s at the least per retry) a run makes at
+ * most 12 retried attempts plus one final one, so every request chain ends in
+ * 13 * 10 s + 60 s = 190 s: inside the 5 minutes left, with room for checkout.
+ * The longest chain, a failing report (open issues, jobs, comments, one
+ * comment POST), is four requests; a POST is never retried after a timeout.
+ */
+export const NATIVE_WATCH_REQUEST_TIMEOUT_MS = 10_000;
+// Close is a PATCH to a fixed state, so repeating it is safe; creating an issue
+// or a comment is not, and is only retried when GitHub rejected it for a rate limit.
+const REPEATABLE_METHODS = new Set(['GET', 'PATCH']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -36,6 +56,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * REST implementation for one repository, authenticated with the workflow's token.
+ * Reads and the close PATCH retry transient failures under the standard policy
+ * (waits total at most 60 s and each attempt times out after 10 s, so a run
+ * ends within 190 s even if every attempt fails); a malformed listing throws
+ * instead of reading as empty.
  * @example const api = new GithubNativeWatchApi('owner/repo', process.env.GITHUB_TOKEN ?? '');
  */
 export class GithubNativeWatchApi implements NativeWatchApi {
@@ -44,7 +68,8 @@ export class GithubNativeWatchApi implements NativeWatchApi {
   constructor(
     repository: string,
     private readonly token: string,
-    private readonly request: GithubFetch = fetch
+    private readonly request: GithubFetch = fetch,
+    private readonly retry: GitHubRetry = new GitHubRetry()
   ) {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*\/[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(repository)) {
       throw new Error(`Invalid repository ${JSON.stringify(repository)}; expected owner/repo`);
@@ -53,35 +78,53 @@ export class GithubNativeWatchApi implements NativeWatchApi {
     this.root = `https://api.github.com/repos/${repository}`;
   }
 
-  private async call(method: string, path: string, payload?: unknown): Promise<unknown> {
-    const response = await this.request(`${this.root}${path}`, {
-      method,
-      redirect: 'error',
-      signal: AbortSignal.timeout(30_000),
-      headers: {
-        accept: 'application/vnd.github+json',
-        authorization: `Bearer ${this.token}`,
-        'x-github-api-version': '2022-11-28',
-        ...(payload === undefined ? {} : { 'content-type': 'application/json' }),
-      },
-      body: payload === undefined ? undefined : JSON.stringify(payload),
+  private async call(
+    method: string,
+    path: string,
+    payload?: unknown,
+    shape: { readonly expected: string; readonly page?: number } = { expected: 'a JSON value' }
+  ): Promise<unknown> {
+    const reply = await sendGitHubRequest(this.retry, this.request, {
+      label: `${method} ${path}`,
+      url: `${this.root}${path}`,
+      init: () => ({
+        method,
+        redirect: 'error',
+        signal: AbortSignal.timeout(NATIVE_WATCH_REQUEST_TIMEOUT_MS),
+        headers: {
+          accept: 'application/vnd.github+json',
+          authorization: `Bearer ${this.token}`,
+          'x-github-api-version': '2022-11-28',
+          ...(payload === undefined ? {} : { 'content-type': 'application/json' }),
+        },
+        body: payload === undefined ? undefined : JSON.stringify(payload),
+      }),
+      idempotent: REPEATABLE_METHODS.has(method),
+      failure: (status) => `${method} ${path} returned ${status}; expected a successful response`,
     });
-    if (!response.ok) {
-      throw new Error(
-        `${method} ${path} returned ${response.status}; expected a successful response`
-      );
-    }
-    return response.status === 204 ? null : response.json();
+    return reply.status === 204
+      ? null
+      : parseJsonReply(reply, { request: `${method} ${path}`, page: shape.page }, shape.expected);
   }
 
-  /** Every page of an array listing; `pick` extracts the array from the page body. */
-  private async pages(path: string, pick: (body: unknown) => unknown[]): Promise<unknown[]> {
+  /** Every page of an array listing; `field` names the array inside each page object, when there is one. */
+  private async pages(path: string, field?: string): Promise<unknown[]> {
     const joiner = path.includes('?') ? '&' : '?';
     const entries: unknown[] = [];
+    const expected = field === undefined ? 'a JSON array' : `an object with a "${field}" array`;
     for (let page = 1; page <= MAX_PAGES; page++) {
-      const batch = pick(
-        await this.call('GET', `${path}${joiner}per_page=${PAGE_SIZE}&page=${page}`)
+      const body = await this.call(
+        'GET',
+        `${path}${joiner}per_page=${PAGE_SIZE}&page=${page}`,
+        undefined,
+        { expected, page }
       );
+      const batch = field === undefined ? body : isRecord(body) ? body[field] : undefined;
+      // A body of the wrong shape is not an empty listing: reading it as one
+      // would close nothing on a green run and open a duplicate on a red one.
+      if (!Array.isArray(batch)) {
+        throw malformedResponse({ request: `GET ${path}`, page }, expected, body);
+      }
       entries.push(...batch);
       if (batch.length < PAGE_SIZE) return entries;
     }
@@ -95,11 +138,11 @@ export class GithubNativeWatchApi implements NativeWatchApi {
       branch,
       per_page: '1',
     });
-    const body = await this.call('GET', `/actions/workflows/${workflowFile}/runs?${query}`);
+    const path = `/actions/workflows/${workflowFile}/runs?${query}`;
+    const expected = 'an object with a "workflow_runs" array';
+    const body = await this.call('GET', path, undefined, { expected });
     const runs = isRecord(body) ? body.workflow_runs : undefined;
-    if (!Array.isArray(runs)) {
-      throw new Error(`Invalid workflow runs page ${JSON.stringify(body)}; expected workflow_runs`);
-    }
+    if (!Array.isArray(runs)) throw malformedResponse({ request: `GET ${path}` }, expected, body);
     const sha = isRecord(runs[0]) ? runs[0].head_sha : undefined;
     if (runs.length === 0) return null;
     if (typeof sha !== 'string' || !/^[a-f0-9]{40}$/.test(sha)) {
@@ -111,9 +154,7 @@ export class GithubNativeWatchApi implements NativeWatchApi {
   }
 
   async listJobs(runId: number): Promise<WorkflowJobResult[]> {
-    const entries = await this.pages(`/actions/runs/${runId}/jobs?filter=latest`, (body) =>
-      isRecord(body) && Array.isArray(body.jobs) ? body.jobs : []
-    );
+    const entries = await this.pages(`/actions/runs/${runId}/jobs?filter=latest`, 'jobs');
     return entries.map((entry) => {
       if (!isRecord(entry) || typeof entry.name !== 'string') {
         throw new Error(`Invalid job ${JSON.stringify(entry)}; expected a name`);
@@ -127,9 +168,7 @@ export class GithubNativeWatchApi implements NativeWatchApi {
 
   async listOpenIssues(label: string): Promise<TrackingIssue[]> {
     const query = new URLSearchParams({ state: 'open', labels: label });
-    const entries = await this.pages(`/issues?${query}`, (body) =>
-      Array.isArray(body) ? body : []
-    );
+    const entries = await this.pages(`/issues?${query}`);
     return entries.flatMap((entry) => {
       if (!isRecord(entry) || !Number.isSafeInteger(entry.number)) {
         throw new Error(`Invalid issue ${JSON.stringify(entry)}; expected a number`);
@@ -148,9 +187,7 @@ export class GithubNativeWatchApi implements NativeWatchApi {
   }
 
   async listIssueCommentBodies(issueNumber: number): Promise<string[]> {
-    const entries = await this.pages(`/issues/${issueNumber}/comments`, (body) =>
-      Array.isArray(body) ? body : []
-    );
+    const entries = await this.pages(`/issues/${issueNumber}/comments`);
     return entries.map((entry) =>
       isRecord(entry) && typeof entry.body === 'string' ? entry.body : ''
     );
@@ -161,7 +198,9 @@ export class GithubNativeWatchApi implements NativeWatchApi {
     body: string;
     labels: readonly string[];
   }): Promise<number> {
-    const created = await this.call('POST', '/issues', issue);
+    const created = await this.call('POST', '/issues', issue, {
+      expected: 'a created issue object',
+    });
     if (!isRecord(created) || !Number.isSafeInteger(created.number)) {
       throw new Error(`Invalid created issue ${JSON.stringify(created)}; expected a number`);
     }
