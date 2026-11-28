@@ -18,7 +18,9 @@
 //
 // A command with anything after the lane's directory (`bun run test --changed`
 // appends `--changed=<sha>`) selects files, so it is not the whole lane and
-// runs as one process exactly as before.
+// runs as one process exactly as before. The one exception is the root lane under
+// `--changed=<sha>`, whose one process gets Bun's own `--parallel=<width>`
+// (see selectedRunCommand).
 //
 // The merged JUnit goes to `workerReportPath(lane)`, never to the lane's
 // `junitPath`, which is its coverage run's evidence.
@@ -113,6 +115,35 @@ export const systemDeps = (): RunnerDeps => ({
   print: (line, isFailure) => (isFailure ? error(line) : log(line)),
 });
 
+const ROOT_LANE_ID = 'root';
+
+/**
+ * The command a selected run (`--changed=<sha>`) executes. The root lane gives
+ * Bun its own `--parallel=<width>` workers: the selection can be most of the
+ * lane (an edit to `scripts/lib/log.ts` selects 81 of 376 files), and one serial
+ * process takes about four times as long as the worker-split lane runs them.
+ * A width of one, any other lane and any other kind of selection (a name filter)
+ * keep the serial command as it was, as does a command that already sets
+ * `--parallel`. The selection and its result are Bun's either way; only the file
+ * schedule differs. This is the local `--changed` loop, never the gate: CI runs
+ * the whole lane.
+ *
+ * @example
+ * selectedRunCommand('root', ['bun', 'test', '--timeout', '15000', 'scripts', '--changed=abc'], ['--changed=abc'], 6);
+ * // => ['bun', 'test', '--parallel=6', '--timeout', '15000', 'scripts', '--changed=abc']
+ */
+export function selectedRunCommand(
+  laneId: string,
+  command: readonly string[],
+  extra: readonly string[],
+  width: number
+): readonly string[] {
+  const isChangedSelection = extra.length === 1 && extra[0]?.startsWith('--changed=');
+  if (laneId !== ROOT_LANE_ID || !isChangedSelection || width < 2) return command;
+  if (command.some((arg) => arg === '--parallel' || arg.startsWith('--parallel='))) return command;
+  return [command[0] as string, command[1] as string, `--parallel=${width}`, ...command.slice(2)];
+}
+
 function parseArguments(argv: readonly string[]): { laneId: string; command: string[] } {
   const separator = argv.indexOf('--');
   const options = separator === -1 ? argv : argv.slice(0, separator);
@@ -141,20 +172,34 @@ export async function main(
   const mergedPath = deps.mergedPath ?? join(deps.rootDir ?? ROOT_DIR, workerReportPath(lane));
 
   const { extra } = splitLaneCommand(command, spec.testDir);
+  const resolveWidth = (): number =>
+    resolveWorkerCount(
+      deps.env,
+      deps.cpus,
+      deps.platform,
+      lane.workers?.defaultWidth,
+      lane.workers?.windowsWidth
+    );
   if (extra.length > 0) {
     // Not the whole lane, so no merged report: and none left over from another run.
     rmSync(mergedPath, { force: true });
-    info(`${laneId}: ${extra.join(' ')} selects files, so this run is one process`);
-    return deps.runSerial(command);
+    const selected = selectedRunCommand(
+      laneId,
+      command,
+      extra,
+      // Windows keeps the serial command: its workers cost seconds per spawn and
+      // the isolated schedule has not been measured there.
+      laneId === ROOT_LANE_ID && deps.platform !== 'win32' ? resolveWidth() : 1
+    );
+    info(
+      selected === command
+        ? `${laneId}: ${extra.join(' ')} selects files, so this run is one process`
+        : `${laneId}: ${extra.join(' ')} selects files, so this run is one process with Bun's own ${selected[2]}`
+    );
+    return deps.runSerial(selected);
   }
 
-  const count = resolveWorkerCount(
-    deps.env,
-    deps.cpus,
-    deps.platform,
-    lane.workers?.defaultWidth,
-    lane.workers?.windowsWidth
-  );
+  const count = resolveWidth();
   const cancellation = new AbortController();
   const interrupt: { by: Interrupt | null } = { by: null };
   deps.onInterrupt((signal) => {

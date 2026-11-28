@@ -749,6 +749,13 @@ Things this deliberately does not do:
   `--changed=<sha>` after the lane directory; anything there selects files, so the
   runner starts the command through the launcher as it always was. A split run would
   hand some workers no file, and the file-set check would have nothing to compare.
+  The root lane's selected run on POSIX adds Bun's own `--parallel=<width>` to that
+  one process (`selectedRunCommand` in `scripts/run-test-workers.ts`; the width is
+  the lane's, so `MANGO_TEST_WORKERS=1` restores the serial command). Bun still
+  picks the files, so only their schedule changes. Measured on an 18-core host with
+  an edit to `scripts/lib/log.ts`, which selects 81 of 376 files: 177.8 s serial,
+  46.4 s with `--parallel=6`, both 1,948 pass, 7 skip, 0 fail. The run is the local
+  `--changed` loop, never the gate; CI runs the whole lane.
 
 A fixed port or a fixed path under the shared temp directory is what would break
 here. The rule in
