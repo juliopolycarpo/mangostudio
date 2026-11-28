@@ -64,9 +64,11 @@ on:
 permissions:
   contents: read
 
+# Shared by every pure diagnostic workflow: one runs at a time, the rest wait in
+# order (see "Concurrency policy" in docs/reference/ci.md).
 concurrency:
-  group: randomized-order-nightly-${{ github.ref }}
-  cancel-in-progress: false
+  group: diagnostics
+  queue: max
 
 jobs:
   randomized:

@@ -19,9 +19,11 @@ on:
 permissions:
   contents: read
 
+# Shared by every pure diagnostic workflow: one runs at a time, the rest wait in
+# order (see "Concurrency policy" in docs/reference/ci.md).
 concurrency:
-  group: cross-runtime-nightly-${{ github.ref }}
-  cancel-in-progress: false
+  group: diagnostics
+  queue: max
 
 jobs:
   cold-fetch:

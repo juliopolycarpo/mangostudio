@@ -344,6 +344,25 @@ runs are predictable and a newer commit always supersedes an older one:
   retains original version approvals, and checks channel ancestry inside each
   publisher before writes. Cancellation or failure can leave partial publication.
 - **Scheduled workflows.** Cron-driven runs other than Canary never cancel in progress.
+- **Diagnostics queue.** `cross-runtime-nightly.yml`, `protocol-fuzz.yml` and
+  `randomized-order-nightly.yml` are cron or manual runs that nothing else waits on.
+  They share `concurrency: { group: diagnostics, queue: max }`, so one runs at a
+  time and the others wait in arrival order (up to 100 pending) instead of taking
+  runners from pull request CI. The default `queue: single` would keep one pending
+  run and drop the rest; `queue: max` is a validation error next to
+  `cancel-in-progress: true`, so these workflows set neither. Only workflows with
+  no `pull_request`, `push` or `workflow_call` trigger belong in the group, and
+  nothing Canary, release or a required check reads may join it: a queued run
+  there is delayed, never cancelled, and that delay is acceptable only for
+  diagnostics. `workflow-hygiene.unit.test.ts` pins the member list and the
+  triggers. Two workflows with only cron and manual triggers stay out:
+  `nightly-distribution-health.yml` verifies the published channels, so a queue
+  delay would delay a release signal, and `canary.yml` publishes. Native Bun
+  qualification stays out too: it also runs on `pull_request`, where the rule
+  above needs `cancel-in-progress: true`. The docs name `queue` as a plain value
+  and say nothing about an expression for it or about `queue: max` with an
+  expression `cancel-in-progress`; actionlint accepts both, but GitHub's runtime
+  behaviour is unverified, so the PR runs are not put at risk.
 
 Reusable workflows do not inherit a `concurrency` group from their caller, but
 cancelling the caller cancels the jobs it invoked, so `ci.yml`'s group already
