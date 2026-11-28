@@ -332,7 +332,8 @@ obrigatórios exatos são:
 | `Apply path-based labels`                | `15368` / `github-actions`           | `labeler.yml`, job `label`                                |
 
 `Verify classification labels` é um step de `Apply path-based labels`, não um
-contexto obrigatório. Os quatro agregados únicos foram verificados antes de
+contexto obrigatório. O step de roteamento de donos do job usa `continue-on-error`:
+uma falha de roteamento gera aviso sem reprovar o check obrigatório. Os quatro agregados únicos foram verificados antes de
 substituir a exigência ambígua de `Gate`. IDs das aplicações, política de status
 estrito, condições, bypass actors e todas as outras regras foram preservados.
 

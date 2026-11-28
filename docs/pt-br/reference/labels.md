@@ -21,9 +21,11 @@ do mapa, incluindo tipos atribuídos apenas manualmente, permanecem intactas. PR
 mantêm suas labels de ecossistema configuradas, que podem classificar atualizações de
 dependências além do mapa de arquivos alterados.
 
-A atribuição de PRs é separada: o workflow `auto-assign.yml` atribui o autor e solicita review
-de quem já commitou nos arquivos alterados pelo PR (histórico da branch base), então ele não
-precisa de configuração de dono por label.
+O roteamento de donos do PR roda como um step posterior do mesmo job (uma espera por runner por
+push, não duas): atribui o autor e solicita review de quem já commitou nos arquivos alterados
+pelo PR (histórico da branch base), então não precisa de configuração de dono por label. Ele
+ignora PRs em draft, roda de novo em `ready_for_review` e usa `continue-on-error`: uma falha de
+roteamento aparece como annotation de aviso e nunca reprova `Apply path-based labels`.
 
 Em issues, labels `area:` são opcionais, mas encorajadas quando a área afetada é clara — elas
 carregam o mesmo sinal de roteamento que em PRs. O workflow `issue-triage.yml` aplica a parte

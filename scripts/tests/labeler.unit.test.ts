@@ -292,11 +292,22 @@ describe('labeler coverage', () => {
     expect(missingFrom(mirrored, documented)).toEqual([]);
   });
 
-  test('documents that ownership routing belongs in auto-assign, not here', () => {
+  test('keeps classification fatal while owner routing shares the job', () => {
     const workflow = readText('.github/workflows/labeler.yml');
+    // Parsed, not sliced: the comment above the routing step names continue-on-error, and a
+    // text slice of the verify step would carry it.
+    const parsed = Bun.YAML.parse(workflow) as {
+      jobs: { label: { steps: Record<string, unknown>[] } };
+    };
+    const verify = parsed.jobs.label.steps.find(
+      (step) => step.name === 'Verify classification labels'
+    );
 
-    expect(workflow).toContain('auto-assign.yml');
-    expect(workflow).not.toContain('addAssignees');
-    expect(workflow).not.toContain('requestReviewers');
+    // Routing moved in to save a runner wait (#2700); only it may be continue-on-error,
+    // and its behaviour is pinned in pr-owner-routing.unit.test.ts.
+    expect(verify, 'expected the verify step in job label').toBeDefined();
+    expect(verify?.['continue-on-error']).toBeUndefined();
+    expect(workflow).toContain('addAssignees');
+    expect(workflow).toContain('requestReviewers');
   });
 });

@@ -294,9 +294,14 @@ describe('unique checks preserve enforcement producers', () => {
     expect(extractJobBlock(codeql, 'analyze')).toContain('security-events: write');
     const labeler = readText('.github/workflows/labeler.yml');
     expect(extractOnBlock(labeler)).toContain('pull_request_target:');
+    expect(extractOnBlock(labeler)).toContain('ready_for_review');
     const label = extractJobBlock(labeler, 'label');
     expect(label).toContain('name: Apply path-based labels');
     expect(label).toContain('pull-requests: write');
+    // Owner routing (assignee API) shares this job; it is the only reason for `issues: write`.
+    expect(label).toContain('issues: write');
+    // The required context must report on drafts too, so the job itself has no `if`.
+    expect(label).not.toMatch(/^ {4}if:/m);
     expect(label).not.toContain('actions/checkout');
   });
 });
