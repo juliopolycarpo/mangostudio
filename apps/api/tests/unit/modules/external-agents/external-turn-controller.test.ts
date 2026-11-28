@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, type Mock, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, jest, type Mock, spyOn } from 'bun:test';
 
 import { RemoteError } from '@mangostudio/protocol';
 import type {
@@ -54,6 +54,7 @@ import {
 } from '../../../support/external-agents/fake-external-runtime';
 import { createRealExternalRuntime } from '../../../support/external-agents/real-external-runtime';
 import { insertTestUser } from '../../../support/factories';
+import { advanceFakeClock } from '../../../support/fake-clock';
 import {
   installRecordingRealtimeBus,
   restoreRealtimeBus,
@@ -204,10 +205,92 @@ function startTurn(
   );
 }
 
+/**
+ * The controller arms its timers on the global `setTimeout` (the unrecognized-event watch, the
+ * settle pause, the steer grace) and reads `Date.now` for its last-resort cap, so a case that
+ * asserts a window installs bun's fake timers, which move both together. It does so only after
+ * the turn has started: opening the session and writing the first rows are not what the case times.
+ */
+let fakeClockInstalled = false;
+
+function installFakeClock(): void {
+  jest.useFakeTimers();
+  fakeClockInstalled = true;
+}
+
+function restoreRealClock(): void {
+  jest.useRealTimers();
+  fakeClockInstalled = false;
+}
+
+/**
+ * One real macrotask turn. `setImmediate` stays real under bun's fake timers, so this lets pending
+ * I/O callbacks run without moving the fake clock.
+ */
+function yieldToRealIo(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+/** Runs everything that is ready now, including due 0 ms timers, without moving the clock. */
+async function flushFakeClockWork(): Promise<void> {
+  for (let round = 0; round < 3; round += 1) {
+    await yieldToRealIo();
+    await advanceFakeClock(0);
+  }
+}
+
+/** Moves the fake clock by `ms` and lets what the due timers started finish. */
+async function advanceClock(ms: number): Promise<void> {
+  await advanceFakeClock(ms);
+  await flushFakeClockWork();
+}
+
+/** Reads whether a promise has settled, without awaiting it, so a case can assert "not yet". */
+function trackSettled(promise: Promise<unknown>): () => boolean {
+  let settled = false;
+  promise.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    }
+  );
+  return () => settled;
+}
+
+/**
+ * Resolves a turn that must already be able to end, because the clock has reached the moment it
+ * ends at. Never moves the clock, so a turn that needs more time fails here instead of passing
+ * on a longer wait.
+ */
+async function settleTurn(
+  running: Promise<ExternalTurnResult>,
+  expectation: string
+): Promise<ExternalTurnResult> {
+  const isSettled = trackSettled(running);
+  for (let round = 0; round < 200 && !isSettled(); round += 1) {
+    await yieldToRealIo();
+    await advanceFakeClock(0);
+  }
+  if (!isSettled()) {
+    throw new Error(
+      `turn state: still running with the fake clock at ${Date.now()} | expected: ${expectation}`
+    );
+  }
+  return running;
+}
+
 async function waitFor(predicate: () => boolean, label: string): Promise<void> {
   for (let attempt = 0; attempt < 500; attempt += 1) {
     if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 1));
+    if (fakeClockInstalled) {
+      // A 1 ms real-timer poll would never fire here, and a 1 ms fake advance would skew the
+      // boundaries a case asserts.
+      await flushFakeClockWork();
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
   }
   throw new Error(`Timed out waiting for ${label}`);
 }
@@ -321,6 +404,8 @@ afterEach(() => {
   activeSteerGate?.restore();
   activeSteerGate = undefined;
   restoreRealtimeBus();
+  // A failing case must not leave the fake clock installed for the next one.
+  restoreRealClock();
 });
 
 describe('external turn controller', () => {
@@ -679,6 +764,7 @@ describe('external turn controller', () => {
         observer: { onEvent: (event) => liveEvents.push(event) },
       });
       await waitFor(() => runtime.calls.turn.length === 1, 'the turn to reach the runtime');
+      installFakeClock();
 
       runtime.emit({ type: 'text_delta', text: 'done' });
       runtime.emitRawFrame({
@@ -689,17 +775,18 @@ describe('external turn controller', () => {
         event: { type: 'future_terminal', outcome: 'finished' },
       });
 
-      const outcome = await Promise.race([
+      // This runtime answers no health read, so every check is a failed read that re-arms the
+      // watch: at 10, then each 20 ms (the recheck ceiling) up to 70. The first check at or
+      // past the 80 ms last-resort cap is the one at 90, and only that one ends the turn.
+      const isSettled = trackSettled(running);
+      await advanceClock(89);
+      expect(isSettled()).toBe(false);
+      expect(runtime.calls.cancel).toHaveLength(0);
+      await advanceClock(1);
+      const outcome = await settleTurn(
         running,
-        new Promise<'still-running'>((resolve) =>
-          setTimeout(() => resolve('still-running'), 1_000)
-        ),
-      ]);
-      if (outcome === 'still-running') {
-        throw new Error(
-          'turn state: still running after 1000ms | expected: a terminal result after an unrecognized event went quiet'
-        );
-      }
+        'a terminal result once the last-resort check at 90 ms ran'
+      );
 
       expect(outcome.reason).toBe('vendor-error');
       expect(outcome.error?.code).toBe('unrecognized_event');
@@ -741,21 +828,21 @@ describe('external turn controller', () => {
       });
     }
 
-    /** Fails with the state of the turn instead of hanging the test when nothing ends it. */
-    async function settledWithin(
-      running: Promise<ExternalTurnResult>,
-      ms: number
-    ): Promise<ExternalTurnResult> {
-      const outcome = await Promise.race([
-        running,
-        new Promise<'still-running'>((resolve) => setTimeout(() => resolve('still-running'), ms)),
-      ]);
-      if (outcome === 'still-running') {
-        throw new Error(
-          `turn state: still running after ${ms}ms | expected: a terminal result from the controller`
-        );
-      }
-      return outcome;
+    /**
+     * Every case here runs on the fake clock, installed once the turn reached the runtime, so
+     * `emitUnrecognized` arms the watch at fake time 0. With FAST_POLICY the checks fall at 20,
+     * then every 40 (the recheck ceiling): 20, 60, 100, ... and a check that finds the session
+     * idle ends the turn `settleMs` (5) later.
+     */
+    async function startWatchedTurn(
+      harnessOptions: Parameters<typeof harness>[0],
+      startOptions: Parameters<typeof startTurn>[1] = {}
+    ) {
+      const parts = harness(harnessOptions);
+      const running = startTurn(parts.controller, startOptions);
+      await waitForTurnStart(parts.runtime);
+      installFakeClock();
+      return { ...parts, running, isSettled: trackSettled(running) };
     }
 
     /** The scripted answers to `runtime.health`, one per read, the last repeating. */
@@ -767,20 +854,26 @@ describe('external turn controller', () => {
     }
 
     it('ends the turn when the runtime says the session is idle', async () => {
-      const { runtime, controller } = harness({
-        unrecognizedEventPolicy: FAST_POLICY,
-        sessionHealth: () => 'idle',
-      });
       const liveEvents: ExternalAgentEvent[] = [];
-      const running = startTurn(controller, {
-        observer: { onEvent: (event) => liveEvents.push(event) },
-      });
-      await waitForTurnStart(runtime);
+      const { runtime, running, isSettled } = await startWatchedTurn(
+        { unrecognizedEventPolicy: FAST_POLICY, sessionHealth: () => 'idle' },
+        { observer: { onEvent: (event) => liveEvents.push(event) } }
+      );
 
       runtime.emit({ type: 'text_delta', text: 'done' });
       emitUnrecognized(runtime);
 
-      const result = await settledWithin(running, 1_000);
+      // One tick before the quiet window closes the runtime has not been asked.
+      await advanceClock(19);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(0);
+      // At 20 ms it is asked once, and the idle answer starts the 5 ms settle pause.
+      await advanceClock(1);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(1);
+      await advanceClock(4);
+      expect(isSettled()).toBe(false);
+      // The pause ends at 25 ms, and the turn ends with it.
+      await advanceClock(1);
+      const result = await settleTurn(running, 'a terminal result at 25 ms (20 quiet + 5 settle)');
       expect(result.reason).toBe('vendor-error');
       expect(result.error?.code).toBe('unrecognized_event');
       expect(result.error?.message).toContain('future_terminal');
@@ -802,50 +895,88 @@ describe('external turn controller', () => {
     });
 
     it('keeps the turn running, and asks again later, while the runtime says it is running', async () => {
-      const { runtime, controller } = harness({
+      const { runtime, running, isSettled } = await startWatchedTurn({
         unrecognizedEventPolicy: FAST_POLICY,
         sessionHealth: sessionHealthScript('running', 'running', 'idle'),
       });
-      const running = startTurn(controller);
-      await waitForTurnStart(runtime);
 
       emitUnrecognized(runtime);
 
-      const result = await settledWithin(running, 2_000);
+      // Reads fall at 20, 60 and 100 ms; each `running` answer re-arms the watch for 40 ms more.
+      await advanceClock(19);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(0);
+      await advanceClock(1);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(1);
+      await advanceClock(39);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(1);
+      await advanceClock(1);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(2);
+      await advanceClock(39);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(2);
+      expect(isSettled()).toBe(false);
+      await advanceClock(1);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(3);
+      // The idle answer at 100 ms starts the settle pause; the turn ends at 105 ms.
+      await advanceClock(4);
+      expect(isSettled()).toBe(false);
+      await advanceClock(1);
+
+      const result = await settleTurn(running, 'a terminal result at 105 ms');
       expect(result.reason).toBe('vendor-error');
       // Two running answers each re-armed the watch; only the idle one ended the turn.
       expect(runtime.calls.healthTimeoutMs).toHaveLength(3);
     });
 
     it('does not end the turn while a running vendor keeps being reported running', async () => {
-      const { runtime, controller } = harness({
+      const { runtime, running, isSettled } = await startWatchedTurn({
         unrecognizedEventPolicy: FAST_POLICY,
         sessionHealth: () => 'running',
       });
-      const running = startTurn(controller);
-      await waitForTurnStart(runtime);
 
       emitUnrecognized(runtime);
-      await waitFor(() => runtime.calls.healthTimeoutMs.length >= 3, 'three health reads');
+      // Reads at 20, 60 and 100 ms, each answered `running`, and the turn is still open after.
+      await advanceClock(20);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(1);
+      await advanceClock(40);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(2);
+      await advanceClock(39);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(2);
+      await advanceClock(1);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(3);
+      // Past the point an idle answer would have ended it (105 ms): nothing did.
+      await advanceClock(10);
+      expect(isSettled()).toBe(false);
+      expect(runtime.calls.cancel).toHaveLength(0);
       runtime.emit({ type: 'text_delta', text: 'a long tool finished' });
       runtime.emit({ type: 'completed' });
 
-      const result = await running;
+      const result = await settleTurn(running, 'a completed result after the vendor completed');
       expect(result.reason).toBe('completed');
       expect(result.error).toBeUndefined();
     });
 
     it('asks again, and does not end the turn, when the runtime cannot answer', async () => {
-      const { runtime, controller } = harness({
+      const { runtime, running, isSettled } = await startWatchedTurn({
         unrecognizedEventPolicy: FAST_POLICY,
         sessionHealth: sessionHealthScript(new Error('health timed out'), 'idle'),
       });
-      const running = startTurn(controller);
-      await waitForTurnStart(runtime);
 
       emitUnrecognized(runtime);
 
-      const result = await settledWithin(running, 2_000);
+      await advanceClock(20);
+      // The failed read at 20 ms ends nothing: it only re-arms the watch for 40 ms.
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(1);
+      await advanceClock(39);
+      expect(isSettled()).toBe(false);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(1);
+      // The second read at 60 ms is idle, and the turn ends after the 5 ms pause.
+      await advanceClock(1);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(2);
+      await advanceClock(4);
+      expect(isSettled()).toBe(false);
+      await advanceClock(1);
+
+      const result = await settleTurn(running, 'a terminal result at 65 ms');
       expect(result.reason).toBe('vendor-error');
       expect(runtime.calls.healthTimeoutMs).toHaveLength(2);
     });
@@ -853,45 +984,61 @@ describe('external turn controller', () => {
     it.each(['unlisted', 'closing'] as const)(
       'asks again, and does not end the turn, when the session is %s in the report',
       async (state) => {
-        const { runtime, controller } = harness({
+        const { runtime, running, isSettled } = await startWatchedTurn({
           unrecognizedEventPolicy: FAST_POLICY,
           sessionHealth: sessionHealthScript(state, 'idle'),
         });
-        const running = startTurn(controller);
-        await waitForTurnStart(runtime);
 
         emitUnrecognized(runtime);
 
-        const result = await settledWithin(running, 2_000);
+        await advanceClock(20);
+        // The first read, at 20 ms, ends nothing: it only re-arms the watch for 40 ms.
+        expect(runtime.calls.healthTimeoutMs).toHaveLength(1);
+        await advanceClock(39);
+        expect(isSettled()).toBe(false);
+        expect(runtime.calls.healthTimeoutMs).toHaveLength(1);
+        // The second read at 60 ms is idle, and the turn ends after the 5 ms pause.
+        await advanceClock(1);
+        expect(runtime.calls.healthTimeoutMs).toHaveLength(2);
+        await advanceClock(4);
+        expect(isSettled()).toBe(false);
+        await advanceClock(1);
+
+        const result = await settleTurn(running, 'a terminal result at 65 ms');
         expect(result.reason).toBe('vendor-error');
         expect(runtime.calls.healthTimeoutMs).toHaveLength(2);
       }
     );
 
     it('ends the turn at the last-resort cap even when the runtime keeps saying running', async () => {
-      const { runtime, controller } = harness({
+      const { runtime, running, isSettled } = await startWatchedTurn({
         unrecognizedEventPolicy: { ...FAST_POLICY, lastResortMs: 100 },
         sessionHealth: () => 'running',
       });
-      const running = startTurn(controller);
-      await waitForTurnStart(runtime);
 
       emitUnrecognized(runtime);
 
-      const result = await settledWithin(running, 2_000);
+      // Checks fall at 20, 60 and 100 ms. The first two read `running`; the one at 100 ms is
+      // the first at or past the cap, so it ends the turn without asking.
+      await advanceClock(99);
+      expect(isSettled()).toBe(false);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(2);
+      expect(runtime.calls.cancel).toHaveLength(0);
+      await advanceClock(1);
+
+      const result = await settleTurn(running, 'a terminal result at the 100 ms last-resort cap');
       expect(result.reason).toBe('vendor-error');
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(2);
       expect(result.error?.code).toBe('unrecognized_event');
       // The runtime still claims a turn, so the vendor is told to stop.
       expect(runtime.calls.cancel).toHaveLength(1);
     });
 
     it('never asks while an approval is pending', async () => {
-      const { runtime, controller, approvals } = harness({
+      const { runtime, approvals, running, isSettled } = await startWatchedTurn({
         unrecognizedEventPolicy: { ...FAST_POLICY, lastResortMs: 60 },
         sessionHealth: () => 'idle',
       });
-      const running = startTurn(controller);
-      await waitForTurnStart(runtime);
 
       runtime.emit({
         type: 'approval_requested',
@@ -909,73 +1056,82 @@ describe('external turn controller', () => {
       );
       emitUnrecognized(runtime);
 
-      // Several windows, and past the last-resort cap, with a person still deciding.
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      expect(runtime.calls.healthTimeoutMs).toHaveLength(0);
-      expect(runtime.calls.cancel).toHaveLength(0);
+      // The first check falls at 20 ms and finds the approval pending, so it re-arms (60 ms,
+      // 100 ms, ...) instead of asking. The checks at 60 ms and after are at or past the 60 ms
+      // last-resort cap, with a person still deciding.
+      for (const elapsedMs of [19, 1, 40, 40, 100]) {
+        await advanceClock(elapsedMs);
+        expect(runtime.calls.healthTimeoutMs).toHaveLength(0);
+        expect(runtime.calls.cancel).toHaveLength(0);
+        expect(isSettled()).toBe(false);
+      }
 
       runtime.emit({ type: 'completed' });
-      const result = await running;
+      const result = await settleTurn(running, 'a completed result after the vendor completed');
       expect(result.reason).toBe('completed');
     });
 
     it('leaves the turn alone when a recognized event follows', async () => {
-      const { runtime, controller } = harness({
+      const { runtime, running } = await startWatchedTurn({
         unrecognizedEventPolicy: FAST_POLICY,
         sessionHealth: () => 'idle',
       });
-      const running = startTurn(controller);
-      await waitForTurnStart(runtime);
 
       emitUnrecognized(runtime, 'future_progress');
       runtime.emit({ type: 'text_delta', text: 'still here' });
-      // Well past the quiet window: the recognized event is what proves the vendor is alive.
-      await new Promise((resolve) => setTimeout(resolve, 120));
-      expect(runtime.calls.healthTimeoutMs).toHaveLength(0);
+      // The recognized event is what proves the vendor is alive: the watch it ended stays quiet
+      // up to the 20 ms window, at it, past the settle pause, and well beyond.
+      for (const elapsedMs of [19, 1, 5, 95]) {
+        await advanceClock(elapsedMs);
+        expect(runtime.calls.healthTimeoutMs).toHaveLength(0);
+      }
       runtime.emit({ type: 'completed' });
 
-      const result = await running;
+      const result = await settleTurn(running, 'a completed result after the vendor completed');
       expect(result.reason).toBe('completed');
       expect(result.error).toBeUndefined();
       expect((await readAssistantRow()).text).toBe('still here');
     });
 
     it('restarts the quiet window on each consecutive unrecognized event', async () => {
-      const { runtime, controller } = harness({
+      const { runtime, running } = await startWatchedTurn({
         unrecognizedEventPolicy: { ...FAST_POLICY, quietMs: 150, maxRecheckMs: 300 },
         sessionHealth: () => 'running',
       });
-      const running = startTurn(controller);
-      await waitForTurnStart(runtime);
 
       emitUnrecognized(runtime, 'future_a');
-      await new Promise((resolve) => setTimeout(resolve, 90));
+      await advanceClock(90);
       emitUnrecognized(runtime, 'future_b');
-      await new Promise((resolve) => setTimeout(resolve, 90));
-      // 180ms after the first event, but only 90ms after the latest: not yet asked.
+      // The first event's window would close at 150 ms; the second one moved it to 240 ms.
+      await advanceClock(60);
       expect(runtime.calls.healthTimeoutMs).toHaveLength(0);
+      await advanceClock(89);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(0);
+      await advanceClock(1);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(1);
 
-      await waitFor(() => runtime.calls.healthTimeoutMs.length === 1, 'the first health read');
       runtime.emit({ type: 'completed' });
-      expect((await running).reason).toBe('completed');
+      expect(
+        (await settleTurn(running, 'a completed result after the vendor completed')).reason
+      ).toBe('completed');
     });
 
     it('does not end, or cancel, a turn the vendor already completed', async () => {
-      const { runtime, controller } = harness({
-        unrecognizedEventPolicy: FAST_POLICY,
-        sessionHealth: () => 'idle',
-      });
       const liveEvents: ExternalAgentEvent[] = [];
-      const running = startTurn(controller, {
-        observer: { onEvent: (event) => liveEvents.push(event) },
-      });
-      await waitForTurnStart(runtime);
+      const { runtime, running } = await startWatchedTurn(
+        { unrecognizedEventPolicy: FAST_POLICY, sessionHealth: () => 'idle' },
+        { observer: { onEvent: (event) => liveEvents.push(event) } }
+      );
 
       emitUnrecognized(runtime);
       runtime.emit({ type: 'completed' });
-      const result = await running;
-      // Past the quiet window and the settle pause.
-      await new Promise((resolve) => setTimeout(resolve, 120));
+      const result = await settleTurn(running, 'a completed result after the vendor completed');
+      // Up to the quiet window, at it, past the settle pause (25 ms), and well beyond.
+      for (const elapsedMs of [19, 1, 5, 95]) {
+        await advanceClock(elapsedMs);
+        expect(runtime.calls.healthTimeoutMs).toHaveLength(0);
+        expect(runtime.calls.cancel).toHaveLength(0);
+      }
 
       expect(result.reason).toBe('completed');
       expect(result.error).toBeUndefined();
@@ -985,23 +1141,24 @@ describe('external turn controller', () => {
     });
 
     it('does not cancel again when the user already stopped the turn', async () => {
-      const { runtime, controller } = harness({
+      const { runtime, running } = await startWatchedTurn({
         unrecognizedEventPolicy: FAST_POLICY,
         sessionHealth: () => 'idle',
       });
-      const running = startTurn(controller);
-      await waitForTurnStart(runtime);
 
       emitUnrecognized(runtime);
       expect(cancelActiveTurn(assistantMessageId, userId, chatId, 'user_cancelled')).toBe(true);
-      const result = await running;
-      await new Promise((resolve) => setTimeout(resolve, 120));
+      const result = await settleTurn(running, 'a cancelled-by-user result after the stop');
+      // Up to the quiet window, at it, past the settle pause (25 ms), and well beyond.
+      for (const elapsedMs of [19, 1, 5, 95]) {
+        await advanceClock(elapsedMs);
+        expect(runtime.calls.healthTimeoutMs).toHaveLength(0);
+        // The stop's own cancel, and nothing from the watch behind it.
+        expect(runtime.calls.cancel).toHaveLength(1);
+      }
 
       expect(result.reason).toBe('cancelled-by-user');
       expect(result.error).toBeUndefined();
-      // The stop's own cancel, and nothing from the watch behind it.
-      expect(runtime.calls.cancel).toHaveLength(1);
-      expect(runtime.calls.healthTimeoutMs).toHaveLength(0);
     });
   });
 
@@ -1033,20 +1190,15 @@ describe('external turn controller', () => {
       });
     }
 
-    async function settledWithin(
-      running: Promise<ExternalTurnResult>,
-      ms: number
-    ): Promise<ExternalTurnResult> {
-      const outcome = await Promise.race([
+    /**
+     * The turn must end with no fake time passing: the marker alone ends it. SLOW_POLICY's
+     * quiet window is a minute, so a turn that waited for it would never settle here.
+     */
+    function settledAtOnce(running: Promise<ExternalTurnResult>): Promise<ExternalTurnResult> {
+      return settleTurn(
         running,
-        new Promise<'still-running'>((resolve) => setTimeout(() => resolve('still-running'), ms)),
-      ]);
-      if (outcome === 'still-running') {
-        throw new Error(
-          `turn state: still running after ${ms}ms | expected: a terminal result from an envelope marked terminal: true`
-        );
-      }
-      return outcome;
+        'a terminal result from an envelope marked terminal: true, with the clock unmoved'
+      );
     }
 
     it('ends the turn at once as a vendor error that names the unreadable kind', async () => {
@@ -1059,11 +1211,12 @@ describe('external turn controller', () => {
         observer: { onEvent: (event) => liveEvents.push(event) },
       });
       await waitForTurnStart(runtime);
+      installFakeClock();
 
       runtime.emit({ type: 'text_delta', text: 'done' });
       emitFutureEvent(runtime, 'future_terminal', true);
 
-      const result = await settledWithin(running, 1_000);
+      const result = await settledAtOnce(running);
       expect(result.reason).toBe('vendor-error');
       expect(result.error?.code).toBe('unrecognized_terminal_event');
       expect(result.error?.message).toContain('future_terminal');
@@ -1090,15 +1243,23 @@ describe('external turn controller', () => {
       });
       const running = startTurn(controller);
       await waitForTurnStart(runtime);
+      installFakeClock();
+      const isSettled = trackSettled(running);
 
       emitFutureEvent(runtime, 'future_progress', undefined);
       emitFutureEvent(runtime, 'future_progress', false);
-      // Long enough for a wrongly honoured marker to have ended the turn.
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // A wrongly honoured marker would end the turn with no time passing, so work that is
+      // ready now has run once the clock moves 0 ms. The quiet window is a minute: one tick
+      // short of it, nothing has asked the runtime either.
+      await advanceClock(0);
+      expect(isSettled()).toBe(false);
+      await advanceClock(SLOW_POLICY.quietMs - 1);
+      expect(isSettled()).toBe(false);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(0);
       runtime.emit({ type: 'text_delta', text: 'still here' });
       runtime.emit({ type: 'completed' });
 
-      const result = await settledWithin(running, 1_000);
+      const result = await settleTurn(running, 'a completed result after the vendor completed');
       expect(result.reason).toBe('completed');
       expect(result.error).toBeUndefined();
       expect((await readAssistantRow()).text).toBe('still here');
@@ -1108,6 +1269,7 @@ describe('external turn controller', () => {
       const { runtime, controller } = harness({ unrecognizedEventPolicy: SLOW_POLICY });
       const running = startTurn(controller);
       await waitForTurnStart(runtime);
+      installFakeClock();
 
       // A known, non-terminal kind carrying the marker is still just progress.
       runtime.emitEnvelope({
@@ -1127,7 +1289,7 @@ describe('external turn controller', () => {
         terminal: true,
       });
 
-      const result = await settledWithin(running, 1_000);
+      const result = await settleTurn(running, 'a completed result from the known completed event');
       expect(result.reason).toBe('completed');
       expect(result.error).toBeUndefined();
       expect((await readAssistantRow()).text).toBe('a');
@@ -1138,6 +1300,7 @@ describe('external turn controller', () => {
       try {
         const running = startTurn(controller);
         await waitFor(() => runtime.calls.turn.length === 1, 'the turn to reach the runtime');
+        installFakeClock();
 
         runtime.emitRawFrame({
           sessionId: runtime.sessionId(),
@@ -1148,7 +1311,7 @@ describe('external turn controller', () => {
           terminal: true,
         });
 
-        const result = await settledWithin(running, 1_000);
+        const result = await settledAtOnce(running);
         expect(result.reason).toBe('vendor-error');
         expect(result.error?.code).toBe('unrecognized_terminal_event');
       } finally {
@@ -3189,9 +3352,19 @@ describe('external turn controller', () => {
       await gate.reached;
       expect(runtime.calls.steer).toHaveLength(0);
 
+      // The fake clock starts with the cancel, so the 20 ms steer grace it arms is measured from 0.
+      installFakeClock();
+      const isTurnSettled = trackSettled(running);
       expect(cancelActiveTurn(assistantMessageId, userId, chatId, 'user_cancelled')).toBe(true);
       await waitFor(() => runtime.calls.cancel.length === 1, 'the cancel to reach the runtime');
-      await new Promise((resolve) => setTimeout(resolve, 60));
+      // The held checkpoint outlives the grace: one tick short of it, at it, and well past it,
+      // the steer has not been dispatched.
+      await advanceClock(19);
+      expect(isTurnSettled()).toBe(false);
+      expect(runtime.calls.steer).toHaveLength(0);
+      await advanceClock(1);
+      expect(runtime.calls.steer).toHaveLength(0);
+      await advanceClock(40);
       expect(runtime.calls.steer).toHaveLength(0);
 
       gate.release();
@@ -3238,9 +3411,17 @@ describe('external turn controller', () => {
         (error: unknown) => error
       );
       await gate.reached;
+      // The fake clock starts with the cancel, so the 20 ms steer grace it arms is measured from 0.
+      installFakeClock();
       expect(cancelActiveTurn(assistantMessageId, userId, chatId, 'user_cancelled')).toBe(true);
       await waitFor(() => runtime.calls.cancel.length === 1, 'the cancel to reach the runtime');
-      await new Promise((resolve) => setTimeout(resolve, 60));
+      // One tick short of the grace, at it, and well past it, with the checkpoint still held.
+      await advanceClock(19);
+      expect(runtime.calls.steer).toHaveLength(0);
+      await advanceClock(1);
+      expect(runtime.calls.steer).toHaveLength(0);
+      await advanceClock(40);
+      expect(runtime.calls.steer).toHaveLength(0);
 
       gate.release();
       expect(await outcome).toBe(databaseFailure);
@@ -3275,14 +3456,19 @@ describe('external turn controller', () => {
       });
       await waitFor(() => runtime.calls.steer.length === 1, 'the steer to reach the runtime');
 
-      const startedAt = Date.now();
+      // The fake clock starts with the completion, so the 20 ms steer grace it arms is measured from 0.
+      installFakeClock();
+      const isTurnSettled = trackSettled(running);
       runtime.emit({ type: 'completed' });
-      const result = await running;
+      // Bounded by the grace period, not by the runtime call that never answers: the turn is
+      // still held one tick short of it and ends at it. `steering` itself is left permanently
+      // unsettled by this test.
+      await advanceClock(19);
+      expect(isTurnSettled()).toBe(false);
+      await advanceClock(1);
+      const result = await settleTurn(running, 'a completed result once the 20 ms grace elapsed');
 
       expect(result.reason).toBe('completed');
-      // Bounded by the grace period, not by the runtime call that never
-      // answers — `steering` itself is left permanently unsettled by this test.
-      expect(Date.now() - startedAt).toBeLessThan(1_000);
       void steering;
     });
   });
