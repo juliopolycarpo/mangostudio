@@ -20,9 +20,11 @@ classification. Labels outside the map, including
 manual-only types, remain untouched. Dependabot PRs keep their configured ecosystem labels,
 which can classify dependency updates beyond the changed-file map.
 
-PR ownership is separate: the `auto-assign.yml` workflow assigns the author and requests reviews
-from prior committers of the PR's changed files (base-branch history), so it needs no per-label
-owner config.
+PR ownership routing runs as a later step of the same job (one runner wait per push, not two): it
+assigns the author and requests reviews from prior committers of the PR's changed files
+(base-branch history), so it needs no per-label owner config. It skips draft PRs, runs again on
+`ready_for_review`, and is `continue-on-error`: a routing failure shows as a warning annotation
+and never fails `Apply path-based labels`.
 
 For issues, `area:` labels are optional but encouraged when the affected area is clear — they
 carry the same routing signal as on PRs. The `issue-triage.yml` workflow enforces the

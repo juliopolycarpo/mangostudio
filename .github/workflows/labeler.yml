@@ -1,19 +1,23 @@
 name: Labeler
 
-# Classification only (area:/type: labels from .github/labeler.yml). Assignee and
-# reviewer routing lives in .github/workflows/auto-assign.yml — do not duplicate
-# ownership logic here.
+# One job per PR push for PR housekeeping: path-based area:/type: classification plus
+# ownership routing (author assignment + history-based reviewer requests). They used to be two
+# workflows (Labeler, Auto Assign), each paying its own runner queue wait on a few seconds of
+# work (#2700); the account's 20-job cap makes that wait the dominant cost. The required check
+# context is the job name below, so the merge keeps reporting `Apply path-based labels` exactly.
 
-# pull_request_target so PRs from forks can be labeled: the fork GITHUB_TOKEN on
-# `pull_request` is read-only. actions/labeler only reads the list of changed
-# file paths — it never checks out or executes PR code — so this trigger is safe.
+# pull_request_target so PRs from forks can be labeled and routed: the fork GITHUB_TOKEN on
+# `pull_request` is read-only. Nothing here checks out or executes PR code: actions/labeler only
+# reads the list of changed file paths, and the routing script only reads PR metadata and
+# base-branch history through the GitHub API. `ready_for_review` is here for routing, which
+# skips drafts; the labeling steps are idempotent, so they simply run again on it.
 on:
   pull_request_target:
-    types: [opened, reopened, synchronize]
+    types: [opened, reopened, ready_for_review, synchronize]
 
 # Coalesce rapid synchronize pushes so overlapping runs on the same PR are
-# cancelled instead of wastefully racing. Labeling is idempotent, so this is
-# purely an efficiency guard.
+# cancelled instead of wastefully racing. Labeling and routing are both idempotent,
+# so this is purely an efficiency guard.
 concurrency:
   group: labeler-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -27,8 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: read # labeler reads .github/labeler.yml from the base branch
-      pull-requests: write # apply area:/type: labels to the PR
+      contents: read # labeler reads .github/labeler.yml from the base branch; no checkout happens here
+      issues: write # assign the PR author via the issues assignee API
+      pull-requests: write # apply area:/type: labels and request reviewers derived from file history
     steps:
       - id: label
         uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0
@@ -57,3 +62,158 @@ jobs:
                 `No area: or type: label was applied to PR #${context.issue.number}. Update .github/labeler.yml for the changed paths.`
               );
             }
+      # Routing was its own non-required job, so a GitHub API hiccup never blocked a merge. It now
+      # shares the required job, so continue-on-error keeps that property: a routing failure
+      # leaves the job green and the next step surfaces it as a warning annotation. It runs even
+      # when the verify step above failed (`!cancelled()`), because a missing label and a routing
+      # outcome are independent. Drafts are skipped here instead of by a job-level `if`, which
+      # would also skip the required check.
+      - name: Assign owners from changed-file history
+        id: route
+        if: ${{ !cancelled() && !github.event.pull_request.draft }}
+        continue-on-error: true
+        timeout-minutes: 3 # routing is best effort and must not hold the required check open
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const MAX_FILES = 50;
+            const COMMITS_PER_FILE = 10;
+            const MAX_REVIEWERS = 3;
+
+            const isBot = (user) =>
+              !user || user.type === 'Bot' || user.login.endsWith('[bot]');
+
+            const pr = context.payload.pull_request;
+            if (!pr) {
+              core.setFailed('Auto-assignment can only run for pull request events.');
+              return;
+            }
+
+            const { owner, repo } = context.repo;
+            const authorLogin = pr.user?.login;
+
+            // Whoever has historically committed to the files this PR touches is a
+            // natural reviewer. Reading the base-branch history keeps the signal on
+            // trusted commits and picks up new contributors without config changes.
+            // A single page bounded to MAX_FILES is enough to derive owners;
+            // paginating every changed file would waste API quota on large PRs.
+            async function listChangedFiles() {
+              const delays = [1000, 2000];
+              for (let attempt = 0; ; attempt++) {
+                try {
+                  const { data } = await github.rest.pulls.listFiles({
+                    owner,
+                    repo,
+                    pull_number: pr.number,
+                    per_page: MAX_FILES,
+                  });
+                  return data;
+                } catch (error) {
+                  const delay = delays[attempt];
+                  if (error?.status !== 500 || delay === undefined) throw error;
+                  core.info(`PR files temporarily unavailable. Retrying in ${delay} ms.`);
+                  await new Promise((resolve) => setTimeout(resolve, delay));
+                }
+              }
+            }
+
+            const files = await listChangedFiles();
+            const paths = [
+              ...new Set(
+                files
+                  .slice(0, MAX_FILES)
+                  .flatMap((file) => [file.filename, file.previous_filename])
+                  .filter(Boolean)
+              ),
+            ];
+
+            const reviewerScores = new Map();
+            for (const path of paths) {
+              let commits;
+              try {
+                ({ data: commits } = await github.rest.repos.listCommits({
+                  owner,
+                  repo,
+                  path,
+                  sha: pr.base.ref,
+                  per_page: COMMITS_PER_FILE,
+                }));
+              } catch (error) {
+                core.info(`Skipping history for ${path}: ${error.message}`);
+                continue;
+              }
+              for (const commit of commits) {
+                const login = commit.author?.login;
+                if (!login || isBot(commit.author) || login === authorLogin) continue;
+                reviewerScores.set(login, (reviewerScores.get(login) ?? 0) + 1);
+              }
+            }
+
+            const candidates = [...reviewerScores.entries()]
+              .sort((a, b) => b[1] - a[1])
+              .map(([login]) => login)
+              .slice(0, MAX_REVIEWERS);
+
+            const { data: currentPr } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: pr.number,
+            });
+
+            // Skip anyone already requested or who has already reviewed so repeated
+            // pushes don't re-ping reviewers after they have weighed in.
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner,
+              repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+            const handledReviewers = new Set([
+              ...(currentPr.requested_reviewers ?? []).map((user) => user.login),
+              ...reviews.map((review) => review.user?.login).filter(Boolean),
+            ]);
+            const reviewersToRequest = candidates.filter(
+              (login) => !handledReviewers.has(login)
+            );
+
+            // requestReviewers/addAssignees only accept users with repo access, so
+            // request one at a time and let a non-collaborator drop out instead of
+            // failing the whole batch.
+            for (const reviewer of reviewersToRequest) {
+              try {
+                await github.rest.pulls.requestReviewers({
+                  owner,
+                  repo,
+                  pull_number: pr.number,
+                  reviewers: [reviewer],
+                });
+                core.info(`Requested review from ${reviewer}`);
+              } catch (error) {
+                core.info(`Could not request review from ${reviewer}: ${error.message}`);
+              }
+            }
+
+            // The author owns their PR; bots (e.g. Dependabot) are left unassigned.
+            if (authorLogin && !isBot(pr.user)) {
+              const alreadyAssigned = (currentPr.assignees ?? []).some(
+                (user) => user.login === authorLogin
+              );
+              if (alreadyAssigned) {
+                core.info(`${authorLogin} already owns this PR.`);
+              } else {
+                try {
+                  await github.rest.issues.addAssignees({
+                    owner,
+                    repo,
+                    issue_number: pr.number,
+                    assignees: [authorLogin],
+                  });
+                  core.info(`Assigned ${authorLogin}`);
+                } catch (error) {
+                  core.info(`Could not assign ${authorLogin}: ${error.message}`);
+                }
+              }
+            }
+      - name: Warn that owner routing failed
+        if: ${{ !cancelled() && steps.route.outcome == 'failure' }}
+        run: echo "::warning title=Owner routing failed::Assignee and reviewer routing did not complete; see the 'Assign owners from changed-file history' step. Labeling is unaffected and this does not block the merge."

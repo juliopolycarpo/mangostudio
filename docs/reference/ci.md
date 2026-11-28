@@ -610,7 +610,8 @@ contexts are:
 | `Apply path-based labels`                | `15368` / `github-actions`           | `labeler.yml`, job `label`                             |
 
 `Verify classification labels` is a step in `Apply path-based labels`, not a
-required context. All four unique aggregate contexts were verified before
+required context. The job's owner-routing step is `continue-on-error`, so a
+routing failure warns without failing the required check. All four unique aggregate contexts were verified before
 replacing the ambiguous `Gate` requirement. Application IDs, strict-status
 policy, conditions, bypass actors and every other rule were retained.
 
