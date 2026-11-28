@@ -13,6 +13,10 @@ name: Runtime Build
 # and LLVM that ring's aarch64 assembly needs). `scripts/build-runtime.ts`
 # checks every binary's header, and asks each one this runner can execute for
 # its version.
+#
+# On a push to main the shipping job also publishes the unstamped cargo output
+# under a digest of its inputs (`runtime-unstamped-<platform>-<digest>`, seven
+# days). Nothing reads it yet, and that part cannot fail the build.
 
 on:
   workflow_call:
@@ -196,6 +200,23 @@ jobs:
           shared-key: runtime-build-${{ matrix.platform }}
           lookup-only: ${{ github.ref == 'refs/heads/main' }}
 
+      # Stage 2 of #2698: key the unstamped binary by everything that
+      # determines it (scripts/lib/runtime-input-digest.ts). Main pushes of the
+      # shipping profile only; a pull request build is light and publishes
+      # nothing reusable. Nothing consumes the digest yet, so this step, the
+      # two after the build and their warning cannot fail the job.
+      - name: Compute runtime input digest
+        id: digest
+        if: inputs.mode == 'artifact' && inputs.profile == 'shipping' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          BUILD_PROFILE: ${{ inputs.profile }}
+        # Same flags as the build below; `--zig` is inert off Linux. Writes
+        # `digest=` to the step output.
+        run: bun --no-install ./scripts/ci/runtime-input-digest.ts digest --platform "$PLATFORM" --profile "$BUILD_PROFILE" --zig
+
       # A seed has nothing to do on an exact hit: the entry it would save
       # exists. A miss builds exactly what a PR light build does, then
       # rust-cache's post-job step saves the new entry.
@@ -217,7 +238,7 @@ jobs:
           fi
           bun --no-install ./scripts/build-runtime.ts "${args[@]}"
 
-      # The only artifact route. Cache-seed mode never reaches it.
+      # The artifact route every consumer reads. Cache-seed mode never reaches it.
       - name: Upload runtime
         if: inputs.mode == 'artifact'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -229,3 +250,48 @@ jobs:
           # A re-run of the consuming job re-runs this one too; the name is
           # per source commit, so the newer upload is the same build input.
           overwrite: true
+
+      # cargo's output is never touched by stamping: `build-runtime.ts` stamps
+      # a staged copy. This stages the cargo bytes (refusing any that carry a
+      # stamp) with a receipt, and prints the digest beside the binary's
+      # SHA-256 in the step summary: two main runs with the same digest should
+      # show the same hash. Evidence for a maintainer, not a gate.
+      - name: Stage unstamped runtime
+        id: unstamped
+        if: steps.digest.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          BUILD_PROFILE: ${{ inputs.profile }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          bun --no-install ./scripts/ci/runtime-input-digest.ts stage \
+            --platform "$PLATFORM" --profile "$BUILD_PROFILE" --zig \
+            --digest "$DIGEST" --out "${RUNNER_TEMP}/runtime-unstamped"
+
+      # A reusable base: kept seven days, named from target and digest, and
+      # under a prefix no distribution download pattern matches.
+      - name: Upload unstamped runtime
+        id: unstamped-upload
+        if: steps.unstamped.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.unstamped.outputs.name }}
+          path: ${{ runner.temp }}/runtime-unstamped
+          retention-days: 7
+          if-no-files-found: error
+          # A re-run of this job recomputes the same digest and rebuilds the
+          # same inputs.
+          overwrite: true
+
+      # `continue-on-error` alone leaves no trace on a green job.
+      - name: Warn that the unstamped runtime was not published
+        if: steps.digest.outcome == 'failure' || steps.unstamped.outcome == 'failure' || steps.unstamped-upload.outcome == 'failure'
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          echo "::warning title=Unstamped runtime not published::${PLATFORM}: the input digest, receipt or upload failed; the build is unaffected."
