@@ -211,17 +211,31 @@ fn magic_bytes(entry_source: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
-/// The names of the `sources` whose code spells `magic` as a byte-array literal (`0x1a, 0x42, ...`,
-/// whatever the whitespace), except `entry`, which owns it.
+/// The names of the `sources` whose code spells `magic` as a hex array (`0x1a, 0x42, ...`), a byte
+/// string (`b"\x1a\x42..."`) or a decimal array (`26, 66, ...`), whatever the whitespace or case,
+/// except `entry`, which owns it.
 ///
 /// Usage: `magic_copies(&[("a.rs".into(), "[0x01, 0xff]".into())], &[1, 255], "main.rs")` is
 /// `["a.rs"]`.
 fn magic_copies(sources: &[(String, String)], magic: &[u8], entry: &str) -> Vec<String> {
-    let spelled = magic
-        .iter()
-        .map(|byte| format!("0x{byte:02x}"))
-        .collect::<Vec<_>>()
-        .join(",");
+    // The three spellings of a byte sequence in Rust source, compared after whitespace is
+    // squeezed out and case is folded: a hex array, a byte string and a decimal array.
+    let spellings = [
+        magic
+            .iter()
+            .map(|byte| format!("0x{byte:02x}"))
+            .collect::<Vec<_>>()
+            .join(","),
+        magic
+            .iter()
+            .map(|byte| format!("\\x{byte:02x}"))
+            .collect::<String>(),
+        magic
+            .iter()
+            .map(u8::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+    ];
     sources
         .iter()
         .filter(|(name, _)| name != entry)
@@ -233,7 +247,8 @@ fn magic_copies(sources: &[(String, String)], magic: &[u8], entry: &str) -> Vec<
                 .chars()
                 .filter(|character| !character.is_whitespace())
                 .collect();
-            squeezed.to_lowercase().contains(&spelled)
+            let folded = squeezed.to_lowercase();
+            spellings.iter().any(|spelled| folded.contains(spelled))
         })
         .map(|(name, _)| name.clone())
         .collect()
@@ -415,6 +430,41 @@ fn the_magic_literal_is_read_from_the_declaration_and_found_only_outside_the_ent
         ["crates/rt/src/other.rs"],
         "expected only the code copy outside the entry (not a comment, not a different array)"
     );
+}
+
+#[test]
+fn a_byte_string_and_a_decimal_array_copy_of_the_magic_are_caught() {
+    let magic = [0x1a, 0x42, 0xff];
+    let entry = "crates/rt/src/main.rs";
+    let spellings = [
+        ("byte string", r#"const M: &[u8] = b"\x1a\x42\xFF";"#),
+        (
+            "spaced decimal array",
+            "const M: [u8; 3] = [26, 66,\n 255];",
+        ),
+        ("hex array", "const M: [u8; 3] = [0x1a, 0x42, 0xff];"),
+    ];
+    for (spelling, source) in spellings {
+        let sources = [("crates/rt/src/copy.rs".to_owned(), source.to_owned())];
+        assert_eq!(
+            magic_copies(&sources, &magic, entry),
+            ["crates/rt/src/copy.rs"],
+            "expected a {spelling} copy of the magic to be caught | received: none"
+        );
+    }
+
+    let near_misses = [
+        ("byte string", r#"b"\x1a\x42\xfe""#),
+        ("decimal array", "[26, 66, 254]"),
+        ("decimal array in a comment", "// [26, 66, 255]"),
+    ];
+    for (spelling, source) in near_misses {
+        let sources = [("crates/rt/src/other.rs".to_owned(), source.to_owned())];
+        assert!(
+            magic_copies(&sources, &magic, entry).is_empty(),
+            "expected a {spelling} that is not the magic to pass | received: flagged"
+        );
+    }
 }
 
 #[test]
