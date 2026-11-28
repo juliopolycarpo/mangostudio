@@ -278,7 +278,7 @@ arquivos e o layout de dois binários permanecem iguais. Os toolchains Rust são
   `runtime-unstamped-<plataforma>-<digest>` com um `receipt.json` (sete dias) e
   imprime o digest ao lado do SHA-256 do binário no resumo do step, para que um
   mantenedor confira que duas execuções com o mesmo digest geraram o mesmo
-  binário. Nada lê o artefato ainda e uma falha nesses steps só emite um aviso. A
+  binário. Uma falha nesses steps só emite um aviso. A
   imagem do runner, o Xcode, o MSVC e o compilador C ficam no recibo, não no
   digest: mudam quase toda semana e o job não consegue fixá-los. Nomes de
   artefato são forjáveis: qualquer um calcula o digest, e uma execução de pull
@@ -293,6 +293,37 @@ arquivos e o layout de dois binários permanecem iguais. Os toolchains Rust são
 ./scripts/ci/runtime-input-digest.ts digest --platform linux-x64-musl
 --profile shipping` o imprime (`--manifest` mostra as entradas, `--allow-dirty`
   inclui as não commitadas).
+- **Reuso de um runtime sem carimbo.** Um push para a main pode pular o cargo e
+  carimbar o binário sem carimbo de uma execução anterior. Fica desligado até um
+  mantenedor rodar `gh variable set RUNTIME_REUSE --body true` (`gh variable
+delete RUNTIME_REUSE` desliga) e vale só para o perfil shipping de um push
+  para a main (nunca pull request, perfil light, dispatch ou release, que sempre
+  compilam). Depois do step do digest, `scripts/ci/runtime-base-reuse.ts` lista as
+  execuções recentes do CI deste repositório (no máximo 100 execuções, 5
+  candidatas, 60 s) e só aceita uma candidata quando tudo isto vale: um push do
+  `ci.yml` na main, na primeira tentativa, deste repositório; o job `Runtime
+<plataforma>` dela teve sucesso (a execução pode ter sido cancelada depois,
+  por isso decide o job, não a execução); o commit dela é ancestral deste;
+  exatamente um artefato não expirado tem este digest; o `receipt.json` é
+  válido pela leitura estrita; e o SHA-256 do arquivo é igual ao do recibo e ao
+  digest da API. O binário precisa estar sem carimbo e com o cabeçalho correto.
+  Toda recusa e todo erro até esse ponto voltam ao cargo com um aviso. Com a base
+  verificada, o mesmo `build-runtime.ts` faz o staging, carimba e verifica
+  (`--prebuilt-unstamped`), e uma falha aí falha o job em vez de compilar em
+  silêncio. O reuso também exige um acerto exato do `rust-cache`, senão o
+  post step salvaria um `target/` vazio sob a chave. A base reusada não é enviada
+  de novo: seus sete dias continuam contando a partir da execução que a
+  compilou, e um registro de 30 dias
+  `runtime-reuse-<plataforma>-<execução>-<digest>-<sha256>`, mais o resumo do
+  step, dizem qual execução produziu os bytes. Nomes de jobs, saídas e
+  artefatos seguintes não mudam. O Canary lê o step marcador `Use reused
+runtime base` e esse registro, e recusa uma origem cujo registro ou produtor
+  falhe nas mesmas regras (veja `canary-validation.md`). Para forçar uma
+  recompilação, defina a variável com qualquer valor diferente de `true` (ou
+  apague-a), ou mude qualquer entrada do digest, o que dá à compilação um
+  digest que nenhuma execução anterior tem. `runtime-base-reuse-policy.unit.test.ts` fixa
+  o portão, o fallback, a permissão `actions: read` e que releases estáveis
+  compilam do código-fonte.
 - **Verificações.** `scripts/build-runtime.ts` e o staging com `--runtime-dir`
   leem o cabeçalho de cada binário (`scripts/lib/executable-header.ts`): formato,
   CPU, loader glibc ou binário estático, e nenhum símbolo `GLIBC_` acima do piso.
