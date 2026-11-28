@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { RUNTIME_REUSE_MARKER_STEP } from '../lib/canary-runtime-reuse';
 import { readText } from './support/read-text';
 import {
   extractJobBlock,
@@ -139,6 +140,11 @@ describe('runtime reuse fallback', () => {
     expect(marker).toMatch(
       /^ {8}run: cat "\$\{RUNNER_TEMP\}\/runtime-reuse-summary\.md" >> "\$GITHUB_STEP_SUMMARY"$/m
     );
+  });
+
+  test('the marker step is named exactly what Canary looks for in the jobs API', () => {
+    // Renaming the step in the workflow without the constant would make every reuse read as a build.
+    expect(runtimeStep(RUNTIME_REUSE_MARKER_STEP)).toContain(`name: ${RUNTIME_REUSE_MARKER_STEP}`);
   });
 
   test('the build still runs on every path and takes a base only after the marker succeeded', () => {

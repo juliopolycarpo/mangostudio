@@ -1,8 +1,11 @@
 import { readFileSync } from 'node:fs';
 
 import { rustCoverageFromGitHub, workflowCoverageFromGitHub } from './canary-lane-coverage';
+import { type RuntimeReuseReceipt, settleRuntimeReuse } from './canary-runtime-reuse';
 import type { CoverageRule } from './codeql-rust-coverage';
 import { needsCompiledProtocolValidation, touchesProtocolSurface } from './protocol';
+import { ALL_BINARY_TARGETS } from './release-targets';
+import { runtimeBuildJobName } from './runtime-base-reuse';
 import { classifyChangedPaths } from './rust-lanes';
 import { requireJsonRecord, requirePositiveSafeInteger } from './script-guards';
 
@@ -63,6 +66,12 @@ export interface CanaryValidationReceipt {
     readonly cargo: LaneCoverageReceipt;
     readonly protocol: LaneCoverageReceipt;
   };
+  /**
+   * Which runtimes the source run compiled and which it reused from an earlier
+   * main run, with the verified provenance of each reuse. Absent in receipts
+   * written before runtime reuse existed; those always compiled every runtime.
+   */
+  readonly runtimeReuse?: RuntimeReuseReceipt;
 }
 
 /** Whether a path-filtered lane ran on the source or an earlier main run covers it. */
@@ -164,6 +173,29 @@ function requireJobs(
       );
     }
     return successfulJobReceipt(latest, runId, name);
+  });
+}
+
+/**
+ * The runtime build job of every release platform in the source run, each the
+ * latest attempt through the qualified one and successful. A missing platform
+ * is an error, never a built-from-source: a job the rule cannot see could have
+ * reused a base.
+ */
+function runtimeJobsOf(
+  jobs: readonly Record<string, unknown>[],
+  source: CanaryValidationSource
+): { platform: string; job: Record<string, unknown> }[] {
+  return ALL_BINARY_TARGETS.map((target) => {
+    const name = runtimeBuildJobName(target.arch);
+    const latest = latestJob(jobs, source.runId, source.runAttempt, name);
+    if (!latest) {
+      throw new Error(
+        `run ${source.runId} ${name}: expected exactly one latest runtime build job through attempt ${source.runAttempt}; received []`
+      );
+    }
+    successfulJobReceipt(latest, source.runId, name);
+    return { platform: target.arch, job: latest };
   });
 }
 
@@ -580,6 +612,8 @@ export function qualifyCanarySource(
   for (const workflow of [
     'ci.yml',
     'distribution-build.yml',
+    // The reuse steps and the marker step the reuse rule reads live here.
+    'runtime-build.yml',
     'smoke-binary.yml',
     'smoke-container.yml',
     'cargo-shim.yml',
@@ -638,6 +672,11 @@ export function qualifyCanarySource(
       );
     }
   }
+  const runtimeReuse = settleRuntimeReuse(
+    api,
+    source,
+    runtimeJobsOf(listRunJobs(api, source.repository, source.runId), source)
+  );
   const required = relevance(api, source);
   const siblings: CanaryValidationReceipt['siblings'][number][] = [];
   let codeqlRust: CanaryValidationReceipt['codeqlRust'];
@@ -760,5 +799,6 @@ export function qualifyCanarySource(
     relevance: required,
     codeqlRust,
     laneCoverage: { cargo, protocol },
+    runtimeReuse,
   };
 }

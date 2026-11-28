@@ -11,6 +11,7 @@ import {
 } from '../lib/canary-publication-evidence';
 import type { DistributionManifest } from '../lib/distribution-manifest';
 import { createReleaseAssetPlan, selectCanaryAssets } from '../lib/release-assets';
+import { ALL_BINARY_TARGETS } from '../lib/release-targets';
 
 function fixture() {
   const sha = 'a'.repeat(40);
@@ -260,6 +261,77 @@ describe('Cargo Shim and Protocol CI coverage in the persisted receipt', () => {
     expect(() => parseCanaryPromotionReceipt(JSON.stringify(receipt), 'owner/repo', sha)).toThrow(
       'qualification laneCoverage protocol'
     );
+  });
+});
+
+describe('runtime reuse in the persisted receipt', () => {
+  const PLATFORMS = ALL_BINARY_TARGETS.map((target) => target.arch as string);
+  const reusedLinux = {
+    platform: 'linux-x64',
+    digest: 'c'.repeat(64),
+    binarySha256: 'e'.repeat(64),
+    producerRunId: 46128211509,
+    producerSha: 'a'.repeat(40),
+    recordArtifactId: 77,
+  };
+  const reuse = (overrides: Record<string, unknown> = {}) => ({
+    reused: [reusedLinux],
+    built: PLATFORMS.filter((platform) => platform !== 'linux-x64'),
+    ...overrides,
+  });
+  const parseWith = (runtimeReuse: unknown) => {
+    const { receipt, sha } = fixture();
+    Object.assign(receipt.qualification, { runtimeReuse });
+    return () => parseCanaryPromotionReceipt(JSON.stringify(receipt), 'owner/repo', sha);
+  };
+
+  test('accepts a recorded reuse, an all-built record and a receipt without the field', () => {
+    const { receipt, sha } = fixture();
+    expect(receipt.qualification.runtimeReuse).toBeUndefined();
+    expect(parseCanaryPromotionReceipt(JSON.stringify(receipt), 'owner/repo', sha)).toEqual(
+      receipt
+    );
+    expect(parseWith(reuse())).not.toThrow();
+    expect(parseWith({ reused: [], built: PLATFORMS })).not.toThrow();
+  });
+
+  test.each([
+    ['a non-object', 'yes', 'qualification runtimeReuse'],
+    ['missing arrays', { reused: [] }, 'expected reused and built arrays'],
+    [
+      'an unknown platform',
+      reuse({ built: [...PLATFORMS, 'plan9'] }),
+      'platform: expected each of',
+    ],
+    ['a platform both built and reused', reuse({ built: PLATFORMS }), 'platform: expected each of'],
+    ['a platform left out', reuse({ built: [] }), 'expected every platform built or reused'],
+    [
+      'a short digest',
+      reuse({ reused: [{ ...reusedLinux, digest: 'abc' }] }),
+      'linux-x64 digest: expected 64 lowercase hex characters',
+    ],
+    [
+      'an uppercase binary hash',
+      reuse({ reused: [{ ...reusedLinux, binarySha256: 'E'.repeat(64) }] }),
+      'linux-x64 binarySha256',
+    ],
+    [
+      'a short producer commit',
+      reuse({ reused: [{ ...reusedLinux, producerSha: 'a'.repeat(39) }] }),
+      'linux-x64 producerSha: expected 40 lowercase hex characters',
+    ],
+    [
+      'a producer run of zero',
+      reuse({ reused: [{ ...reusedLinux, producerRunId: 0 }] }),
+      'producer run ID',
+    ],
+    [
+      'a record id that is not a number',
+      reuse({ reused: [{ ...reusedLinux, recordArtifactId: '77' }] }),
+      'record artifact ID',
+    ],
+  ])('refuses %s and names the received value', (_name, runtimeReuse, message) => {
+    expect(parseWith(runtimeReuse)).toThrow(message);
   });
 });
 

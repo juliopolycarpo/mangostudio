@@ -11,6 +11,8 @@ import {
   qualifyCanarySource,
 } from '../lib/canary-validation';
 import { GitHubRetry, STANDARD_RETRY_POLICY } from '../lib/github-retry';
+import { ALL_BINARY_TARGETS } from '../lib/release-targets';
+import { runtimeBuildJobName, runtimeReuseArtifactName } from '../lib/runtime-base-reuse';
 import { fakeCliEnvironment, installFakeCli, removeFakeCliDirectory } from './support/fake-cli';
 import { ghFailure, ghServing, ScriptedGhRunner } from './support/scripted-gh-runner';
 import { RecordedRetryEnvironment } from './support/scripted-github-http';
@@ -31,6 +33,10 @@ const ciNames = [
   ),
   'Smoke — Container / Container transport',
 ];
+/** The runtime build job of every release platform, named as the Actions API names it. */
+const runtimeNames = ALL_BINARY_TARGETS.map((target) => runtimeBuildJobName(target.arch));
+/** Every job of the source run the qualification reads. */
+const runNames = [...ciNames, ...runtimeNames];
 
 /** Workflow ID and the jobs that prove a lane ran, for candidate commits other than the source. */
 const evidenceLanes = {
@@ -75,6 +81,10 @@ function jobs(runId: number, names: readonly string[]) {
     run_attempt: 1,
     status: 'completed',
     conclusion: 'success',
+    started_at: '2026-11-28T09:00:00Z',
+    completed_at: '2026-11-28T09:10:00Z',
+    // What a runtime job always has; the reuse rule reads its step conclusions.
+    steps: [{ name: 'Build runtime', number: 1, status: 'completed', conclusion: 'success' }],
   }));
 }
 
@@ -92,7 +102,9 @@ class FakeQualificationApi implements CanaryValidationApi {
       tree: { sha: 'd'.repeat(40) },
     });
     this.values.set('actions/runs/100/attempts/2', run(100, 'ci.yml', 42));
-    this.values.set('actions/runs/100/jobs?filter=all&per_page=100', jobs(100, ciNames));
+    this.values.set('actions/runs/100/jobs?filter=all&per_page=100', jobs(100, runNames));
+    // No runtime reused a base: the source run holds no reuse record.
+    this.values.set('actions/runs/100/artifacts?per_page=100', []);
     this.values.set(`compare/${'b'.repeat(40)}...${source.sourceSha}`, {
       status: 'ahead',
       base_commit: { sha: 'b'.repeat(40) },
@@ -105,6 +117,7 @@ class FakeQualificationApi implements CanaryValidationApi {
       ...[
         'ci.yml',
         'distribution-build.yml',
+        'runtime-build.yml',
         'smoke-binary.yml',
         'smoke-container.yml',
         'cargo-shim.yml',
@@ -1292,6 +1305,141 @@ describe('canary required validation producers', () => {
       'source validation contract differs from qualification revision'
     );
   });
+  test('the runtime build workflow is a pinned producer contract, because the reuse rule reads its steps', () => {
+    const api = new FakeQualificationApi();
+    api.values.set(`contents/.github/workflows/runtime-build.yml?ref=${source.sourceSha}`, {
+      encoding: 'base64',
+      content: Buffer.from('name: Runtime Build\njobs: {}\n').toString('base64'),
+    });
+    expect(() => qualifyCanarySource(source, api)).toThrow(
+      'runtime-build.yml: source validation contract differs from qualification revision'
+    );
+  });
+  describe('runtime reuse', () => {
+    const PRODUCER_SHA = 'd'.repeat(40);
+    const DIGEST = 'c'.repeat(64);
+    const BINARY_SHA = 'e'.repeat(64);
+    const PLATFORM = 'linux-x64';
+
+    /** The source run's `linux-x64` runtime job reused a base that run 700 built. */
+    function reuseLinux(api: FakeQualificationApi) {
+      const reusing = jobs(100, runNames).map((job) =>
+        job.name === runtimeBuildJobName(PLATFORM)
+          ? {
+              ...job,
+              steps: [
+                { name: 'Use reused runtime base', conclusion: 'success' },
+                { name: 'Build runtime', conclusion: 'success' },
+              ],
+            }
+          : job
+      );
+      api.values.set('actions/runs/100/jobs?filter=all&per_page=100', reusing);
+      api.values.set('actions/runs/100/artifacts?per_page=100', [
+        {
+          id: 77,
+          name: runtimeReuseArtifactName(PLATFORM, 700, DIGEST, BINARY_SHA),
+          expired: false,
+          created_at: '2026-11-28T09:05:00Z',
+          workflow_run: { id: 100 },
+        },
+      ]);
+      api.values.set('actions/runs/700', {
+        ...run(700, 'ci.yml', 42),
+        head_sha: PRODUCER_SHA,
+        run_attempt: 1,
+        head_repository: { full_name: source.repository },
+      });
+      api.values.set('actions/runs/700/jobs?filter=all&per_page=100', [
+        {
+          ...jobs(700, [runtimeBuildJobName(PLATFORM)])[0],
+          started_at: '2026-11-20T09:00:00Z',
+          completed_at: '2026-11-20T09:10:00Z',
+        },
+      ]);
+      api.values.set(`compare/${PRODUCER_SHA}...${source.sourceSha}`, {
+        status: 'ahead',
+        base_commit: { sha: PRODUCER_SHA },
+        merge_base_commit: { sha: PRODUCER_SHA },
+        files: [{ filename: 'README.md' }],
+      });
+    }
+
+    test('a run that compiled every runtime records them as built', () => {
+      const result = qualifyCanarySource(source, new FakeQualificationApi());
+      expect(result.runtimeReuse).toEqual({
+        reused: [],
+        built: ALL_BINARY_TARGETS.map((target) => target.arch),
+      });
+    });
+
+    test('a verified reuse is explained in the receipt', () => {
+      const api = new FakeQualificationApi();
+      reuseLinux(api);
+      expect(qualifyCanarySource(source, api).runtimeReuse).toEqual({
+        reused: [
+          {
+            platform: PLATFORM,
+            digest: DIGEST,
+            binarySha256: BINARY_SHA,
+            producerRunId: 700,
+            producerSha: PRODUCER_SHA,
+            recordArtifactId: 77,
+          },
+        ],
+        built: ALL_BINARY_TARGETS.map((target) => target.arch).filter(
+          (platform) => platform !== PLATFORM
+        ),
+      });
+    });
+
+    test('a reuse whose record is missing rejects the source', () => {
+      const api = new FakeQualificationApi();
+      reuseLinux(api);
+      api.values.set('actions/runs/100/artifacts?per_page=100', []);
+      expect(() => qualifyCanarySource(source, api)).toThrow(
+        'reuse records of run 100: expected exactly one, because the job reused a base'
+      );
+    });
+
+    test('a reuse whose producer is not a main push of this repository rejects the source', () => {
+      const api = new FakeQualificationApi();
+      reuseLinux(api);
+      api.values.set('actions/runs/700', {
+        ...run(700, 'ci.yml', 42),
+        head_sha: PRODUCER_SHA,
+        run_attempt: 1,
+        event: 'pull_request',
+      });
+      expect(() => qualifyCanarySource(source, api)).toThrow(
+        'producer run 700 event: expected push'
+      );
+    });
+
+    test('a source run without a runtime build job cannot be explained and is rejected', () => {
+      const api = new FakeQualificationApi();
+      api.values.set(
+        'actions/runs/100/jobs?filter=all&per_page=100',
+        jobs(100, runNames).filter((job) => job.name !== runtimeBuildJobName(PLATFORM))
+      );
+      expect(() => qualifyCanarySource(source, api)).toThrow(
+        `${runtimeBuildJobName(PLATFORM)}: expected exactly one latest runtime build job through attempt 2; received []`
+      );
+    });
+
+    test('a failed runtime build job rejects the source before any reuse is read', () => {
+      const api = new FakeQualificationApi();
+      api.values.set(
+        'actions/runs/100/jobs?filter=all&per_page=100',
+        jobs(100, runNames).map((job) =>
+          job.name === runtimeBuildJobName(PLATFORM) ? { ...job, conclusion: 'failure' } : job
+        )
+      );
+      expect(() => qualifyCanarySource(source, api)).toThrow(
+        'expected completed successful associated job'
+      );
+    });
+  });
   test('legacy runs without verified exact push evidence require both siblings', () => {
     const api = new FakeQualificationApi();
     api.absent(43);
@@ -1325,7 +1473,7 @@ describe('canary required validation producers', () => {
       const api = new FakeQualificationApi();
       api.values.set(
         'actions/runs/100/jobs?filter=all&per_page=100',
-        jobs(100, ciNames).map((job) => (job.name === ciNames[2] ? { ...job, conclusion } : job))
+        jobs(100, runNames).map((job) => (job.name === ciNames[2] ? { ...job, conclusion } : job))
       );
       expect(() => qualifyCanarySource(source, api)).toThrow(
         'expected completed successful associated job'
@@ -1335,8 +1483,8 @@ describe('canary required validation producers', () => {
   test('an older successful job cannot hide a failed rerun job', () => {
     const api = new FakeQualificationApi();
     api.values.set('actions/runs/100/jobs?filter=all&per_page=100', [
-      ...jobs(100, ciNames),
-      { ...jobs(100, ciNames)[2], run_attempt: 2, conclusion: 'failure' },
+      ...jobs(100, runNames),
+      { ...jobs(100, runNames)[2], run_attempt: 2, conclusion: 'failure' },
     ]);
     expect(() => qualifyCanarySource(source, api)).toThrow(
       'expected completed successful associated job'
@@ -1346,7 +1494,7 @@ describe('canary required validation producers', () => {
     const api = new FakeQualificationApi();
     api.values.set(
       'actions/runs/100/jobs?filter=all&per_page=100',
-      jobs(100, ciNames).map((job) =>
+      jobs(100, runNames).map((job) =>
         job.name === ciNames[1] || job.name === 'CI Gate' ? { ...job, run_attempt: 2 } : job
       )
     );
@@ -1356,10 +1504,10 @@ describe('canary required validation producers', () => {
   });
   test('missing and ambiguous mandatory jobs cannot be interpreted as successful skips', () => {
     const api = new FakeQualificationApi();
-    api.values.set('actions/runs/100/jobs?filter=all&per_page=100', jobs(100, ciNames).slice(1));
+    api.values.set('actions/runs/100/jobs?filter=all&per_page=100', jobs(100, runNames).slice(1));
     expect(() => qualifyCanarySource(source, api)).toThrow('CI Gate: expected exactly one');
     api.values.set('actions/runs/100/jobs?filter=all&per_page=100', [
-      ...jobs(100, ciNames),
+      ...jobs(100, runNames),
       ...jobs(100, ['CI Gate']),
     ]);
     expect(() => qualifyCanarySource(source, api)).toThrow('CI Gate: expected exactly one');
@@ -1393,7 +1541,7 @@ if (args.includes('--paginate')) {
   else if (process.env.FAKE_EMPTY_PAGES === 'true') console.log('[]');
   else console.log(JSON.stringify([{
     ...(process.env.FAKE_MISSING_COUNT === 'true' ? {} : { total_count: value.length + (process.env.FAKE_INCOMPLETE_PAGES === 'true' ? 1 : 0) }),
-    [path.includes('/jobs?') ? 'jobs' : 'workflow_runs']: value,
+    [path.includes('/jobs?') ? 'jobs' : path.includes('/artifacts?') ? 'artifacts' : 'workflow_runs']: value,
   }]));
 } else console.log(JSON.stringify(value));
 `;
@@ -1504,7 +1652,7 @@ test('qualifies the frozen successful attempt while a later rerun changes mutabl
     'actions/runs/100',
     run(100, 'ci.yml', 42, { run_attempt: 3, status: 'in_progress', conclusion: null })
   );
-  const previous = jobs(100, ciNames);
+  const previous = jobs(100, runNames);
   api.values.set('actions/runs/100/jobs?filter=all&per_page=100', [
     ...previous,
     ...previous.map((job) => ({
@@ -1538,7 +1686,12 @@ describe('qualifyCanarySourceToFiles over the shared retry client', () => {
     const runner = new ScriptedGhRunner(
       ghServing(new FakeQualificationApi().values, {
         prefix: BASE,
-        collectionKey: (path) => (path.includes('/jobs?') ? 'jobs' : 'workflow_runs'),
+        collectionKey: (path) =>
+          path.includes('/jobs?')
+            ? 'jobs'
+            : path.includes('/artifacts?')
+              ? 'artifacts'
+              : 'workflow_runs',
       })
     );
     const api = createCanaryGhApi(runner, new GitHubRetry(STANDARD_RETRY_POLICY, environment));
