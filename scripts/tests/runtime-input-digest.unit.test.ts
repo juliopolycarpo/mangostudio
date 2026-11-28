@@ -282,6 +282,13 @@ describe('observeBuildEnv and observeBuildTools', () => {
       zig: '0.15.2',
       'cargo-zigbuild': 'cargo-zigbuild 0.24.1',
     });
+    // `cargo zigbuild --version` exits 2: the subcommand has no such flag.
+    expect(zig.calls).toEqual([
+      'cargo --version',
+      'rustc -vV',
+      'zig version',
+      'cargo-zigbuild --version',
+    ]);
   });
 
   test('a tool that cannot run is named with its exit code', () => {
