@@ -951,6 +951,13 @@ mod windows_tests {
     /// script also polls for its processes for at most 20 s, below this cap.
     const FIXTURE_SCRIPT_TIMEOUT: Duration = Duration::from_secs(60);
 
+    /// First line of the fixtures that poll for processes. Without the
+    /// progress preference, a cold PowerShell writes its module-loading
+    /// progress to stderr as CLIXML, and a failed fixture reports that record
+    /// instead of the message it threw.
+    const FIXTURE_SCRIPT_PREAMBLE: &str =
+        "$ProgressPreference = 'SilentlyContinue'; $ErrorActionPreference = 'Stop'";
+
     struct FakeTaskExec {
         calls: Mutex<Vec<String>>,
         timeouts: Mutex<Vec<Duration>>,
@@ -1280,7 +1287,7 @@ mod windows_tests {
         let pid = runner.id();
         // One literal per line: `spawn_boundary`'s brace scanner reads line by line.
         let script = [
-            "$ErrorActionPreference = 'Stop'".to_owned(),
+            FIXTURE_SCRIPT_PREAMBLE.to_owned(),
             PROCESS_LIFETIME_HELPERS.to_owned(),
             format!("$runners = @(Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\" -ErrorAction Stop)"),
             format!("if ($runners.Count -ne 1) {{ throw ('expected one owned runner CIM row for PID {pid} | received: ' + $runners.Count) }}"),
@@ -1345,7 +1352,7 @@ mod windows_tests {
         };
         // One literal per line: `spawn_boundary`'s brace scanner reads line by line.
         let script = [
-            "$ErrorActionPreference = 'Stop'".to_owned(),
+            FIXTURE_SCRIPT_PREAMBLE.to_owned(),
             PROCESS_LIFETIME_HELPERS.to_owned(),
             "$runners = @()".to_owned(),
             "$deadline = (Get-Date).AddSeconds(20)".to_owned(),
@@ -1393,7 +1400,7 @@ mod windows_tests {
             let mut fixture = WindowsFixture::spawn(&request).expect("owned control starts");
             let pid = fixture.id();
             let script = [
-                "$ErrorActionPreference = 'Stop'".to_owned(),
+                FIXTURE_SCRIPT_PREAMBLE.to_owned(),
                 PROCESS_LIFETIME_HELPERS.to_owned(),
                 format!("$root = @(Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\" -ErrorAction Stop)"),
                 "$deadline = (Get-Date).AddSeconds(20)".to_owned(),
