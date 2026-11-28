@@ -7,6 +7,9 @@
 //   bun ./scripts/ci/pr-cache-cleanup.ts --all-closed          # dry run: backlog sweep
 //   bun ./scripts/ci/pr-cache-cleanup.ts --all-closed --delete
 //
+// The workflow runs only --all-closed (the manual backlog sweep). Its close-time job
+// is plain `gh` with no checkout; --pr is the same cleanup for an operator's shell.
+//
 // Dry run is the default everywhere; only --delete mutates. Reads
 // GITHUB_REPOSITORY and GITHUB_TOKEN (actions: write to delete).
 

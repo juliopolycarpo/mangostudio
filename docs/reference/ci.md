@@ -386,25 +386,44 @@ sat on the merge refs of closed pull requests.
 `pr-cache-cleanup.yml` deletes them when a pull request closes, merged or not:
 
 - **What goes.** Every cache whose ref is exactly `refs/pull/<N>/merge` for the
-  closed pull request, deleted by cache ID. The script lists with the API `ref`
-  filter, then matches the ref again on each entry, so no other ref is touched:
-  not `main`, not another pull request, not `refs/pull/<N>/head`. A 404 on
-  delete counts as already gone. The script reads the pull request's state
-  first: one that was reopened before the run started, or a number GitHub does
-  not know, keeps its caches.
+  closed pull request. The close-time job runs the runner's own `gh`:
+  `gh cache delete --all --ref refs/pull/<N>/merge --succeed-on-no-caches`.
+  `gh` lists with the API `ref` filter (which matches the ref exactly) and
+  deletes each entry by ID, so no other ref is touched: not `main`, not another
+  pull request, not `refs/pull/<N>/head`. The step reads the pull request's
+  state first (`gh api repos/<repo>/pulls/<N> --jq .state`): one that was
+  reopened before the run started keeps its caches, and a state other than
+  `open` or `closed` fails the job before anything is deleted.
 - **Trigger.** `pull_request_target` with `types: [closed]`. A fork pull request
   gets a read-only token on `pull_request`, which cannot delete caches.
   `pull_request_target` runs the base branch's file with a write token, which is
-  safe only because no pull request code runs: the job checks out `main` with
-  `persist-credentials: false`, installs nothing and downloads no artifact. The
-  pull request number reaches the script through `env` and must be a positive
-  integer. Permissions are `actions: write`, `contents: read` and
-  `pull-requests: read`, with a
-  concurrency group per pull request number and a 10-minute timeout. A pull
-  request into a branch that lacks the workflow is not cleaned on close; use the
-  sweep below.
+  safe only because no pull request code runs: the job has no checkout, no
+  action, no Bun download and no artifact, only `gh` and shell. (It used to
+  check out `main` and install a Bun canary build, and one run held a runner for
+  two minutes on a 504 from that download.) The pull request number reaches the
+  step through `env`, must be a positive integer (digits only, no leading zero)
+  and is checked before the first `gh` call. Permissions are `actions: write`
+  and `pull-requests: read`, with a concurrency group per pull request number and
+  a 10-minute timeout. The step retries the state read, the count and the delete
+  up to three attempts, 5 s then 10 s apart, the budget of
+  `scripts/lib/github-retry.ts`, and each retry lists again.
+- **What `gh` does not do.** The script this replaced matched the ref again on
+  every listed entry, read every page against `total_count`, treated a 404 on
+  delete as already gone and reported progress when it stopped. `gh` stops at
+  the first failed delete (a 404 from a concurrent sweep included, which the
+  retry absorbs by listing again) and prints nothing in a non-TTY step. So the
+  step lists the ref with `gh cache list` first, writes the count to the job
+  summary and stops before deleting if any listed entry is on another ref. That
+  check is detection only: `gh cache delete --all` lists again and trusts the
+  same API `ref` filter. A close-time run that still fails after its retries
+  leaves the caches until GitHub's 7-day eviction or the next sweep.
+- **Flags.** `gh cache delete --all`, `--ref` and `--succeed-on-no-caches` exist
+  in `gh` 2.105.0, the version the Ubuntu 24.04 and 26.04 runner images list. The
+  step prints `gh --version` so the first run records it.
 - **Backlog sweep.** Run the workflow by hand (`workflow_dispatch`, `main` only).
-  It lists every cache, asks the pulls API which pull requests are closed and
+  It still runs `scripts/ci/pr-cache-cleanup.ts` from a checkout of `main`, and
+  covers a pull request into a branch that lacks the workflow and a close-time
+  run that failed. It lists every cache, asks the pulls API which pull requests are closed and
   deletes only those merge-ref caches. Open pull requests and numbers GitHub
   does not know keep theirs. Other jobs save and delete caches while it reads, so
   a listing that moves between pages is read again, up to three attempts. It is a dry run unless the `delete` input is set.
@@ -417,7 +436,8 @@ Run the script locally with `GITHUB_REPOSITORY` and `GITHUB_TOKEN` set:
 `bun ./scripts/ci/pr-cache-cleanup.ts --pr <N>` or `--all-closed`. Both preview
 by default and print counts and bytes per pull request; add `--delete` to delete.
 `scripts/tests/pr-cache-cleanup.unit.test.ts` pins the exact-ref selection, the
-number validation and the workflow's trigger, checkout and `env` rules. The Rust
+number validation, the workflow's trigger, checkout and `env` rules, and runs the
+close-time step against a fake `gh` (reopened, failing and retried calls). The Rust
 build caches on `main` follow a different policy; see "Rust cache generations"
 in [testing.md](./testing.md).
 
