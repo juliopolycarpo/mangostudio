@@ -22,6 +22,7 @@ import {
   type BoundedRunner,
   DOWNLOAD_ATTEMPTS,
   downloadRunArtifact,
+  downloadSourceRunId,
   fetchArtifactZip,
   findRunArtifact,
   METADATA_TIMEOUT_MS,
@@ -252,6 +253,54 @@ describe('download retry budget', () => {
     // The counts prove the scan found the steps: an empty scan cannot pass.
     expect(callers).toBe(3);
     expect(declared).toEqual(['smoke-binary.yml: 3']);
+  });
+});
+
+describe('downloadSourceRunId', () => {
+  test('defaults to the current run', () => {
+    expect(downloadSourceRunId({ GITHUB_RUN_ID: '9001' })).toBe(9001);
+    expect(downloadSourceRunId({ ARTIFACT_RUN_ID: '', GITHUB_RUN_ID: '9001' })).toBe(9001);
+  });
+
+  test('takes the named run over the current one', () => {
+    expect(downloadSourceRunId({ ARTIFACT_RUN_ID: '46128211509', GITHUB_RUN_ID: '9' })).toBe(
+      46_128_211_509
+    );
+  });
+
+  test.each(['abc', '0', '-3', '1e3', '07', '1.5', ' 7', '99999999999999999999'])(
+    'refuses a named run %p instead of falling back to the current run',
+    (named) => {
+      expect(() => downloadSourceRunId({ ARTIFACT_RUN_ID: named, GITHUB_RUN_ID: '9' })).toThrow(
+        `ARTIFACT_RUN_ID: expected a positive integer | received ${named}`
+      );
+    }
+  );
+
+  test('refuses a missing or malformed current run when none is named', () => {
+    expect(() => downloadSourceRunId({})).toThrow(
+      'GITHUB_RUN_ID: expected a positive integer | received undefined'
+    );
+    expect(() => downloadSourceRunId({ GITHUB_RUN_ID: 'x' })).toThrow(
+      'GITHUB_RUN_ID: expected a positive integer | received x'
+    );
+  });
+});
+
+describe('download-run-artifact composite', () => {
+  const action = Bun.YAML.parse(
+    readFileSync(join(ROOT_DIR, '.github/actions/download-run-artifact/action.yml'), 'utf8')
+  ) as {
+    inputs: Record<string, { required?: boolean; default?: string }>;
+    runs: { steps: { env: Record<string, string> }[] };
+  };
+
+  test('run-id is optional and empty by default, so existing callers read the current run', () => {
+    expect(action.inputs['run-id']).toMatchObject({ required: false, default: '' });
+  });
+
+  test('run-id reaches the script as ARTIFACT_RUN_ID', () => {
+    expect(action.runs.steps[0]?.env.ARTIFACT_RUN_ID).toBe('$' + '{{ inputs.run-id }}');
   });
 });
 
