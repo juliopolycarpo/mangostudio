@@ -27,6 +27,60 @@ afterEach(() => {
   for (const pid of pids) if (isAlive(pid)) signalPid(pid, 'SIGKILL');
 });
 
+interface SmokeOutcome {
+  readonly code: number | null;
+  readonly signal: string | number | null;
+  readonly output: string;
+}
+
+/**
+ * The fake hub's event log. A smoke script killed by its spawn timeout before
+ * the hub started leaves no file; that fails here with the script's exit,
+ * signal and output instead of an ENOENT that says nothing about the script.
+ */
+function readSmokeEvents(
+  eventsPath: string,
+  outcome: SmokeOutcome
+): { event: string; pid: number }[] {
+  let raw: string;
+  try {
+    raw = readFileSync(eventsPath, 'utf8');
+  } catch {
+    throw new Error(
+      `(build smoke): expected the fake hub to record its startup before the script exited | received: exit ${outcome.code}, signal ${outcome.signal ?? 'none'}, no events file; output: ${outcome.output || '(empty)'}`
+    );
+  }
+  return raw
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as { event: string; pid: number });
+}
+
+describe('readSmokeEvents', () => {
+  test('a missing events file reports the script exit, signal and output', () => {
+    expect(() =>
+      readSmokeEvents(join(tmpdir(), 'mango-build-smoke-absent', 'events.jsonl'), {
+        code: null,
+        signal: 'SIGTERM',
+        output: 'waiting for the hub',
+      })
+    ).toThrow(
+      '(build smoke): expected the fake hub to record its startup before the script exited | received: exit null, signal SIGTERM, no events file; output: waiting for the hub'
+    );
+  });
+
+  test('parses one event per line', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mango-build-smoke-events-'));
+    scratchRoots.push(root);
+    const eventsPath = join(root, 'events.jsonl');
+    writeFileSync(eventsPath, '{"event":"startup","pid":7}\n{"event":"exit","pid":7}\n');
+    expect(readSmokeEvents(eventsPath, { code: 1, signal: null, output: '' })).toEqual([
+      { event: 'startup', pid: 7 },
+      { event: 'exit', pid: 7 },
+    ]);
+  });
+});
+
 function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -129,10 +183,11 @@ describe('test-build foreground server cleanup', () => {
         new Response(smoke.stderr).text(),
         smoke.exited,
       ]);
-      const events = readFileSync(eventsPath, 'utf8')
-        .trim()
-        .split('\n')
-        .map((line) => JSON.parse(line) as { event: string; pid: number });
+      const events = readSmokeEvents(eventsPath, {
+        code,
+        signal: smoke.signalCode,
+        output: `${stdout}${stderr}`,
+      });
       const startup = events.find(({ event }) => event === 'startup');
       expect(startup, `${stdout}${stderr}`).toBeDefined();
       if (!startup) throw new Error(`Expected the fake hub to start; output: ${stdout}${stderr}`);
