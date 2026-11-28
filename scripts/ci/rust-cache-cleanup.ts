@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
-// Dependency-free trusted-main tooling. A fixture invocation is read-only:
+// Dependency-free trusted-main tooling. A fixture invocation is read-only; it prints what one
+// run would delete (Rust generations and the retention rule), `--now` pins the clock:
 // bun ./scripts/ci/rust-cache-cleanup.ts --fixture scripts/tests/fixtures/rust-cache-listing.json
+// bun ./scripts/ci/rust-cache-cleanup.ts --fixture listing.json --now 2026-11-28T06:00:00Z
 // The workflow opts into deletion with --delete and a workflow_run context.
 
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -8,10 +10,10 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { GitHubRetry } from '../lib/github-retry';
 import { isJsonRecord } from '../lib/script-guards';
 import { parseCacheEntry } from './actions-api/client';
-import { cleanupRustCaches } from './rust-cache/cleanup';
+import { cleanupRustCaches, planCacheDeletions } from './rust-cache/cleanup';
 import { MAIN_CACHE_REF } from './rust-cache/families';
 import { GithubRustCacheApi } from './rust-cache/github';
-import { type RustCacheEntry, selectRustCacheDeletions } from './rust-cache/selection';
+import type { RustCacheEntry } from './rust-cache/selection';
 
 /**
  * Require the workflow_run event and trusted main execution before mutation.
@@ -81,15 +83,35 @@ export function readFixtureListing(path: string): RustCacheEntry[] {
   });
 }
 
+/**
+ * The clock of a fixture run: `--fixture <listing.json>` uses the real time, and `--now <ISO 8601>`
+ * pins it so the retention rule's quiet window gives the same plan on any day.
+ * @example parseFixtureClock(['--fixture', 'listing.json', '--now', '2026-11-28T06:00:00Z']);
+ */
+export function parseFixtureClock(args: readonly string[]): number {
+  const expected = '--fixture <listing.json> [--now <ISO 8601 timestamp>]';
+  if (args.length === 2 && args[0] === '--fixture') return Date.now();
+  if (args.length === 4 && args[0] === '--fixture' && args[2] === '--now') {
+    const now = Date.parse(args[3]);
+    if (Number.isFinite(now)) return now;
+    throw new Error(
+      `Invalid --now ${JSON.stringify(args[3])}; expected an ISO 8601 timestamp such as 2026-11-28T06:00:00Z`
+    );
+  }
+  throw new Error(`Invalid arguments ${JSON.stringify(args)}; expected ${expected}`);
+}
+
 async function main(): Promise<void> {
   const args = Bun.argv.slice(2);
-  if (args.length === 2 && args[0] === '--fixture') {
-    console.log(JSON.stringify(selectRustCacheDeletions(readFixtureListing(args[1])), null, 2));
+  if (args[0] === '--fixture') {
+    const fixtureNow = parseFixtureClock(args);
+    const listing = readFixtureListing(args[1]);
+    console.log(JSON.stringify(planCacheDeletions(listing, fixtureNow), null, 2));
     return;
   }
   if (args.length !== 1 || !['--delete', '--dry-run'].includes(args[0])) {
     throw new Error(
-      `Invalid arguments ${JSON.stringify(args)}; expected --fixture <listing.json>, --dry-run or --delete`
+      `Invalid arguments ${JSON.stringify(args)}; expected --fixture <listing.json> [--now <ISO 8601>], --dry-run or --delete`
     );
   }
   const eventPath = process.env.GITHUB_EVENT_PATH;

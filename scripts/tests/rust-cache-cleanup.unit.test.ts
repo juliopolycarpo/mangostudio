@@ -536,7 +536,7 @@ class FakeStartingWriterHttp extends FakeGithubHttp {
 }
 
 describe('GitHub cache adapter', () => {
-  test('follows every cache page with main-ref and Rust-prefix scope', async () => {
+  test('follows every cache page with main-ref scope and no key filter', async () => {
     const http = new FakeGithubHttp();
     const first = Array.from({ length: 100 }, (_, i) => changedEntry(OLD, { id: i + 1 }));
     http.replies = [
@@ -547,7 +547,8 @@ describe('GitHub cache adapter', () => {
     expect(http.calls.map(({ url }) => url.searchParams.get('page'))).toEqual(['1', '2']);
     for (const { url, init } of http.calls) {
       expect(url.searchParams.get('ref')).toBe('refs/heads/main');
-      expect(url.searchParams.get('key')).toBe('v0-rust-');
+      // The retention rule reads families outside `v0-rust-`, so the listing carries no key filter.
+      expect(url.searchParams.get('key')).toBeNull();
       expect(init.redirect).toBe('error');
       expect(init.headers).toMatchObject({ authorization: 'Bearer fake-token' });
     }
@@ -747,7 +748,7 @@ describe('GitHub cache adapter', () => {
     const partial = { status: 200, body: { total_count: 2, actions_caches: [NEW] } };
     http.replies = [{ status: 200, body: MAIN_RUN }, partial, partial, partial];
     await expect(http.cleanup({ apply: true })).rejects.toThrow(
-      'Incomplete actions_caches listing 1/2; expected every entry; main Rust cache listing gave up after 3 attempts'
+      'Incomplete actions_caches listing 1/2; expected every entry; main cache listing gave up after 3 attempts'
     );
     expect(http.calls.map(({ init }) => init.method)).not.toContain('DELETE');
   });

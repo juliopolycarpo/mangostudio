@@ -19,17 +19,45 @@ const SCOPED_FAMILY = new RegExp(
   'g'
 );
 
-/** Account for an exact registered key, preserving unrelated entries as unknown. */
-export function cacheFamily(key: string): string {
-  const rust = parseRustCacheKey(key);
-  if (rust) return `rust/${rust.family}`;
+/** The parts of a key `cache-scoped` wrote: `<os>-<arch>-<epoch>-<family>-<scope>-<validity>`. */
+export interface ScopedCacheKey {
+  /** Runner OS and architecture, e.g. `Linux-X64`. */
+  readonly platform: string;
+  readonly epoch: string;
+  readonly family: string;
+  /** `main`, `pr-<N>` or `run-<id>`. */
+  readonly scope: string;
+  readonly validity: string;
+}
+
+/**
+ * Split a `cache-scoped` key, or return undefined when the wire key cannot
+ * establish one owner uniquely.
+ * @example parseScopedCacheKey('Linux-X64-v1-timings-main-test-shard-2-42')?.scope; // 'main'
+ */
+export function parseScopedCacheKey(key: string): ScopedCacheKey | undefined {
   const platform = PLATFORM.exec(key);
-  if (!platform) return 'unknown';
+  if (!platform) return undefined;
   const scoped = key.slice(platform[0].length);
   const candidates = [...scoped.matchAll(SCOPED_FAMILY)].filter((match) =>
     EPOCH.test(scoped.slice(0, match.index))
   );
   // Epoch and validity can both contain hyphens. If either contains another
   // family/scope boundary, the wire key cannot establish its owner uniquely.
-  return candidates.length === 1 ? candidates[0][1] : 'unknown';
+  if (candidates.length !== 1) return undefined;
+  const [match] = candidates;
+  return {
+    platform: platform[0].slice(0, -1),
+    epoch: scoped.slice(0, match.index),
+    family: match[1],
+    scope: match[2],
+    validity: match[3],
+  };
+}
+
+/** Account for an exact registered key, preserving unrelated entries as unknown. */
+export function cacheFamily(key: string): string {
+  const rust = parseRustCacheKey(key);
+  if (rust) return `rust/${rust.family}`;
+  return parseScopedCacheKey(key)?.family ?? 'unknown';
 }

@@ -13,6 +13,9 @@ name: Rust Cache Cleanup
 # rest on that order: a deferred sweep waits for the next CI completion on main
 # or the daily Randomized Order Nightly, and a day without a sweep stays well
 # under the cache limit. docs/reference/testing.md ("Cleanup triggers") has the bound.
+#
+# The same run also keeps the newest few entries of the main-scope turbo, timings and
+# lint-tools families (docs/reference/testing.md, "Retention for other main caches").
 on:
   workflow_run:
     workflows:
