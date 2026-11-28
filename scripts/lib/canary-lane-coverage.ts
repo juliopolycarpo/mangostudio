@@ -22,6 +22,8 @@ export interface CanaryCoverageApi {
 const COMPARE_FILE_LIMIT = 300;
 /** Successful runs read per lane; resolveRustCoverage tries only the newest few distinct commits. */
 const NOMINATION_PAGE_SIZE = 20;
+/** Events whose main runs run the whole lane; the evidence lanes name the same two. */
+const NOMINATING_EVENTS = ['push', 'workflow_dispatch'];
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -116,7 +118,7 @@ function successfulPushCommits(
   repository: string,
   workflowId: number
 ): string[] {
-  const path = `repos/${repository}/actions/workflows/${workflowId}/runs?branch=main&event=push&status=success&per_page=${NOMINATION_PAGE_SIZE}`;
+  const path = `repos/${repository}/actions/workflows/${workflowId}/runs?branch=main&status=success&per_page=${NOMINATION_PAGE_SIZE}`;
   const body = api.get(path);
   const rows = record(body)?.workflow_runs;
   if (!Array.isArray(rows)) {
@@ -128,10 +130,10 @@ function successfulPushCommits(
   for (const entry of rows) {
     const row = record(entry);
     if (!row) continue;
-    // A row that is malformed or not a successful main push is dropped: dropping
-    // only removes a nomination, so it never widens coverage.
+    // A row that is malformed or not a successful main push or manual dispatch is
+    // dropped: dropping only removes a nomination, so it never widens coverage.
     if (
-      row.event !== 'push' ||
+      !NOMINATING_EVENTS.includes(String(row.event)) ||
       row.head_branch !== 'main' ||
       row.conclusion !== 'success' ||
       typeof row.head_sha !== 'string' ||

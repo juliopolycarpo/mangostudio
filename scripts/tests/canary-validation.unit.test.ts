@@ -119,7 +119,8 @@ class FakeQualificationApi implements CanaryValidationApi {
     }
     for (const [workflow, id, names] of [
       ['cargo-shim.yml', 43, ['Cargo Shim Gate']],
-      ['protocol-ci.yml', 44, ['Protocol Gate']],
+      // A push that ran the compiled matrix: Gate plus the matrix-free jobs.
+      ['protocol-ci.yml', 44, evidenceLanes['protocol-ci.yml'].jobs],
       [
         'codeql.yml',
         45,
@@ -245,19 +246,16 @@ class FakeQualificationApi implements CanaryValidationApi {
     rows: readonly { commit: string; conclusion?: string }[]
   ) {
     const { id } = evidenceLanes[workflow];
-    this.values.set(
-      `actions/workflows/${id}/runs?branch=main&event=push&status=success&per_page=20`,
-      {
-        total_count: rows.length,
-        workflow_runs: rows.map((row, index) =>
-          run(9000 + index, workflow, id, {
-            head_sha: row.commit,
-            conclusion: row.conclusion ?? 'success',
-            run_number: 500 - index,
-          })
-        ),
-      }
-    );
+    this.values.set(`actions/workflows/${id}/runs?branch=main&status=success&per_page=20`, {
+      total_count: rows.length,
+      workflow_runs: rows.map((row, index) =>
+        run(9000 + index, workflow, id, {
+          head_sha: row.commit,
+          conclusion: row.conclusion ?? 'success',
+          run_number: 500 - index,
+        })
+      ),
+    });
   }
   /**
    * Both lanes covered by a green push run on `commit`, with a docs-only range to the source.
@@ -463,7 +461,7 @@ describe('canary required validation producers', () => {
     const rustCommit = source.pushBeforeSha as string;
     const otherCommit = 'f'.repeat(40);
     const nominationPath = (id: number) =>
-      `actions/workflows/${id}/runs?branch=main&event=push&status=success&per_page=20`;
+      `actions/workflows/${id}/runs?branch=main&status=success&per_page=20`;
     const cargoRelevant = ['crates/mango-protocol/src/lib.rs', 'docs/guide.md'];
 
     /** The scenario of #2726: Z is green, Rust commit A was cancelled, and the source is docs-only. */
@@ -498,7 +496,7 @@ describe('canary required validation producers', () => {
 
     test('rejects a docs commit after a Rust commit whose Cargo Shim run was cancelled', () => {
       expect(() => qualifyCanarySource(source, docsAfterCancelledRustApi())).toThrow(
-        `cargo-shim.yml: expected a covering main push run for ${source.sourceSha}; received no candidate covers ${source.sourceSha}: ${earlierGreen} (Cargo Shim-relevant change)`
+        `cargo-shim.yml: expected a covering main run for ${source.sourceSha}; received no candidate covers ${source.sourceSha}: ${earlierGreen} (Cargo Shim-relevant change)`
       );
     });
 
@@ -506,7 +504,7 @@ describe('canary required validation producers', () => {
       const api = protocolOnlyApi();
       api.recordRange(otherCommit, source.sourceSha, ['spec/schema/1/protocol.json']);
       expect(() => qualifyCanarySource(source, api)).toThrow(
-        `protocol-ci.yml: expected a covering main push run for ${source.sourceSha}; received no candidate covers ${source.sourceSha}: ${otherCommit} (Protocol CI-relevant change)`
+        `protocol-ci.yml: expected a covering main run for ${source.sourceSha}; received no candidate covers ${source.sourceSha}: ${otherCommit} (Protocol CI-relevant change)`
       );
     });
 
@@ -577,6 +575,123 @@ describe('canary required validation producers', () => {
       expect(receipt.laneCoverage?.cargo.reason).not.toContain(otherCommit);
     });
 
+    describe('Protocol CI after a prose-only push, which runs no compiled job', () => {
+      const compiledCommit = '1'.repeat(40);
+      const proseCommit = '2'.repeat(40);
+      const skippedMatrix = ['success', 'skipped', 'skipped', 'skipped'];
+      const compiledChange = ['crates/mango-protocol/src/lib.rs', 'docs/protocol/README.md'];
+
+      /** Cargo Shim covered by a green docs-only predecessor; Protocol CI is the variable. */
+      function cargoCoveredApi() {
+        const api = new FakeQualificationApi();
+        api.recordLaneNominations('cargo-shim.yml', [{ commit: earlierGreen }]);
+        api.recordWorkflowRun('cargo-shim.yml', earlierGreen);
+        api.recordRange(earlierGreen, source.sourceSha, ['docs/guide.md']);
+        return api;
+      }
+      /** The source edits only a prose guide: its Protocol CI run is green with the matrix skipped. */
+      function proseOnlySourceApi() {
+        const api = cargoCoveredApi();
+        api.recordRange(source.pushBeforeSha as string, source.sourceSha, [
+          'docs/protocol/README.md',
+        ]);
+        api.values.set('actions/runs/44/jobs?filter=all&per_page=100', [
+          ...jobs(44, ['Protocol Gate']),
+          ...jobs(44, ['TypeScript', 'cargo-deny', 'Schema equality and round trip']).map(
+            (job) => ({ ...job, id: job.id + 10, conclusion: 'skipped' })
+          ),
+        ]);
+        return api;
+      }
+
+      test('a compiled change, a prose-only push and an unrelated commit qualify', () => {
+        // Protocol CI skipped C by path. B's run proves no compiled job; A's does, and the
+        // prose guide B edited is not something the compiled matrix ever validated.
+        const api = cargoCoveredApi();
+        api.absent(44);
+        api.recordLaneNominations('protocol-ci.yml', [
+          { commit: proseCommit },
+          { commit: compiledCommit },
+        ]);
+        api.recordWorkflowRun('protocol-ci.yml', proseCommit, { conclusions: skippedMatrix });
+        api.recordWorkflowRun('protocol-ci.yml', compiledCommit);
+        api.recordRange(proseCommit, source.sourceSha, ['docs/guide.md']);
+        api.recordRange(compiledCommit, source.sourceSha, [
+          'docs/protocol/README.md',
+          'docs/guide.md',
+        ]);
+        const receipt = qualifyCanarySource(source, api);
+        expect(receipt.laneCoverage?.protocol).toMatchObject({ ranOnSource: false });
+        expect(receipt.laneCoverage?.protocol.reason).toContain(compiledCommit);
+      });
+
+      test('a prose-only source whose own run skipped the matrix needs a compiled predecessor', () => {
+        const api = proseOnlySourceApi();
+        api.recordLaneNominations('protocol-ci.yml', [{ commit: compiledCommit }]);
+        api.recordWorkflowRun('protocol-ci.yml', compiledCommit);
+        api.recordRange(compiledCommit, source.sourceSha, ['docs/protocol/README.md']);
+        const receipt = qualifyCanarySource(source, api);
+        expect(receipt.laneCoverage?.protocol).toMatchObject({ ranOnSource: false });
+        expect(receipt.laneCoverage?.protocol.reason).toContain(compiledCommit);
+        // The source's own Gate is still the sibling run the receipt names.
+        expect(
+          receipt.siblings.find((sibling) => sibling.workflow === 'protocol-ci.yml')
+        ).toMatchObject({ result: 'success', runId: 44 });
+      });
+
+      test('a prose-only source after a compiled change whose run was cancelled is rejected', () => {
+        // Its Gate is green, but the compiled change before it never passed Protocol CI on main.
+        const api = proseOnlySourceApi();
+        api.recordLaneNominations('protocol-ci.yml', [
+          { commit: compiledCommit, conclusion: 'cancelled' },
+          { commit: earlierGreen },
+        ]);
+        api.recordWorkflowRun('protocol-ci.yml', earlierGreen);
+        api.recordRange(earlierGreen, source.sourceSha, compiledChange);
+        expect(() => qualifyCanarySource(source, api)).toThrow(
+          `protocol-ci.yml: expected a covering main run for ${source.sourceSha}; received no candidate covers ${source.sourceSha}: ${earlierGreen} (Protocol CI-relevant change)`
+        );
+      });
+
+      test('a cancelled compiled change, a prose-only push and an unrelated commit are rejected', () => {
+        const api = cargoCoveredApi();
+        api.absent(44);
+        api.recordLaneNominations('protocol-ci.yml', [
+          { commit: proseCommit },
+          { commit: earlierGreen },
+        ]);
+        api.recordWorkflowRun('protocol-ci.yml', proseCommit, { conclusions: skippedMatrix });
+        api.recordWorkflowRun('protocol-ci.yml', earlierGreen);
+        api.recordRange(proseCommit, source.sourceSha, ['docs/guide.md']);
+        api.recordRange(earlierGreen, source.sourceSha, [...compiledChange, 'docs/guide.md']);
+        expect(() => qualifyCanarySource(source, api)).toThrow(
+          `${proseCommit} (no Actions evidence: Protocol Gate, TypeScript, cargo-deny and Schema equality and round trip did not all succeed`
+        );
+        expect(() => qualifyCanarySource(source, api)).toThrow(
+          `${earlierGreen} (Protocol CI-relevant change)`
+        );
+      });
+
+      test('a prose guide in the range is not a compiled change, but a spec file is', () => {
+        const api = cargoCoveredApi();
+        api.absent(44);
+        api.recordLaneNominations('protocol-ci.yml', [{ commit: compiledCommit }]);
+        api.recordWorkflowRun('protocol-ci.yml', compiledCommit);
+        api.recordRange(compiledCommit, source.sourceSha, [
+          'docs/protocol/versioning.md',
+          'docs/protocol/adopt-rust.md',
+        ]);
+        expect(qualifyCanarySource(source, api).laneCoverage?.protocol.ranOnSource).toBe(false);
+        api.recordRange(compiledCommit, source.sourceSha, [
+          'docs/protocol/versioning.md',
+          'spec/schema/1/protocol.json',
+        ]);
+        expect(() => qualifyCanarySource(source, api)).toThrow(
+          `${compiledCommit} (Protocol CI-relevant change)`
+        );
+      });
+    });
+
     describe('run listings are nominations, never the proof', () => {
       /** The listing names Z and the range Z...source is docs-only; Actions evidence is the variable. */
       function nominatedApi() {
@@ -596,7 +711,7 @@ describe('canary required validation producers', () => {
         );
         expect(() => qualifyCanarySource(source, api)).toThrow(
           missingEvidence(
-            `expected a completed cargo-shim.yml run on main for ${earlierGreen} (push); received none`
+            `expected a completed cargo-shim.yml run on main for ${earlierGreen} (push or workflow_dispatch); received none`
           )
         );
       });
@@ -604,7 +719,7 @@ describe('canary required validation producers', () => {
       test.each([
         ['a green run on another branch', { branch: 'attacker-branch' }],
         ['a green pull request run', { event: 'pull_request' }],
-        ['a manually dispatched run', { event: 'workflow_dispatch' }],
+        ['a green scheduled run', { event: 'schedule' }],
       ])('rows plus %s are rejected', (_label, options) => {
         const api = nominatedApi();
         api.recordWorkflowRun('cargo-shim.yml', earlierGreen, options);
@@ -612,6 +727,16 @@ describe('canary required validation producers', () => {
           missingEvidence(`expected a completed cargo-shim.yml run on main for ${earlierGreen}`)
         );
       });
+
+      test.each(['cargo-shim.yml', 'protocol-ci.yml'] as const)(
+        'a manually dispatched green %s run on main is evidence',
+        (workflow) => {
+          // A dispatch runs every job of both lanes, and the jobs are still checked.
+          const api = nominatedApi();
+          api.recordWorkflowRun(workflow, earlierGreen, { event: 'workflow_dispatch' });
+          expect(qualifyCanarySource(source, api).laneCoverage?.cargo.ranOnSource).toBe(false);
+        }
+      );
 
       test('rows plus a run from a workflow file with other bytes are rejected', () => {
         const api = nominatedApi();
@@ -660,10 +785,10 @@ describe('canary required validation producers', () => {
           { commit: earlierGreen, conclusion: 'cancelled' },
         ]);
         expect(() => qualifyCanarySource(source, api)).toThrow(
-          'cargo-shim.yml: expected a covering main push run for'
+          'cargo-shim.yml: expected a covering main run for'
         );
         expect(() => qualifyCanarySource(source, api)).toThrow(
-          'received no main commit has a successful Cargo Shim push run'
+          'received no main commit has a successful Cargo Shim run'
         );
       });
 
@@ -758,7 +883,7 @@ describe('canary required validation producers', () => {
           ],
         });
         expect(() => qualifyCanarySource(source, api)).toThrow(
-          `protocol-ci.yml: expected a covering main push run for ${source.sourceSha}; received no candidate covers ${source.sourceSha}: ${otherCommit} (Protocol CI-relevant change)`
+          `protocol-ci.yml: expected a covering main run for ${source.sourceSha}; received no candidate covers ${source.sourceSha}: ${otherCommit} (Protocol CI-relevant change)`
         );
       });
 

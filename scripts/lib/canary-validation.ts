@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { rustCoverageFromGitHub, workflowCoverageFromGitHub } from './canary-lane-coverage';
 import type { CoverageRule } from './codeql-rust-coverage';
-import { touchesProtocolSurface } from './protocol';
+import { needsCompiledProtocolValidation, touchesProtocolSurface } from './protocol';
 import { classifyChangedPaths } from './rust-lanes';
 import { requireJsonRecord, requirePositiveSafeInteger } from './script-guards';
 
@@ -277,6 +277,24 @@ function missingLaneJobEvidence(
 }
 
 /**
+ * Whether every named job of the run's latest attempt succeeded. A job that is
+ * missing or skipped answers false; an ambiguous producer or a failed read throws.
+ */
+function laneRanOnRun(
+  api: CanaryValidationApi,
+  repository: string,
+  runId: number,
+  attempt: number,
+  names: readonly string[]
+): boolean {
+  const runJobs = listRunJobs(api, repository, runId);
+  return names.every((name) => {
+    const job = latestJob(runJobs, runId, attempt, name);
+    return job?.status === 'completed' && job.conclusion === 'success' && job.run_id === runId;
+  });
+}
+
+/**
  * A path-filtered lane Canary may find skipped. A skip counts only when an
  * earlier (or later) main commit ran the lane successfully and no
  * lane-relevant path differs between that commit and the source.
@@ -288,37 +306,49 @@ interface SkippableLane {
   readonly rule: CoverageRule;
 }
 
-// Cargo Shim runs every lane on a push, so its Gate alone shows the workspace ran.
+// Cargo Shim runs every lane on a push and on a manual dispatch (`changes` reports
+// rust and qualification true for any event but a pull request), so its Gate alone
+// shows the workspace ran. A candidate may therefore be either event.
 const CARGO_SHIM_LANE: SkippableLane = {
   receiptKey: 'cargo',
   workflow: 'cargo-shim.yml',
-  evidence: { workflow: 'cargo-shim.yml', jobs: ['Cargo Shim Gate'], events: ['push'] },
+  evidence: {
+    workflow: 'cargo-shim.yml',
+    jobs: ['Cargo Shim Gate'],
+    events: ['push', 'workflow_dispatch'],
+  },
   rule: {
     // The workflow's push path filter is generated from this same predicate.
     relevant: (paths) => classifyChangedPaths(paths).qualification,
     subject: 'Cargo Shim',
     verb: 'validated',
-    noCandidates: 'no main commit has a successful Cargo Shim push run',
-    headCovered: (head) => `${head} has a successful Cargo Shim push run`,
+    noCandidates: 'no main commit has a successful Cargo Shim run',
+    headCovered: (head) => `${head} has a successful Cargo Shim run`,
   },
 };
 
 // Protocol Gate goes green over a skipped compiled matrix when a push touches only
-// prose guides, so the three matrix-free jobs must have run too.
+// prose guides, so the matrix jobs that need no OS fan-out must have run too. The
+// relevance predicate is the workflow's own (`protocol-lanes.ts relevance`): a
+// prose-only range never ran the matrix, so it can neither cover a later commit nor
+// be undone by one. touchesProtocolSurface would leave a prose-only push as a
+// candidate that fails evidence and an ancestor that fails the path check, a dead
+// end until the next compiled change. A dispatch runs the whole matrix
+// (`protocol=true`), so it is evidence like a push.
 const PROTOCOL_CI_LANE: SkippableLane = {
   receiptKey: 'protocol',
   workflow: 'protocol-ci.yml',
   evidence: {
     workflow: 'protocol-ci.yml',
     jobs: ['Protocol Gate', 'TypeScript', 'cargo-deny', 'Schema equality and round trip'],
-    events: ['push'],
+    events: ['push', 'workflow_dispatch'],
   },
   rule: {
-    relevant: touchesProtocolSurface,
+    relevant: needsCompiledProtocolValidation,
     subject: 'Protocol CI',
     verb: 'validated',
-    noCandidates: 'no main commit has a successful Protocol CI push run',
-    headCovered: (head) => `${head} has a successful Protocol CI push run`,
+    noCandidates: 'no main commit has a successful Protocol CI run',
+    headCovered: (head) => `${head} has a successful Protocol CI run`,
   },
 };
 
@@ -385,10 +415,12 @@ function settleCodeqlRust(
 }
 
 /**
- * Settle a path-filtered lane that has no run on the source. Accepted only when
- * main's records cover the source (canary-lane-coverage.ts); the run listing
- * nominates candidates and Actions job evidence proves each one. Everything
- * else, a failed lookup included, rejects the source.
+ * Settle a path-filtered lane that did not run in full on the source: it has no
+ * run (push path filter) or its run skipped the evidence jobs (Protocol CI on a
+ * prose-only push). Accepted only when main's records cover the source
+ * (canary-lane-coverage.ts); the run listing nominates candidates and Actions
+ * job evidence proves each one. Everything else, a failed lookup included,
+ * rejects the source.
  */
 function settleSkippedLane(
   api: CanaryValidationApi,
@@ -406,7 +438,7 @@ function settleSkippedLane(
   });
   if (!coverage.covered) {
     throw new Error(
-      `${lane.workflow}: expected a covering main push run for ${source.sourceSha}; received ${coverage.reason}. The push path filter skipped the lane for this SHA, which counts only when a main commit with a successful ${listWith('and', lane.evidence.jobs)} push run differs from it in no ${lane.rule.subject}-relevant path. To recover, re-run the cancelled or failed ${lane.workflow} run of the newest ${lane.rule.subject}-relevant commit on main, then run Canary again`
+      `${lane.workflow}: expected a covering main run for ${source.sourceSha}; received ${coverage.reason}. ${lane.workflow} did not run ${listWith('and', lane.evidence.jobs)} on this SHA, which counts only when a main commit with those jobs successful in a ${listWith('or', lane.evidence.events)} run differs from it in no ${lane.rule.subject}-relevant path. To recover, re-run the cancelled or failed ${lane.workflow} run of the newest ${lane.rule.subject}-relevant commit on main, or dispatch ${lane.workflow} on main while main has no newer ${lane.rule.subject}-relevant change, then run Canary again`
     );
   }
   return { ranOnSource: false, reason: coverage.reason };
@@ -691,10 +723,21 @@ export function qualifyCanarySource(
     const attempt = requirePositiveSafeInteger(run.run_attempt, `${policy.workflow} attempt`);
     const jobs = requireJobs(api, source.repository, runId, attempt, policy.jobs);
     if (policy.lane) {
-      laneCoverage[policy.lane.receiptKey] = {
-        ranOnSource: true,
-        reason: `${policy.lane.rule.subject} ran on ${source.sourceSha}`,
-      };
+      // A green Gate is not a lane that ran: Protocol CI reports green over a
+      // skipped compiled matrix for a prose-only push, which leaves any earlier
+      // compiled change unvalidated. Then the source settles like a skipped lane.
+      laneCoverage[policy.lane.receiptKey] = laneRanOnRun(
+        api,
+        source.repository,
+        runId,
+        attempt,
+        policy.lane.evidence.jobs
+      )
+        ? {
+            ranOnSource: true,
+            reason: `${policy.lane.rule.subject} ran on ${source.sourceSha}`,
+          }
+        : settleSkippedLane(api, source, policy.lane, workflowId);
     }
     if (policy.workflow === 'codeql.yml') {
       const rust = settleCodeqlRust(api, source, runId, attempt);
