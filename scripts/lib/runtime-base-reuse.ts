@@ -804,35 +804,53 @@ export interface RuntimeReuseRecord {
   };
 }
 
+/** What a reuse record's artifact name says about the reuse. */
+interface RuntimeReuseNameFields {
+  readonly platform: ReleasePlatformId;
+  readonly producerRunId: number;
+  /** Input digest the producer and the reusing run share. */
+  readonly digest: string;
+  /** SHA-256 of the unstamped binary the reusing job verified. */
+  readonly binarySha256: string;
+}
+
 /**
- * Artifact name of a reuse record. It carries the platform, the producing run
- * and the digest, so Canary can verify the claim from the artifact listing alone.
+ * Artifact name of a reuse record. It carries the platform, the producing run,
+ * the input digest and the binary's SHA-256, so Canary can show and verify the
+ * claim from the artifact listing alone (it holds `actions: read` and cannot read
+ * the record's content or annotations).
  *
  * @example
- * runtimeReuseArtifactName('linux-x64', 46128211509, 'ab…'); // → 'runtime-reuse-linux-x64-46128211509-ab…'
+ * runtimeReuseArtifactName('linux-x64', 46128211509, digest, binarySha256);
+ * // → 'runtime-reuse-linux-x64-46128211509-<digest>-<binary sha256>'
  */
 export function runtimeReuseArtifactName(
   platform: string,
   producerRunId: number,
-  digest: string
+  digest: string,
+  binarySha256: string
 ): string {
   platformTarget(platform);
   requirePositiveSafeInteger(producerRunId, 'producer run id');
-  if (!SHA256_PATTERN.test(digest)) {
-    throw invalidValue('digest', '64 lowercase hex characters', digest);
+  for (const [label, value] of [
+    ['digest', digest],
+    ['binary sha256', binarySha256],
+  ] as const) {
+    if (!SHA256_PATTERN.test(value)) {
+      throw invalidValue(label, '64 lowercase hex characters', value);
+    }
   }
-  return `runtime-reuse-${platform}-${producerRunId}-${digest}`;
+  return `runtime-reuse-${platform}-${producerRunId}-${digest}-${binarySha256}`;
 }
 
 /**
  * Inverse of {@link runtimeReuseArtifactName}; null for any other name.
  *
  * @example
- * parseRuntimeReuseArtifactName('runtime-reuse-linux-x64-7-' + 'a'.repeat(64)); // → { platform: 'linux-x64', producerRunId: 7, digest: 'aaa…' }
+ * parseRuntimeReuseArtifactName(`runtime-reuse-linux-x64-7-${digest}-${binarySha256}`);
+ * // → { platform: 'linux-x64', producerRunId: 7, digest, binarySha256 }
  */
-export function parseRuntimeReuseArtifactName(
-  name: string
-): { platform: ReleasePlatformId; producerRunId: number; digest: string } | null {
+export function parseRuntimeReuseArtifactName(name: string): RuntimeReuseNameFields | null {
   // Longest platform id first: `linux-x64` is a prefix of `linux-x64-musl`.
   const platforms = ALL_BINARY_TARGETS.map((target) => target.arch).sort(
     (left, right) => right.length - left.length
@@ -840,9 +858,9 @@ export function parseRuntimeReuseArtifactName(
   for (const platform of platforms) {
     const prefix = `runtime-reuse-${platform}-`;
     if (!name.startsWith(prefix)) continue;
-    const rest = /^([1-9]\d{0,15})-([0-9a-f]{64})$/.exec(name.slice(prefix.length));
-    if (rest?.[1] && rest[2] && Number.isSafeInteger(Number(rest[1]))) {
-      return { platform, producerRunId: Number(rest[1]), digest: rest[2] };
+    const rest = /^([1-9]\d{0,15})-([0-9a-f]{64})-([0-9a-f]{64})$/.exec(name.slice(prefix.length));
+    if (rest?.[1] && rest[2] && rest[3] && Number.isSafeInteger(Number(rest[1]))) {
+      return { platform, producerRunId: Number(rest[1]), digest: rest[2], binarySha256: rest[3] };
     }
   }
   return null;

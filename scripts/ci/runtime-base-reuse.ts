@@ -195,7 +195,7 @@ if (import.meta.main) {
         'GITHUB_OUTPUT',
         [
           `path=${base.binaryPath}`,
-          `record-name=${runtimeReuseArtifactName(request.platform, producer.runId, request.digest)}`,
+          `record-name=${runtimeReuseArtifactName(request.platform, producer.runId, request.digest, base.sha256)}`,
           `binary-sha256=${base.sha256}`,
           '',
         ].join('\n')

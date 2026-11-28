@@ -756,39 +756,54 @@ describe('verifyRuntimeBaseFiles', () => {
 });
 
 describe('reuse record', () => {
-  test('names the platform, the producing run and the digest, and parses back', () => {
-    const name = runtimeReuseArtifactName('linux-x64-musl', 46128211509, DIGEST);
-    expect(name).toBe(`runtime-reuse-linux-x64-musl-46128211509-${DIGEST}`);
+  const BINARY_SHA = 'e'.repeat(64);
+
+  test('names the platform, the producing run, the digest and the binary hash, and parses back', () => {
+    const name = runtimeReuseArtifactName('linux-x64-musl', 46128211509, DIGEST, BINARY_SHA);
+    expect(name).toBe(`runtime-reuse-linux-x64-musl-46128211509-${DIGEST}-${BINARY_SHA}`);
     expect(parseRuntimeReuseArtifactName(name)).toEqual({
       platform: 'linux-x64-musl',
       producerRunId: 46128211509,
       digest: DIGEST,
+      binarySha256: BINARY_SHA,
     });
     // `linux-x64` is a prefix of `linux-x64-musl`; the digit run after it decides.
-    expect(parseRuntimeReuseArtifactName(`runtime-reuse-linux-x64-7-${DIGEST}`)).toMatchObject({
-      platform: 'linux-x64',
-      producerRunId: 7,
-    });
+    expect(
+      parseRuntimeReuseArtifactName(`runtime-reuse-linux-x64-7-${DIGEST}-${BINARY_SHA}`)
+    ).toMatchObject({ platform: 'linux-x64', producerRunId: 7 });
   });
 
+  const HEX = 'c'.repeat(64);
   test.each([
-    `runtime-unstamped-linux-x64-${'c'.repeat(64)}`,
-    `runtime-reuse-plan9-7-${'c'.repeat(64)}`,
-    `runtime-reuse-linux-x64-0-${'c'.repeat(64)}`,
-    `runtime-reuse-linux-x64-07-${'c'.repeat(64)}`,
-    `runtime-reuse-linux-x64-7-${'C'.repeat(64)}`,
-    `runtime-reuse-linux-x64-7-${'c'.repeat(63)}`,
-    `runtime-reuse-linux-x64-7-${'c'.repeat(64)}-extra`,
-    `runtime-reuse-linux-x64-99999999999999999999-${'c'.repeat(64)}`,
+    `runtime-unstamped-linux-x64-${HEX}`,
+    `runtime-reuse-plan9-7-${HEX}-${HEX}`,
+    `runtime-reuse-linux-x64-0-${HEX}-${HEX}`,
+    `runtime-reuse-linux-x64-07-${HEX}-${HEX}`,
+    `runtime-reuse-linux-x64-7-${'C'.repeat(64)}-${HEX}`,
+    `runtime-reuse-linux-x64-7-${HEX}-${'C'.repeat(64)}`,
+    `runtime-reuse-linux-x64-7-${'c'.repeat(63)}-${HEX}`,
+    `runtime-reuse-linux-x64-7-${HEX}-${'c'.repeat(63)}`,
+    `runtime-reuse-linux-x64-7-${HEX}`,
+    `runtime-reuse-linux-x64-7-${HEX}-${HEX}-extra`,
+    `runtime-reuse-linux-x64-99999999999999999999-${HEX}-${HEX}`,
     '',
   ])('does not parse %p', (name) => {
     expect(parseRuntimeReuseArtifactName(name)).toBeNull();
   });
 
   test('refuses to name a record for an invalid input', () => {
-    expect(() => runtimeReuseArtifactName('plan9', 7, DIGEST)).toThrow('Invalid platform');
-    expect(() => runtimeReuseArtifactName('linux-x64', 0, DIGEST)).toThrow('producer run id');
-    expect(() => runtimeReuseArtifactName('linux-x64', 7, 'abc')).toThrow('Invalid digest');
+    expect(() => runtimeReuseArtifactName('plan9', 7, DIGEST, BINARY_SHA)).toThrow(
+      'Invalid platform'
+    );
+    expect(() => runtimeReuseArtifactName('linux-x64', 0, DIGEST, BINARY_SHA)).toThrow(
+      'producer run id'
+    );
+    expect(() => runtimeReuseArtifactName('linux-x64', 7, 'abc', BINARY_SHA)).toThrow(
+      'Invalid digest'
+    );
+    expect(() => runtimeReuseArtifactName('linux-x64', 7, DIGEST, 'abc')).toThrow(
+      'Invalid binary sha256'
+    );
   });
 
   test('keeps the original producer and records the reusing run apart from it', () => {
