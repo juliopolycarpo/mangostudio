@@ -22,7 +22,7 @@ export interface CanaryCoverageApi {
 const COMPARE_FILE_LIMIT = 300;
 /** Successful runs read per lane; resolveRustCoverage tries only the newest few distinct commits. */
 const NOMINATION_PAGE_SIZE = 20;
-/** Events whose main runs run the whole lane; the evidence lanes name the same two. */
+/** Events whose main runs run the whole lane, each listed on its own; the evidence lanes name the same two. */
 const NOMINATING_EVENTS = ['push', 'workflow_dispatch'];
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -106,42 +106,48 @@ export function rustCoverageFromGitHub(
 }
 
 /**
- * Commits whose push run of a workflow on main the listing reports as
- * successful, newest run first. The listing only nominates: a row says nothing
- * about the run's jobs or workflow bytes, so every candidate still needs the
- * Actions evidence. One bounded page is read; a failed or malformed read throws.
+ * Commits whose push or manual-dispatch run of a workflow on main the listings
+ * report as successful, newest run first. The listings only nominate: a row says
+ * nothing about the run's jobs or workflow bytes, so every candidate still needs
+ * the Actions evidence. Each event gets its own bounded page, because one
+ * `branch=main` page without an event filter also holds pull request runs from a
+ * fork's `main` branch, and enough of them would push the real runs off the page.
+ * A failed or malformed read of either page throws.
  * @example
- * successfulPushCommits(api, 'owner/repo', 43); // ['<newest sha>', '<older sha>']
+ * successfulMainCommits(api, 'owner/repo', 43); // ['<newest sha>', '<older sha>']
  */
-function successfulPushCommits(
+function successfulMainCommits(
   api: CanaryCoverageApi,
   repository: string,
   workflowId: number
 ): string[] {
-  const path = `repos/${repository}/actions/workflows/${workflowId}/runs?branch=main&status=success&per_page=${NOMINATION_PAGE_SIZE}`;
-  const body = api.get(path);
-  const rows = record(body)?.workflow_runs;
-  if (!Array.isArray(rows)) {
-    throw new Error(
-      `${path}: expected a workflow_runs array; received ${JSON.stringify(body)?.slice(0, 200)}`
-    );
-  }
   const nominated: { sha: string; number: number }[] = [];
-  for (const entry of rows) {
-    const row = record(entry);
-    if (!row) continue;
-    // A row that is malformed or not a successful main push or manual dispatch is
-    // dropped: dropping only removes a nomination, so it never widens coverage.
-    if (
-      !NOMINATING_EVENTS.includes(String(row.event)) ||
-      row.head_branch !== 'main' ||
-      row.conclusion !== 'success' ||
-      typeof row.head_sha !== 'string' ||
-      !/^[a-f0-9]{40}$/.test(row.head_sha) ||
-      !Number.isSafeInteger(row.run_number)
-    )
-      continue;
-    nominated.push({ sha: row.head_sha, number: row.run_number as number });
+  for (const event of NOMINATING_EVENTS) {
+    const path = `repos/${repository}/actions/workflows/${workflowId}/runs?branch=main&event=${event}&status=success&per_page=${NOMINATION_PAGE_SIZE}`;
+    const body = api.get(path);
+    const rows = record(body)?.workflow_runs;
+    if (!Array.isArray(rows)) {
+      throw new Error(
+        `${path}: expected a workflow_runs array; received ${JSON.stringify(body)?.slice(0, 200)}`
+      );
+    }
+    for (const entry of rows) {
+      const row = record(entry);
+      if (!row) continue;
+      // A row that is malformed or not a successful main run of the requested
+      // event is dropped: dropping only removes a nomination, so it never widens
+      // coverage.
+      if (
+        row.event !== event ||
+        row.head_branch !== 'main' ||
+        row.conclusion !== 'success' ||
+        typeof row.head_sha !== 'string' ||
+        !/^[a-f0-9]{40}$/.test(row.head_sha) ||
+        !Number.isSafeInteger(row.run_number)
+      )
+        continue;
+      nominated.push({ sha: row.head_sha, number: row.run_number as number });
+    }
   }
   nominated.sort((left, right) => right.number - left.number);
   return [...new Set(nominated.map(({ sha }) => sha))];
@@ -165,7 +171,7 @@ export function workflowCoverageFromGitHub(
     readonly evidence: CandidateEvidence;
   }
 ): RustCoverage {
-  const candidates = successfulPushCommits(api, input.repository, input.workflowId);
+  const candidates = successfulMainCommits(api, input.repository, input.workflowId);
   return resolveRustCoverage(
     input.sourceSha,
     candidates,

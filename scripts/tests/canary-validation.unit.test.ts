@@ -238,24 +238,53 @@ class FakeQualificationApi implements CanaryValidationApi {
     );
   }
   /**
-   * The newest-first push runs the lane workflow lists for main. Rows only nominate: the listing
-   * is one bounded page read with `get`, and `conclusion` is what the row claims.
+   * The newest-first runs the lane workflow lists for main, one bounded page per event (`push`
+   * unless a row says `workflow_dispatch`). Both pages always exist, as the real API answers an
+   * empty page. Rows only nominate: `conclusion` is what the row claims, and `runNumber`
+   * defaults to a descending sequence from 500.
    */
   recordLaneNominations(
     workflow: keyof typeof evidenceLanes,
-    rows: readonly { commit: string; conclusion?: string }[]
+    rows: readonly {
+      commit: string;
+      conclusion?: string;
+      event?: 'push' | 'workflow_dispatch';
+      runNumber?: number;
+    }[]
   ) {
     const { id } = evidenceLanes[workflow];
-    this.values.set(`actions/workflows/${id}/runs?branch=main&status=success&per_page=20`, {
-      total_count: rows.length,
-      workflow_runs: rows.map((row, index) =>
-        run(9000 + index, workflow, id, {
-          head_sha: row.commit,
-          conclusion: row.conclusion ?? 'success',
-          run_number: 500 - index,
-        })
-      ),
-    });
+    for (const event of ['push', 'workflow_dispatch'] as const) {
+      const page = rows.filter((row) => (row.event ?? 'push') === event);
+      this.values.set(
+        `actions/workflows/${id}/runs?branch=main&event=${event}&status=success&per_page=20`,
+        {
+          total_count: page.length,
+          workflow_runs: page.map((row, index) =>
+            run(9000 + index, workflow, id, {
+              event,
+              head_sha: row.commit,
+              conclusion: row.conclusion ?? 'success',
+              run_number: row.runNumber ?? 500 - index,
+            })
+          ),
+        }
+      );
+    }
+  }
+  /**
+   * A full push page of green runs older than anything else listed, on commits no test covers.
+   * The page is as full as the API's per_page, so a lister that read only it would see no
+   * covering run if the real one sat in another event's page.
+   */
+  recordFullPushPageOfOlderRuns(workflow: keyof typeof evidenceLanes, coveringRun: string) {
+    const unrelated = Array.from({ length: 20 }, (_, index) => ({
+      commit: (index + 10).toString(16).padStart(2, '0').repeat(20),
+      runNumber: 100 - index,
+    }));
+    this.recordLaneNominations(workflow, [
+      ...unrelated,
+      { commit: coveringRun, event: 'workflow_dispatch', runNumber: 600 },
+    ]);
   }
   /**
    * Both lanes covered by a green push run on `commit`, with a docs-only range to the source.
@@ -460,8 +489,8 @@ describe('canary required validation producers', () => {
   describe('Cargo Shim and Protocol CI skipped by the push path filter', () => {
     const rustCommit = source.pushBeforeSha as string;
     const otherCommit = 'f'.repeat(40);
-    const nominationPath = (id: number) =>
-      `actions/workflows/${id}/runs?branch=main&status=success&per_page=20`;
+    const nominationPath = (id: number, event: 'push' | 'workflow_dispatch') =>
+      `actions/workflows/${id}/runs?branch=main&event=${event}&status=success&per_page=20`;
     const cargoRelevant = ['crates/mango-protocol/src/lib.rs', 'docs/guide.md'];
 
     /** The scenario of #2726: Z is green, Rust commit A was cancelled, and the source is docs-only. */
@@ -792,21 +821,65 @@ describe('canary required validation producers', () => {
         );
       });
 
-      test('a failed nomination lookup propagates instead of assuming coverage', () => {
+      test.each(['push', 'workflow_dispatch'] as const)(
+        'a failed %s nomination lookup rejects even when the other page covers the source',
+        (event) => {
+          const api = new FakeQualificationApi();
+          api.absent(43);
+          api.absent(44);
+          api.coverLanesFrom(earlierGreen);
+          api.failures.set(nominationPath(43, event), 'fixture denied API read');
+          expect(() => qualifyCanarySource(source, api)).toThrow('fixture denied API read');
+        }
+      );
+
+      test.each(['push', 'workflow_dispatch'] as const)(
+        'a malformed %s nomination page is rejected, naming the value',
+        (event) => {
+          const api = new FakeQualificationApi();
+          api.absent(43);
+          api.absent(44);
+          api.coverLanesFrom(earlierGreen);
+          api.values.set(nominationPath(43, event), { workflow_runs: 'not-an-array' });
+          expect(() => qualifyCanarySource(source, api)).toThrow(
+            'expected a workflow_runs array; received {"workflow_runs":"not-an-array"}'
+          );
+        }
+      );
+
+      test('the covering run on the dispatch page counts when the push page is full of older runs', () => {
+        // Without an event filter one page also holds pull request runs from a fork's main
+        // branch, so each event is listed on its own and the two are merged by run number.
         const api = new FakeQualificationApi();
         api.absent(43);
         api.absent(44);
-        api.failures.set(nominationPath(43), 'fixture denied API read');
-        expect(() => qualifyCanarySource(source, api)).toThrow('fixture denied API read');
+        for (const workflow of ['cargo-shim.yml', 'protocol-ci.yml'] as const) {
+          api.recordFullPushPageOfOlderRuns(workflow, earlierGreen);
+          api.recordWorkflowRun(workflow, earlierGreen, { event: 'workflow_dispatch' });
+        }
+        api.recordRange(earlierGreen, source.sourceSha, ['docs/guide.md']);
+        const receipt = qualifyCanarySource(source, api);
+        expect(receipt.laneCoverage?.cargo.reason).toContain(earlierGreen);
+        expect(receipt.laneCoverage?.protocol.reason).toContain(earlierGreen);
       });
 
-      test('a malformed nomination page is rejected, naming the value', () => {
+      test('a row from the wrong event or a fork-style pull request run nominates nothing', () => {
         const api = new FakeQualificationApi();
         api.absent(43);
         api.absent(44);
-        api.values.set(nominationPath(43), { workflow_runs: 'not-an-array' });
+        api.recordLaneNominations('cargo-shim.yml', []);
+        // The fake answers the push page with a pull request run on a fork's main branch.
+        api.values.set(nominationPath(43, 'push'), {
+          workflow_runs: [
+            run(9100, 'cargo-shim.yml', 43, {
+              event: 'pull_request',
+              head_sha: earlierGreen,
+              run_number: 900,
+            }),
+          ],
+        });
         expect(() => qualifyCanarySource(source, api)).toThrow(
-          'expected a workflow_runs array; received {"workflow_runs":"not-an-array"}'
+          'received no main commit has a successful Cargo Shim run'
         );
       });
 

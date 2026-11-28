@@ -107,10 +107,12 @@ Protocol CI's run skipped its compiled jobs (`TypeScript`, `cargo-deny`,
 push path filter compares only the push's own range, so a Rust change whose run
 was cancelled or failed does not force the next push to rerun them, and a green
 Protocol Gate over a skipped matrix validates nothing earlier. Such a SHA counts
-only when a main commit covers it: the qualifier reads one page of the workflow's
-newest successful `push` and `workflow_dispatch` runs on `main`
-(`status=success`, newest 20) as nominations and tries the newest five distinct
-commits. A candidate needs Actions evidence, as above, restricted to those two
+only when a main commit covers it: the qualifier reads one page each of the
+workflow's newest successful `push` and `workflow_dispatch` runs on `main`
+(`status=success`, newest 20 per event; a page without an event filter would
+also hold pull request runs from a fork's `main`) as nominations, merges them by
+run number and tries the newest five distinct commits. A failed read of either
+page rejects the SHA. A candidate needs Actions evidence, as above, restricted to those two
 events (a dispatch runs every job of both workflows): a completed run for that
 exact SHA on `main` in this repository, from a workflow file with the
 qualification revision's bytes, whose latest attempt has `Cargo Shim Gate`
