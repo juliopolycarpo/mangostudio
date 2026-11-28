@@ -144,7 +144,9 @@ jobs:
 
       - name: Download bundled binary smoke harness
         if: ${{ !inputs.rebuild }}
-        timeout-minutes: 2
+        # Above the client's 172 s worst case (two attempts and the pause), so a
+        # slow download fails with the client's error; run-artifact.unit.test.ts pins it.
+        timeout-minutes: 3
         uses: ./.github/actions/download-run-artifact # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           name: hub-inputs-${{ inputs.source_sha }}

@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -13,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { zipCreationCommand } from '../lib/archive-creation';
+import { ROOT_DIR } from '../lib/config';
 import { ARTIFACT_DOWNLOAD_RETRY_POLICY, GitHubRetry } from '../lib/github-retry';
 import {
   ARCHIVE_TIMEOUT_MS,
@@ -28,6 +30,7 @@ import {
 } from '../lib/run-artifact';
 import { zipCreationUnavailable } from './support/host-tools';
 import { RecordedRetryEnvironment } from './support/scripted-github-http';
+import { extractStepBlocksUsing } from './support/workflow-blocks';
 
 // Skipped on a developer machine without `zip`; CI throws instead (see host-tools.ts).
 const ZIP_UNAVAILABLE = zipCreationUnavailable();
@@ -218,6 +221,37 @@ describe('download retry budget', () => {
       ARTIFACT_DOWNLOAD_RETRY_POLICY.maxTotalWaitMs;
     expect(worstCaseMs).toBe(172_000);
     expect(worstCaseMs).toBeLessThanOrEqual(180_000);
+  });
+
+  // A step deadline below the client's worst case kills a download that would
+  // have succeeded on its last attempt, and hides the client's error.
+  test('every workflow step that downloads a run artifact outlasts the client worst case', () => {
+    const worstCaseMinutes = Math.ceil(
+      (DOWNLOAD_ATTEMPTS * (METADATA_TIMEOUT_MS + ARCHIVE_TIMEOUT_MS) +
+        ARTIFACT_DOWNLOAD_RETRY_POLICY.maxTotalWaitMs) /
+        60_000
+    );
+    const workflowsDirectory = join(ROOT_DIR, '.github/workflows');
+    const declared: string[] = [];
+    let callers = 0;
+    for (const file of readdirSync(workflowsDirectory).sort()) {
+      const steps = extractStepBlocksUsing(
+        readFileSync(join(workflowsDirectory, file), 'utf8'),
+        './.github/actions/download-run-artifact'
+      );
+      callers += steps.length;
+      for (const step of steps) {
+        const minutes = /^ {8}timeout-minutes: (\d+)$/m.exec(step)?.[1];
+        if (minutes !== undefined) declared.push(`${file}: ${minutes}`);
+        expect(
+          Number(minutes ?? worstCaseMinutes),
+          `(${file} download-run-artifact step timeout-minutes): expected at least ${worstCaseMinutes} | received: ${minutes}`
+        ).toBeGreaterThanOrEqual(worstCaseMinutes);
+      }
+    }
+    // The counts prove the scan found the steps: an empty scan cannot pass.
+    expect(callers).toBe(3);
+    expect(declared).toEqual(['smoke-binary.yml: 3']);
   });
 });
 
