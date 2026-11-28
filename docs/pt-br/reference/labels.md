@@ -72,6 +72,14 @@ limpeza de labels não gere novas cobranças.
 - `type: chore` — manual, manutenção que não se encaixa em nenhum outro tipo
 - `type: bug`, `type: feature`, `type: migration`, `type: question` — manual / padrões dos templates de issue
 
+## `ci:` (como o CI executa)
+
+Aplicada manualmente em um pull request; nenhum glob e nenhum workflow a aplica, e ela não
+conta como classificação `area:` ou `type:`. Crie-a uma vez nas configurações de labels do
+repositório antes do primeiro uso.
+
+- `ci: full` — restaura o conjunto completo de lanes em um pull request do Dependabot, que de outra forma roda um conjunto leve cujos gates se recusam a liberar o merge. Adicione-a e comente `@dependabot rebase`; se o Dependabot responder que o pull request já está atualizado, use `@dependabot recreate` ou "Re-run all jobs" em CI, Cargo Shim e Protocol CI. Veja [`ci.md`](./ci.md#conjunto-leve-de-lanes-para-pull-requests-do-dependabot)
+
 ## `status:` (somente issues)
 
 Issues carregam exatamente uma label `status:`. Nenhum glob aplica essas labels — o
@@ -89,8 +97,9 @@ Mantenha novas labels e mudanças de glob em sincronia entre `.github/labeler.ym
 `.github/dependabot.yml` e esta página. `scripts/tests/labeler.unit.test.ts` garante que o
 conjunto de labels `area:`/`type:` documentado aqui é igual ao definido em `.github/labeler.yml`
 (mais as labels manuais acima), então uma label adicionada em um lugar e não no outro falha o
-teste pelo nome. O texto dos globs em cada item e a lista de `status:` **não** são verificados —
-mantenha-os corretos manualmente.
+teste pelo nome. O texto dos globs em cada item, a seção `ci:` e a lista de `status:` **não**
+são verificados — mantenha-os corretos manualmente. `scripts/lib/lane-mode.ts` é dono do nome
+`ci: full`; `lane-mode.unit.test.ts` confere que as duas versões desta página o escrevem.
 
 ## Relacionado
 

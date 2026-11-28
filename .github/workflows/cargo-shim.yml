@@ -85,9 +85,20 @@ jobs:
     runs-on: ubuntu-latest
     # Bun setup can wait four minutes for a republished canary asset.
     timeout-minutes: 9
+    # A job-level block replaces the workflow's, so contents stays. The pull
+    # request read is for the lane-set step's label lookup.
+    permissions:
+      contents: read
+      pull-requests: read # the PR's current labels for the lane-set step
     outputs:
       rust: ${{ steps.changed.outputs.rust }}
-      qualification: ${{ steps.changed.outputs.qualification }}
+      # Light drops the macOS and Windows real-binary lanes and Windows ARM64;
+      # the Ubuntu workspace job and musl Clippy stay. Each lane's skip is
+      # accepted through its own output below, and the gate refuses the run.
+      qualification: ${{ steps.lanes.outputs.lane_set == 'light' && 'false' || steps.changed.outputs.qualification }}
+      arm64: ${{ steps.lanes.outputs.lane_set == 'light' && 'false' || steps.changed.outputs.rust }}
+      lane_set: ${{ steps.lanes.outputs.lane_set }}
+      lane_reason: ${{ steps.lanes.outputs.lane_reason }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -119,6 +130,19 @@ jobs:
           cat "$RUNNER_TEMP/lanes" >> "$GITHUB_OUTPUT"
           cat "$RUNNER_TEMP/lanes"
 
+      # The same lane-set decision CI's Preflight makes, from the same script
+      # and inputs; see the step of that name in ci.yml.
+      - id: lanes
+        name: Decide the lane set
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: bun ./scripts/ci/lane-mode.ts "$RUNNER_TEMP/changed-files" >> "$GITHUB_OUTPUT"
+
   workspace:
     name: Workspace (${{ matrix.os }})
     needs: [changes]
@@ -127,7 +151,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Light keeps Ubuntu only: the fmt, shear, Clippy, test and doc steps
+        # below all run there, and the other two OSes repeat the build.
+        os: ${{ fromJSON(needs.changes.outputs.lane_set == 'light' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -300,7 +326,7 @@ jobs:
     # when retained bytes fit the configured storage allowance.
     name: Workspace (windows-11-arm)
     needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.arm64 == 'true'
     runs-on: windows-11-arm
     timeout-minutes: 40
     steps:
@@ -444,6 +470,8 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 musl-clippy' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}
+          # `light` makes the evaluator report the lanes and then refuse.
+          LANE_SET: ${{ needs.changes.outputs.lane_set }}
+          ALLOWED_SKIPS: ${{ format('{0} {1} {2}', needs.changes.outputs.rust == 'false' && 'workspace musl-clippy' || '', needs.changes.outputs.arm64 == 'false' && 'workspace-windows-arm64' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts

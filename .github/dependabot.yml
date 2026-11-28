@@ -1,4 +1,8 @@
 version: 2
+# Pull requests from these entries run a light CI lane set that its gates refuse
+# to merge; the `ci: full` label plus `@dependabot rebase` (or `recreate` when
+# Dependabot says the branch is up to date) restores the full run
+# (docs/reference/ci.md, "Light lane set for Dependabot pull requests").
 updates:
   # `/` only covers .github/workflows and a root action.yml; the repo-local
   # composite actions each pin their own third-party SHAs and need an

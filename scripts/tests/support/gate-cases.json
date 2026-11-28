@@ -48,7 +48,7 @@
       {
         "name": "ordinary or docs-only PR",
         "event": "pull_request",
-        "outputs": { "rust": "false", "qualification": "false" },
+        "outputs": { "rust": "false", "qualification": "false", "arm64": "false" },
         "allowedSkips": [
           "fuzz-workspace",
           "musl-clippy",
@@ -60,14 +60,20 @@
       {
         "name": "Rust PR or manual run",
         "event": "pull_request",
-        "outputs": { "rust": "true", "qualification": "true" },
+        "outputs": { "rust": "true", "qualification": "true", "arm64": "true" },
         "allowedSkips": []
       },
       {
         "name": "Rust PR without qualification paths",
         "event": "pull_request",
-        "outputs": { "rust": "true", "qualification": "false" },
+        "outputs": { "rust": "true", "qualification": "false", "arm64": "true" },
         "allowedSkips": ["real-binary-qualification"]
+      },
+      {
+        "name": "light Dependabot Rust PR",
+        "event": "pull_request",
+        "outputs": { "rust": "true", "qualification": "false", "arm64": "false" },
+        "allowedSkips": ["real-binary-qualification", "workspace-windows-arm64"]
       },
       {
         "name": "failed change detection",

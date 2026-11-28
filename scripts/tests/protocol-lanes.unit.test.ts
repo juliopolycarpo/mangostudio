@@ -22,6 +22,7 @@ import {
   selectLanes,
   type ToolchainProbe,
 } from '../protocol/tasks';
+import { LANE_SET_OS_MATRIX } from './support/lane-set-workflows';
 import { readText } from './support/read-text';
 import { useScratchDirs } from './support/scratch-dirs';
 import { extractJobBlock, extractOnBlock, extractStepBlocks } from './support/workflow-blocks';
@@ -386,7 +387,7 @@ describe('protocol lane selection', () => {
     );
 
     const workspace = extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'workspace');
-    expect(workspace).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
+    expect(workspace).toContain(LANE_SET_OS_MATRIX);
     expect(workspace).toContain("if: needs.changes.outputs.rust == 'true'");
   });
 });

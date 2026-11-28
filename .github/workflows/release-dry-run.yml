@@ -27,6 +27,13 @@ on:
         description: JSON target ID to content-addressed same-run artifact name map.
         type: string
         default: "{}"
+      lane_set:
+        description: >-
+          full, or light when CI skipped distribution for a manifest-only Dependabot
+          pull request. Light runs no dry-run lane (there are no bytes to package)
+          and the gate refuses; see scripts/lib/lane-mode.ts.
+        type: string
+        default: full
   workflow_dispatch:
   schedule:
     - cron: "0 7 * * 1"
@@ -91,6 +98,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_NAME: ${{ github.event_name }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LANE_SET: ${{ inputs.lane_set }}
         # The release pattern mirrors the release import graph; prefer
         # over-triggering. Release-script logic is also unit-tested via the
         # `test` workflow. `Dockerfile$` is anchored so Dockerfile.alpine does
@@ -104,6 +112,15 @@ jobs:
           if [ "$EVENT_NAME" != "pull_request" ]; then
             echo "release=true" >> "$GITHUB_OUTPUT"
             echo "launcher=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Light: CI skipped distribution, so a Cargo.lock bump (release
+          # relevant) would otherwise wait on target artifacts that never
+          # arrive. The gate below still refuses the light run.
+          if [ "$LANE_SET" = "light" ]; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "launcher=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -605,6 +622,8 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
+          # Scheduled and manual runs have no input; they are the full set.
+          LANE_SET: ${{ inputs.lane_set || 'full' }}
           ALLOWED_SKIPS: ${{ format('{0} {1} {2} {3}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.launcher == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '', (needs.changes.outputs.release == 'false' || inputs.reuse_distribution) && 'runtime' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts

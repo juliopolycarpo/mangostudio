@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { evaluateGate } from '../ci/evaluate-gate';
+import { LANE_SET_OS_MATRIX } from './support/lane-set-workflows';
 import { readText } from './support/read-text';
 import {
   extractJobBlock,
@@ -96,7 +97,7 @@ describe('short-job fold command and failure coverage', () => {
 
   test('macOS and Windows transport tests survive a failed peer compile while interop retains its prerequisite', () => {
     const job = extractJobBlock(protocol, 'interop');
-    expect(job).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
+    expect(job).toContain(LANE_SET_OS_MATRIX);
     const transport = commandStep(protocol, 'interop', 'bun run protocol:test --ts-only');
     expect(transport).toContain(
       `if: ${EXPR} !cancelled() && steps.install.outcome == 'success' && matrix.os != 'ubuntu-latest' }}`

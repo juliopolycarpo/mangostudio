@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { evaluateGate, type NeedResult, parseAllowedSkips, parseNeeds } from '../ci/evaluate-gate';
 import fixtures from './support/gate-cases.json';
+import { LANE_SET_OS_MATRIX } from './support/lane-set-workflows';
 import { readText } from './support/read-text';
 import {
   expectedGateNeeds,
@@ -58,7 +59,7 @@ function scenarioProjection(path: string, workflow: string, scenario: Scenario):
     }
     if (!extractJobBlock(workflow, 'transports')) {
       const interop = extractJobBlock(workflow, 'interop');
-      expect(interop).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
+      expect(interop).toContain(LANE_SET_OS_MATRIX);
       const transport = extractStepBlocks(interop).find((step) =>
         step.includes('run: bun run protocol:test --ts-only')
       );
