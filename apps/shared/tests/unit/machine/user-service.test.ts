@@ -29,6 +29,7 @@ import {
 } from '../../../src/machine/user-service';
 import { RuntimeServiceManagementError } from '../../../src/runtime-contract';
 import { UserServiceStatusSchema } from '../../../src/runtime-home';
+import { CAPTURED_PROGRESS_THEN_THROW } from './clixml-captures';
 
 const IDENTITY: UserServiceIdentity = {
   unitName: 'example.service',
@@ -643,6 +644,70 @@ describe('createUserServiceManager on win32', () => {
     expect(decodePowerShellArgv(host.argv[0] ?? [])).toContain(
       "Get-ScheduledTask -TaskName 'Example Unit'"
     );
+  });
+
+  it('silences PowerShell progress records on the first line of every script it runs', async () => {
+    const host = new FakeServiceHost({ platform: 'win32' });
+    await createUserServiceManager(IDENTITY, host.deps()).start();
+    const script = decodePowerShellArgv(host.argv[0] ?? []) ?? '';
+    expect(script.split('\n')[0]).toStartWith("$ProgressPreference = 'SilentlyContinue'; ");
+  });
+
+  it('quotes the script own error text, not a CLIXML envelope, when a task command fails', async () => {
+    const host = new FakeServiceHost({
+      platform: 'win32',
+      onExec: () => ({
+        exitCode: 1,
+        stdout: '',
+        stderr: CAPTURED_PROGRESS_THEN_THROW,
+      }),
+    });
+    const failure = await createUserServiceManager(IDENTITY, host.deps())
+      .stop()
+      .then(
+        () => undefined,
+        (error: unknown) => error
+      );
+    expect(failure, 'expected stop to reject when PowerShell exits 1').toBeInstanceOf(
+      RuntimeServiceManagementError
+    );
+    const message = (failure as Error).message;
+    expect(message).toContain('Stop-ScheduledTask failed (exit 1): boom-after-progress');
+    expect(
+      message,
+      `expected no envelope text in the operator message | received: ${message}`
+    ).not.toMatch(/CLIXML|<Objs|_x000D_/);
+  });
+
+  it('reports a status failure as the script own error text, not a CLIXML envelope', async () => {
+    const host = new FakeServiceHost({
+      platform: 'win32',
+      onExec: () => ({
+        exitCode: 1,
+        stdout: '',
+        stderr: CAPTURED_PROGRESS_THEN_THROW,
+      }),
+    });
+    const status = await createUserServiceManager(IDENTITY, host.deps()).status();
+    expect(status.error).toStartWith('boom-after-progress');
+    expect(status.error).not.toMatch(/CLIXML|<Objs|_x000D_/);
+  });
+
+  it('leaves the stderr of every other supervisor command as the program wrote it', async () => {
+    const host = new FakeServiceHost({
+      platform: 'linux',
+      onExec: (argv) =>
+        argv[1] === '--user' && argv[2] === 'start'
+          ? { exitCode: 1, stdout: '', stderr: CAPTURED_PROGRESS_THEN_THROW }
+          : undefined,
+    });
+    const failure = await createUserServiceManager(IDENTITY, host.deps())
+      .start()
+      .then(
+        () => undefined,
+        (error: unknown) => error
+      );
+    expect((failure as Error | undefined)?.message).toContain('#< CLIXML');
   });
 
   it('stops the task before unregistering it, since unregistering leaves it running', async () => {

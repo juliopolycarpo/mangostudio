@@ -27,6 +27,9 @@ use crate::runtime_home::{
     RuntimeSlot, read_runtime_slot_config, read_runtime_slot_credentials, slot_current_binary_path,
 };
 
+// Pure text handling, compiled off Windows only so its tests run on every host.
+#[cfg(any(windows, test))]
+mod powershell_output;
 #[cfg(test)]
 mod process_lifetime_test_receipt;
 mod scheduled_task;
@@ -599,7 +602,14 @@ mod windows {
         fn run(&self, script: &str, timeout: Duration) -> io::Result<(bool, String)> {
             use std::os::windows::process::CommandExt as _;
 
-            let encoded = encode_script(script);
+            // `-EncodedCommand` with a piped stderr makes PowerShell write its streams as
+            // CLIXML. This silences the progress records (a cold start emits "Preparing
+            // modules for first use."); the error records cannot be silenced on 5.1, so
+            // the failure text below is decoded. Same line, so error positions keep their
+            // line numbers.
+            let encoded = encode_script(&format!(
+                "$ProgressPreference = 'SilentlyContinue'; {script}"
+            ));
             let mut child = Command::new("powershell.exe")
                 // No console window for the manager call: `service` and
                 // `doctor` also run from a hub-driven ssh session or a
@@ -630,11 +640,14 @@ mod windows {
                     return Ok((
                         output.status.success(),
                         if output.status.success() {
-                            stdout.trim()
+                            stdout.trim().to_owned()
                         } else {
-                            stderr.trim()
-                        }
-                        .to_owned(),
+                            // Operators read this in `service` errors: a leftover CLIXML
+                            // envelope becomes the message it carries.
+                            super::powershell_output::decode_clixml(&stderr)
+                                .trim()
+                                .to_owned()
+                        },
                     ));
                 }
                 if Instant::now() >= deadline {
@@ -1297,6 +1310,51 @@ mod windows_tests {
             json!([100, 200, 400, 500]),
             "expected every eligible synthetic lifetime and no stale parent-PID row | received: {report}"
         );
+    }
+
+    /// `service` shows `ProcessExec`'s failure text to operators. PowerShell writes a piped
+    /// stderr as CLIXML under `-EncodedCommand`, so a failing script used to surface as
+    /// `#< CLIXML <Objs ...><S S="Error">boom_x000D__x000A_</S>...`. The text must be the
+    /// script's own message, for a terminating error, a non-terminating one and one that
+    /// follows a progress record, each with the script's failure reported.
+    #[test]
+    fn a_failing_script_reports_its_message_as_plain_text_not_clixml() {
+        use super::windows::ProcessExec;
+
+        let cases = [
+            (
+                "a terminating error",
+                "throw 'boom-terminating'",
+                "boom-terminating",
+            ),
+            (
+                "a non-terminating error and an exit code",
+                "Write-Error 'boom-nonterminating'; exit 4",
+                "boom-nonterminating",
+            ),
+            (
+                "an error after a progress record",
+                "Write-Progress -Activity act -Status st; throw 'boom-after-progress'",
+                "boom-after-progress",
+            ),
+        ];
+        for (label, script, message) in cases {
+            let (ok, text) = ProcessExec
+                .run(script, FIXTURE_SCRIPT_TIMEOUT)
+                .expect("PowerShell runs the failing script");
+            assert!(
+                !ok,
+                "expected {label} to report failure | received success with: {text}"
+            );
+            assert!(
+                text.contains(message),
+                "expected {label} to name '{message}' | received: {text:?}"
+            );
+            assert!(
+                !text.contains("CLIXML") && !text.contains("<Objs") && !text.contains("_x000D_"),
+                "expected plain text for {label} | received: {text:?}"
+            );
+        }
     }
 
     /// What `Stop-ScheduledTask` leaves behind, rebuilt without Task Scheduler: a

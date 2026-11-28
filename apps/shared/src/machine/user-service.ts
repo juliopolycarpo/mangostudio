@@ -16,6 +16,7 @@ import { posix } from 'node:path';
 import { HIDDEN_WINDOW } from '../process';
 import { RuntimeServiceManagementError } from '../runtime-contract/service-errors';
 import type { UserServicePlatform, UserServiceStatus } from '../runtime-home';
+import { decodeClixml } from './powershell-output';
 
 const USER_SERVICE_NO_SYSTEMD_ERROR = 'systemd is not available';
 const USER_SERVICE_UNSUPPORTED_PLATFORM_ERROR = 'unsupported platform';
@@ -554,7 +555,14 @@ function renderScheduledTaskSetArgumentsScript(taskName: string, taskArguments: 
   ].join('\n');
 }
 
-/** Argv that runs a script through Windows PowerShell without shell quoting. */
+/**
+ * Argv that runs a script through Windows PowerShell without shell quoting.
+ *
+ * `-EncodedCommand` with a piped stderr makes PowerShell write its streams as CLIXML. The
+ * preamble silences the progress records (a cold start emits "Preparing modules for first
+ * use."); the error records cannot be silenced on 5.1, so `run` decodes them. It shares the
+ * script's first line, so error positions keep their line numbers.
+ */
 function powershellArgv(script: string): string[] {
   return [
     'powershell.exe',
@@ -563,7 +571,7 @@ function powershellArgv(script: string): string[] {
     '-ExecutionPolicy',
     'Bypass',
     '-EncodedCommand',
-    encodePowerShell(script),
+    encodePowerShell(`$ProgressPreference = 'SilentlyContinue'; ${script}`),
   ];
 }
 
@@ -1279,7 +1287,12 @@ export function createUserServiceManager(
 
   async function run(argv: readonly string[]): Promise<UserServiceExecResult> {
     const env = argv[0] === 'systemctl' ? ((await sessionBus()) ?? deps.env) : deps.env;
-    return await deps.exec(argv, { env });
+    const result = await deps.exec(argv, { env });
+    // Every message below is shown to an operator: a CLIXML envelope on PowerShell's stderr
+    // becomes the text it carries before `status` or `commandFailure` quote it.
+    return argv[0] === 'powershell.exe'
+      ? { ...result, stderr: decodeClixml(result.stderr) }
+      : result;
   }
 
   function commandFailure(label: string, result: UserServiceExecResult): Error {
