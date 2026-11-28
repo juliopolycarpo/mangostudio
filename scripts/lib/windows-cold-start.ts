@@ -24,7 +24,7 @@
 // lane should fall to the second-case level.
 
 import { closeSync, fstatSync, openSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 
 /** One start-up measurement: the same command run twice, back to back. */
 export interface StartTiming {
@@ -147,6 +147,31 @@ export function readTree(
     }
   }
   return { label, root, files, bytes, ms: Math.round(now() - started), skipped, truncated };
+}
+
+/**
+ * The Git for Windows install root that holds `bin\bash.exe`, found by walking
+ * up from the `git.exe` on PATH. Which `git.exe` PATH names depends on the
+ * shell: `<Git>\cmd\git.exe` from PowerShell, `<Git>\ucrt64\bin\git.exe` (or
+ * `mingw64`) from a Git Bash step, so "one level up" is the root only for the
+ * first. The first probe run looked under `<Git>\ucrt64` and timed nothing.
+ *
+ * @example
+ * findGitRoot('C:\\Program Files\\Git\\ucrt64\\bin\\git.exe', existsSync); // 'C:\\Program Files\\Git'
+ */
+export function findGitRoot(
+  gitExecutable: string,
+  exists: (path: string) => boolean
+): string | undefined {
+  let directory = win32.dirname(gitExecutable);
+  // Four levels cover every layout Git for Windows ships; a stray git.exe elsewhere finds nothing.
+  for (let level = 0; level < 4; level += 1) {
+    if (exists(win32.join(directory, 'bin', 'bash.exe'))) return directory;
+    const parent = win32.dirname(directory);
+    if (parent === directory) return undefined;
+    directory = parent;
+  }
+  return undefined;
 }
 
 /** Marks a run whose first start is far above its second: the cold start the tests hit. */

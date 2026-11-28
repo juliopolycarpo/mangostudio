@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  findGitRoot,
   formatStartTiming,
   formatTreeRead,
   readTree,
@@ -126,6 +127,28 @@ describe('readTree', () => {
       fakeClock([])
     );
     expect(timing).toMatchObject({ files: 0, bytes: 0, truncated: false });
+  });
+});
+
+/** A Git for Windows install that has only `<root>\bin\bash.exe`. */
+function fakeGitInstall(root: string): (path: string) => boolean {
+  return (path) => path === `${root}\\bin\\bash.exe`;
+}
+
+describe('findGitRoot', () => {
+  const root = 'C:\\Program Files\\Git';
+
+  test.each([
+    ['the cmd shim PowerShell finds', `${root}\\cmd\\git.exe`],
+    ['the ucrt64 binary a Git Bash step finds', `${root}\\ucrt64\\bin\\git.exe`],
+    ['the mingw64 binary of older installs', `${root}\\mingw64\\bin\\git.exe`],
+    ['the libexec binary', `${root}\\mingw64\\libexec\\git-core\\git.exe`],
+  ])('walks up from %s to the directory holding bin\\bash.exe', (_name, gitExecutable) => {
+    expect(findGitRoot(gitExecutable, fakeGitInstall(root))).toBe(root);
+  });
+
+  test('a git.exe with no bash above it has no root', () => {
+    expect(findGitRoot('C:\\tools\\git\\git.exe', fakeGitInstall(root))).toBeUndefined();
   });
 });
 
