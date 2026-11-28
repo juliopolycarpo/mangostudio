@@ -506,10 +506,35 @@ current_version() {
   return 1
 }
 
+# Whether two paths name the same existing directory. Equal spelling is not
+# required: Git Bash prints a link target under one of its mount points
+# (/tmp is the user's TEMP, wherever that is) through the mount, so readlink can
+# say /tmp/x for a root that was given as /d/a/_temp/x. Comparing the text of
+# the two would call them different; comparing the directories does not.
+same_directory() {
+  [ "$1" = "$2" ] && return 0
+  [ -d "$1" ] && [ -d "$2" ] && [ "$1" -ef "$2" ]
+}
+
+# Whether <path> lies inside <root>, however either is spelled (see
+# same_directory): true when some ancestor of <path> is the root directory.
+path_is_inside() {
+  local root="$1" path="$2" parent
+  # A relative target resolves from the link's directory, not from here.
+  case "$path" in /*) ;; *) return 1 ;; esac
+  while :; do
+    parent="${path%/*}"
+    # No slash left to strip, or nothing before it: the walk has run out.
+    { [ "$parent" = "$path" ] || [ -z "$parent" ]; } && return 1
+    same_directory "$parent" "$root" && return 0
+    path="$parent"
+  done
+}
+
 # A pre-`current` install: the bin link (or the no-symlink wrapper) points
 # straight at "<root>/<version>/mangostudio".
 legacy_target_version() {
-  local root="$1" bin_link="$2" target='' version
+  local root="$1" bin_link="$2" target='' version version_dir
   if [ -L "$bin_link" ]; then
     target="$(readlink "$bin_link")"
   elif [ -f "$bin_link" ]; then
@@ -518,13 +543,17 @@ legacy_target_version() {
   [ -n "$target" ] || return 1
 
   case "$target" in
-    "${root}"/*/mangostudio)
-      version="${target#"${root}"/}"
-      version="${version%/mangostudio}"
+    */*/mangostudio)
+      version_dir="${target%/mangostudio}"
+      version="${version_dir##*/}"
       case "$version" in
         [0-9]*.[0-9]*.[0-9]*)
-          printf '%s\n' "$version"
-          return 0
+          # The version directory must sit directly in the root. It need not
+          # exist (a legacy link can dangle), so compare its parent.
+          if same_directory "${version_dir%/*}" "$root"; then
+            printf '%s\n' "$version"
+            return 0
+          fi
           ;;
       esac
       ;;
@@ -1126,12 +1155,10 @@ do_uninstall() {
   if [ -L "$BIN_LINK" ]; then
     local target
     target="$(readlink "$BIN_LINK")"
-    case "$target" in
-      "${INSTALL_ROOT}"/*)
-        rm -f "$BIN_LINK"
-        removed+=("$BIN_LINK")
-        ;;
-    esac
+    if path_is_inside "$INSTALL_ROOT" "$target"; then
+      rm -f "$BIN_LINK"
+      removed+=("$BIN_LINK")
+    fi
   elif [ -f "$BIN_LINK" ] && grep -q "exec \"${INSTALL_ROOT}/" "$BIN_LINK" 2>/dev/null; then
     rm -f "$BIN_LINK"
     removed+=("$BIN_LINK")

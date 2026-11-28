@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -81,6 +82,23 @@ fixture_github_api_curl() {
   case "$write_out" in *http_code*) printf '%s' "$status" ;; esac
 }
 curl() { fixture_github_api_curl "$@"; }
+`;
+
+// Named fake of `readlink` that spells a link target the way Git Bash does when the install root
+// sits under one of its mount points: MSYS re-expresses D:\a\_temp\x as /tmp/x (the `usertemp`
+// mount) while the installer was given /d/a/_temp/x. Same directory, different spelling.
+// FIXTURE_ROOT_SPELLING is the prefix the link was created with; FIXTURE_ALIAS_SPELLING is the
+// prefix readlink reports instead, and must be another path to the same directory.
+const FIXTURE_MOUNT_SPELLING_READLINK = `
+fixture_mount_spelling_readlink() {
+  local target
+  target="$(command readlink "$@")" || return
+  case "$target" in
+    "$FIXTURE_ROOT_SPELLING"/*) printf '%s\\n' "$FIXTURE_ALIAS_SPELLING/\${target#"$FIXTURE_ROOT_SPELLING"/}" ;;
+    *) printf '%s\\n' "$target" ;;
+  esac
+}
+readlink() { fixture_mount_spelling_readlink "$@"; }
 `;
 
 /** Select Git Bash rather than the Windows WSL launcher, e.g. fixtureBash(). */
@@ -449,6 +467,69 @@ describe('install.sh layout', () => {
     expect(readlinkSync(join(root, 'current'))).toBe('0.1.2');
     expect(readlinkSync(join(bin, 'mangostudio'))).toBe(join(root, 'current', 'mangostudio'));
     expect(originRecord(root).previousVersion).toBe('0.1.1');
+  });
+
+  // Regression for #2748: Git Bash reports a link target under its `usertemp` mount as /tmp/...
+  // while the root is given as /d/...; a prefix comparison then read the legacy install as foreign
+  // and recorded no previousVersion, so --rollback had nothing to return to.
+  describe('when readlink spells the install root differently from the root it was given', () => {
+    function aliasedLegacyLayout() {
+      const fixture = layout();
+      const legacyDir = join(fixture.root, '0.1.1');
+      mkdirSync(legacyDir, { recursive: true });
+      makeFixtureBin(legacyDir, '0.1.1');
+      mkdirSync(fixture.bin, { recursive: true });
+      const binLink = join(fixture.bin, 'mangostudio');
+      fixtureSymlink(join(legacyDir, 'mangostudio'), binLink);
+      const alias = join(fixture.workDir, 'root-alias');
+      fixtureSymlink(fixture.root, alias);
+      const spelling = `FIXTURE_ROOT_SPELLING="$3"; FIXTURE_ALIAS_SPELLING="$4"`;
+      return { ...fixture, binLink, alias, spelling };
+    }
+
+    test('legacy_target_version still reads the version out of the bin link', () => {
+      const { root, binLink, alias, spelling } = aliasedLegacyLayout();
+
+      const result = sourceAndCall(
+        `${FIXTURE_MOUNT_SPELLING_READLINK}\n${spelling}\nlegacy_target_version "$1" "$2"`,
+        [root, binLink, root, alias]
+      );
+
+      expect(result.stderr).toBe('');
+      expect(result.stdout.trim(), JSON.stringify(result)).toBe('0.1.1');
+      expect(result.exitCode).toBe(0);
+    });
+
+    test('legacy_target_version still rejects a link into a different directory', () => {
+      const { workDir, root, bin, alias, spelling } = aliasedLegacyLayout();
+      const otherDir = join(workDir, 'other-root', '0.1.1');
+      mkdirSync(otherDir, { recursive: true });
+      makeFixtureBin(otherDir, '0.1.1');
+      const foreignLink = join(bin, 'foreign-mangostudio');
+      fixtureSymlink(join(otherDir, 'mangostudio'), foreignLink);
+
+      const result = sourceAndCall(
+        `${FIXTURE_MOUNT_SPELLING_READLINK}\n${spelling}\nlegacy_target_version "$1" "$2"`,
+        [root, foreignLink, root, alias]
+      );
+
+      expect(result.stdout.trim(), JSON.stringify(result)).toBe('');
+      expect(result.exitCode).toBe(1);
+    });
+
+    test('--uninstall still removes a bin link into the install root', () => {
+      const { root, binLink, alias, spelling } = aliasedLegacyLayout();
+
+      const result = sourceAndCall(
+        `${FIXTURE_MOUNT_SPELLING_READLINK}\n${spelling}\nINSTALL_ROOT="$1"; BIN_LINK="$2"; do_uninstall`,
+        [root, binLink, root, alias]
+      );
+
+      expect(result.exitCode, JSON.stringify(result)).toBe(0);
+      // lstat, not existsSync: a link left behind would dangle once the root is gone.
+      expect(lstatSync(binLink, { throwIfNoEntry: false })).toBeUndefined();
+      expect(existsSync(root)).toBe(false);
+    });
   });
 
   test('--prune keeps current and previous, removes other version directories, leaves the rest alone', () => {
