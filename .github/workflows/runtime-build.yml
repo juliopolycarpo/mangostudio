@@ -239,18 +239,28 @@ jobs:
         run: bun --no-install ./scripts/ci/runtime-input-digest.ts digest --platform "$PLATFORM" --profile "$BUILD_PROFILE" --zig
 
       # Stage 4 of #2698: reuse a base an earlier main run published, or build.
-      # Every reuse step repeats the whole gate (caller opt-in, artifact mode,
-      # shipping profile, main push, the variable, a computed digest) so no
-      # step can run on another path, and every one is `continue-on-error`: a
-      # refusal or failure leaves `Build runtime` to compile as usual. The
+      # The one expression below is the whole gate (caller opt-in, artifact
+      # mode, shipping profile, main push, the variable); every reuse step
+      # tests its output plus the computed digest, so no step can run on
+      # another path. The steps that read or download are `continue-on-error`:
+      # a refusal or failure leaves `Build runtime` to compile as usual. The
       # digest step sits after the cargo cache restore on purpose: the
       # restore exports CARGO_INCREMENTAL, one of the digest's facts.
+      #
+      # The expression goes through `env`, not into the script text.
+      - name: Decide runtime base reuse
+        id: reuse-gate
+        shell: bash
+        env:
+          REUSE_ENABLED: ${{ inputs.reuse && inputs.mode == 'artifact' && inputs.profile == 'shipping' && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.RUNTIME_REUSE == 'true' && 'true' || 'false' }}
+        run: echo "reuse_enabled=${REUSE_ENABLED}" >> "$GITHUB_OUTPUT"
+
       #
       # With the cargo cache on, a reuse needs an exact cache hit. rust-cache
       # saves `target/` in its post step on a miss, and a skipped compile would
       # save an empty one under the key every later build restores.
       - name: Skip runtime base reuse on a cargo cache miss
-        if: inputs.reuse && inputs.mode == 'artifact' && inputs.profile == 'shipping' && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.RUNTIME_REUSE == 'true' && steps.digest.outcome == 'success' && inputs.cache && steps.rust-cache.outputs.cache-hit != 'true'
+        if: steps.reuse-gate.outputs.reuse_enabled == 'true' && steps.digest.outcome == 'success' && inputs.cache && steps.rust-cache.outputs.cache-hit != 'true'
         shell: bash
         env:
           PLATFORM: ${{ matrix.platform }}
@@ -264,7 +274,7 @@ jobs:
       # that holds this digest; it exits 0 on every refusal and says why.
       - name: Find reusable runtime base
         id: reuse-find
-        if: inputs.reuse && inputs.mode == 'artifact' && inputs.profile == 'shipping' && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.RUNTIME_REUSE == 'true' && steps.digest.outcome == 'success' && (!inputs.cache || steps.rust-cache.outputs.cache-hit == 'true')
+        if: steps.reuse-gate.outputs.reuse_enabled == 'true' && steps.digest.outcome == 'success' && (!inputs.cache || steps.rust-cache.outputs.cache-hit == 'true')
         continue-on-error: true
         timeout-minutes: 3
         shell: bash
@@ -285,7 +295,7 @@ jobs:
       # ZIP is checked against the digest the API recorded at upload.
       - name: Download reusable runtime base
         id: reuse-download
-        if: inputs.reuse && inputs.mode == 'artifact' && inputs.profile == 'shipping' && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.RUNTIME_REUSE == 'true' && steps.digest.outcome == 'success' && steps.reuse-find.outputs.reuse == 'true'
+        if: steps.reuse-gate.outputs.reuse_enabled == 'true' && steps.digest.outcome == 'success' && steps.reuse-find.outputs.reuse == 'true'
         continue-on-error: true
         # Two attempts at the client's worst case: see run-artifact.unit.test.ts.
         timeout-minutes: 3
@@ -299,7 +309,7 @@ jobs:
       # the API, and writes the record and the summary the next steps publish.
       - name: Verify reusable runtime base
         id: reuse-verify
-        if: inputs.reuse && inputs.mode == 'artifact' && inputs.profile == 'shipping' && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.RUNTIME_REUSE == 'true' && steps.digest.outcome == 'success' && steps.reuse-download.outcome == 'success'
+        if: steps.reuse-gate.outputs.reuse_enabled == 'true' && steps.digest.outcome == 'success' && steps.reuse-download.outcome == 'success'
         continue-on-error: true
         timeout-minutes: 3
         shell: bash
@@ -330,7 +340,7 @@ jobs:
       # `Build runtime` below takes the base only when it succeeded.
       - name: Use reused runtime base
         id: reuse
-        if: inputs.reuse && inputs.mode == 'artifact' && inputs.profile == 'shipping' && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.RUNTIME_REUSE == 'true' && steps.digest.outcome == 'success' && steps.reuse-verify.outcome == 'success'
+        if: steps.reuse-gate.outputs.reuse_enabled == 'true' && steps.digest.outcome == 'success' && steps.reuse-verify.outcome == 'success'
         shell: bash
         run: cat "${RUNNER_TEMP}/runtime-reuse-summary.md" >> "$GITHUB_STEP_SUMMARY"
 
@@ -341,7 +351,7 @@ jobs:
       # for Canary to read.
       - name: Upload runtime reuse record
         id: reuse-record
-        if: inputs.reuse && inputs.mode == 'artifact' && inputs.profile == 'shipping' && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.RUNTIME_REUSE == 'true' && steps.digest.outcome == 'success' && steps.reuse.outcome == 'success'
+        if: steps.reuse-gate.outputs.reuse_enabled == 'true' && steps.digest.outcome == 'success' && steps.reuse.outcome == 'success'
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -356,6 +366,7 @@ jobs:
       # exists. A miss builds exactly what a PR light build does, then
       # rust-cache's post-job step saves the new entry.
       - name: Build runtime
+        id: build
         if: steps.seed-cache.outputs.cache-hit != 'true' && (inputs.mode == 'artifact' || steps.rust-cache.outputs.cache-hit != 'true')
         shell: bash
         env:
@@ -379,6 +390,17 @@ jobs:
             args+=(--prebuilt-unstamped "$PREBUILT_UNSTAMPED")
           fi
           bun --no-install ./scripts/build-runtime.ts "${args[@]}"
+
+      # Fail closed stays: a build that failed on a verified base never falls
+      # back to cargo in the same job. Nothing here skips that base on the next
+      # push, so the annotation names the way out.
+      - name: Explain a failed build from a reused runtime base
+        if: failure() && steps.build.outcome == 'failure' && steps.reuse.outcome == 'success'
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          echo "::error title=Build from a reused runtime base failed::${PLATFORM}: staging, stamping or verifying the reused base failed. The next push picks the same base again. Run 'gh variable set RUNTIME_REUSE --body false' (or delete the variable) so the next push compiles from source."
 
       # The artifact route every consumer reads. Cache-seed mode never reaches it.
       - name: Upload runtime
@@ -444,7 +466,7 @@ jobs:
       # summary. These are the failures: a search that crashed, or a nominated
       # base that did not download or did not verify. The base is not used.
       - name: Warn that the runtime base was not reused
-        if: inputs.reuse && inputs.mode == 'artifact' && inputs.profile == 'shipping' && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.RUNTIME_REUSE == 'true' && steps.digest.outcome == 'success' && (steps.reuse-find.outcome == 'failure' || steps.reuse-download.outcome == 'failure' || steps.reuse-verify.outcome == 'failure')
+        if: steps.reuse-gate.outputs.reuse_enabled == 'true' && steps.digest.outcome == 'success' && (steps.reuse-find.outcome == 'failure' || steps.reuse-download.outcome == 'failure' || steps.reuse-verify.outcome == 'failure')
         shell: bash
         env:
           PLATFORM: ${{ matrix.platform }}
@@ -459,7 +481,7 @@ jobs:
 
       # Without the record Canary refuses this run, so say so on the run.
       - name: Warn that the runtime reuse record was not published
-        if: inputs.reuse && inputs.mode == 'artifact' && inputs.profile == 'shipping' && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.RUNTIME_REUSE == 'true' && steps.digest.outcome == 'success' && steps.reuse-record.outcome == 'failure'
+        if: steps.reuse-gate.outputs.reuse_enabled == 'true' && steps.digest.outcome == 'success' && steps.reuse-record.outcome == 'failure'
         shell: bash
         env:
           PLATFORM: ${{ matrix.platform }}

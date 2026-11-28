@@ -22,7 +22,7 @@ const DISTRIBUTION_WORKFLOW = '.github/workflows/distribution-build.yml';
 const CI_WORKFLOW = '.github/workflows/ci.yml';
 const RELEASE_WORKFLOW = '.github/workflows/release.yml';
 
-/** Every clause a reuse step must carry in its own `if`, so none can run on another path. */
+/** Every clause the one gate expression carries, so no reuse step can run on another path. */
 const GATE_CLAUSES = [
   'inputs.reuse',
   "inputs.mode == 'artifact'",
@@ -30,11 +30,16 @@ const GATE_CLAUSES = [
   "github.event_name == 'push'",
   "github.ref == 'refs/heads/main'",
   "vars.RUNTIME_REUSE == 'true'",
-  "steps.digest.outcome == 'success'",
 ];
 
-/** The steps that exist only to reuse a base, in workflow order. */
-const REUSE_STEPS = [
+/** What every other reuse step tests: the gate's output and its own digest precondition. */
+const GATE_OUTPUT = "steps.reuse-gate.outputs.reuse_enabled == 'true'";
+const DIGEST_CLAUSE = "steps.digest.outcome == 'success'";
+
+const GATE_STEP = 'Decide runtime base reuse';
+
+/** The steps that test the gate output, in workflow order, all before `Build runtime`. */
+const GATED_STEPS = [
   'Skip runtime base reuse on a cargo cache miss',
   'Find reusable runtime base',
   'Download reusable runtime base',
@@ -44,6 +49,12 @@ const REUSE_STEPS = [
   'Warn that the runtime base was not reused',
   'Warn that the runtime reuse record was not published',
 ];
+
+/** Reports a failed build from a base; it runs after `Build runtime` and tests the marker, which implies the gate. */
+const EXPLAIN_STEP = 'Explain a failed build from a reused runtime base';
+
+/** The steps that exist only to reuse a base. */
+const REUSE_STEPS = [GATE_STEP, ...GATED_STEPS, EXPLAIN_STEP];
 
 /** Reuse steps whose failure must leave the build to compile from source. */
 const FALLBACK_STEPS = [
@@ -61,13 +72,41 @@ const runtimeStep = (name: string) => extractStepBlock(runtimeJob(), name);
 const ifOf = (step: string) => /^ {8}if: (.+)$/m.exec(step)?.[1] ?? '';
 
 describe('runtime reuse gate', () => {
-  test.each(REUSE_STEPS)('%s repeats the whole gate in its own condition', (name) => {
-    const condition = ifOf(runtimeStep(name));
-    const missing = GATE_CLAUSES.filter((clause) => !condition.includes(clause));
+  test('one step computes the gate from every clause, and says true or false', () => {
+    const gate = runtimeStep(GATE_STEP);
+    const expression = /^ {10}REUSE_ENABLED: (.+)$/m.exec(gate)?.[1] ?? '';
+    const missing = GATE_CLAUSES.filter((clause) => !expression.includes(clause));
     expect(
       missing,
-      `(runtime-build.yml step "${name}" if): expected every gate clause | received: ${condition || '<none>'}`
+      `(runtime-build.yml step "${GATE_STEP}" REUSE_ENABLED): expected every gate clause | received: ${expression || '<none>'}`
     ).toEqual([]);
+    expect(expression).toMatch(/&& 'true' \|\| 'false' \}\}$/);
+    expect(gate).toContain('id: reuse-gate');
+    expect(gate).toContain('echo "reuse_enabled=$' + '{REUSE_ENABLED}" >> "$GITHUB_OUTPUT"');
+    // It always runs: a skipped gate would leave an empty output, which no step reads as true.
+    expect(ifOf(gate)).toBe('');
+  });
+
+  test('the variable, the event and the ref are named once, in the gate step', () => {
+    const naming = extractStepBlocks(runtimeJob())
+      .filter((step) =>
+        /vars\.RUNTIME_REUSE|github\.event_name == 'push'|refs\/heads\/main/.test(step)
+      )
+      .map((step) => /^ {6}- name: (.+)$/m.exec(step)?.[1] ?? '<unnamed>');
+    // `Compute runtime input digest`, the cache restore and the checks name main for their own reasons.
+    expect(naming.filter((name) => REUSE_STEPS.includes(name))).toEqual([GATE_STEP]);
+  });
+
+  test.each(GATED_STEPS)('%s tests the gate output and its digest precondition', (name) => {
+    const condition = ifOf(runtimeStep(name));
+    expect(
+      condition,
+      `(runtime-build.yml step "${name}" if): expected ${GATE_OUTPUT} | received: ${condition || '<none>'}`
+    ).toContain(GATE_OUTPUT);
+    expect(
+      condition,
+      `(runtime-build.yml step "${name}" if): expected ${DIGEST_CLAUSE} | received: ${condition}`
+    ).toContain(DIGEST_CLAUSE);
   });
 
   test('the find step needs an exact cargo cache hit when the cache is on, and the skip step says so otherwise', () => {
@@ -112,10 +151,11 @@ describe('runtime reuse gate', () => {
     );
     const at = (name: string) => names.indexOf(name);
     expect(at('Restore the cargo cache')).toBeLessThan(at('Compute runtime input digest'));
-    for (const name of REUSE_STEPS.slice(0, 6)) {
+    for (const name of [GATE_STEP, ...GATED_STEPS.slice(0, 6)]) {
       expect(at('Compute runtime input digest'), name).toBeLessThan(at(name));
       expect(at(name), name).toBeLessThan(at('Build runtime'));
     }
+    expect(at('Build runtime'), EXPLAIN_STEP).toBeLessThan(at(EXPLAIN_STEP));
   });
 
   test('only the runtime build workflow and its caller chain know the variable or the CLI', () => {
@@ -155,6 +195,20 @@ describe('runtime reuse fallback', () => {
     );
     expect(build).toContain('--prebuilt-unstamped "$PREBUILT_UNSTAMPED"');
     expect(build).toMatch(/if \[ -n "\$PREBUILT_UNSTAMPED" \]; then/);
+  });
+
+  test('a build that fails on a verified base fails the job and names the way out', () => {
+    const build = runtimeStep('Build runtime');
+    expect(build).toContain('id: build');
+    expect(build).not.toContain('continue-on-error');
+    const explain = runtimeStep(EXPLAIN_STEP);
+    expect(ifOf(explain)).toBe(
+      "failure() && steps.build.outcome == 'failure' && steps.reuse.outcome == 'success'"
+    );
+    expect(explain).not.toContain('continue-on-error');
+    expect(explain).toContain('::error');
+    expect(explain).toContain('gh variable set RUNTIME_REUSE --body false');
+    expect(explain).toContain('or delete the variable');
   });
 
   test('a reused base is not published again as an unstamped runtime', () => {
@@ -319,8 +373,9 @@ describe('runtime reuse callers', () => {
     const on = extractOnBlock(release);
     expect(on).toMatch(/push:\n {4}tags:/);
     expect(on).not.toMatch(/branches/);
+    const gate = runtimeStep(GATE_STEP);
     for (const clause of ["github.event_name == 'push'", "github.ref == 'refs/heads/main'"]) {
-      expect(ifOf(runtimeStep('Find reusable runtime base')), clause).toContain(clause);
+      expect(gate, clause).toContain(clause);
     }
   });
 
