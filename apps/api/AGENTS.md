@@ -18,6 +18,12 @@ For per-task file maps, use `docs/reference/agent-playbooks.md`.
 
 - Route plugins define their own `.group('/path', ...)` paths without the `/api` prefix.
 - Keep request and response schemas explicit, and reuse shared contracts for public shapes.
+- A body schema closed with `additionalProperties: false` answers an unknown field with 422. Elysia
+  rc.5 strips it by default, so `src/plugins/strict-body.ts` (mounted in `app.ts` and in
+  `createApiTestApp`) restores the rejection. Do not set `normalize: false` to get it back: it is
+  global and also closes open schemas, rejects query extras and turns response extras into a 500.
+  `tests/integration/routes/strict-body-contract.integration.test.ts` walks every body route; a
+  route with an open root schema is listed, with a reason, in `tests/support/fixtures/strict-body-routes.ts`.
 - Prefer Kysely builder in application code. Use `kysely/sql` only when a migration or SQLite edge requires it.
 - Reuse config, secret-store, and provider abstractions before adding new env parsing or credential logic.
 - Keep auth, connector, and provider errors explicit and logged with context.
