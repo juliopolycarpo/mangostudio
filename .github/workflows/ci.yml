@@ -55,11 +55,13 @@ jobs:
     # Bun setup can wait four minutes for a republished canary asset.
     timeout-minutes: 9
     # A job-level block replaces the workflow's, so contents stays. The pull
-    # request read is for the lane-set step's label lookup; a Dependabot
-    # `pull_request` token may hold it, and no secret is involved.
+    # request read serves the lane-set step's label lookup (a Dependabot
+    # `pull_request` token may hold it, and no secret is involved) and the
+    # tree-reuse shadow step, which also reads the merged pull request's run.
     permissions:
       contents: read
-      pull-requests: read # the PR's current labels for the lane-set step
+      actions: read # tree-reuse shadow: the merged pull request's CI run and its jobs
+      pull-requests: read # the PR's labels (lane set); the pushed commit's pull requests
     outputs:
       # A light run never builds a distribution, whatever the diff says; the
       # gate accepts the skip and refuses the run (scripts/ci/evaluate-gate.ts).
@@ -200,6 +202,26 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
+
+      # Shadow only (docs/reference/ci.md, "Tree reuse shadow"): says whether
+      # this push's tree was already tested by the merged pull request's last
+      # run, in the log and the step summary. It sets no output, nothing reads
+      # it, and nothing is skipped on it. A read error or a timeout cannot fail
+      # or delay the run: the script exits 0, `continue-on-error` absorbs a
+      # kill, and one minute caps the wait. Last in the job so no other step
+      # waits behind it.
+      - name: Compute the tree reuse shadow verdict
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        timeout-minutes: 1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          # `after` is the pushed commit; ci-gate.unit.test.ts keeps the other context SHA out of this file.
+          PUSH_SHA: ${{ github.event.after }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        # Dependency-free script; runs without `bun install`.
+        run: bun ./scripts/ci/tree-reuse.ts
 
   distribution:
     name: Distribution

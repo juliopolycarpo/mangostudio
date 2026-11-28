@@ -467,6 +467,39 @@ lanes key a dispatch on `github.ref` and a called run on `github.run_id`, so a
 dispatch on `main` cannot cancel the job CI Gate waits on. `release-dry-run.yml`
 cancels only pull-request runs; its cron and dispatches queue.
 
+## Tree reuse shadow
+
+A squash merge usually lands the tree that the pull request's last CI run already
+tested. On every push to `main`, the last step of Preflight computes whether that
+holds for the pushed commit and writes the verdict, with its reason or the proven run
+link and tree, to the step summary and the log. **It skips nothing**: the step has no
+`id`, sets no output, and no job or step reads it; the run is the same full run with or
+without it. It cannot fail or delay the run either: the script always exits 0, the
+step is `continue-on-error` with a one-minute timeout, and the job gains only
+`actions: read` and `pull-requests: read`. It is a measurement for a later stage that
+would skip the Browser Smoke jobs on a proof.
+
+The verdict is `scripts/lib/tree-reuse.ts`'s `resolveTreeReuse`, over the same
+synchronous GitHub read port Canary validates with. It says "would reuse" only when all
+of these hold, and any read error or malformed payload says "full run" with the reason:
+
+1. the pushed commit has exactly one parent and it is the push's `before`;
+2. the diff `before...sha` (compare API, refused at 300 files, where it truncates)
+   touches nothing under `.github/`, `scripts/ci/` or `scripts/lib/tree-reuse.ts`;
+3. `commits/{sha}/pulls` returns exactly one pull request: merged, with
+   `merge_commit_sha` equal to the pushed commit, into `main`, from this repository
+   (no fork), by an author that is not a bot;
+4. that pull request head's newest `ci.yml` `pull_request` run is a completed, first
+   attempt success of this repository, updated less than 24 hours ago;
+5. the run's `referenced_workflows` is non-empty and every entry has the same `sha` M
+   on `refs/pull/<number>/merge`;
+6. M has parents `[before, pull request head]` and the pushed commit's tree;
+7. in that run `CI Gate` and each job in `TREE_REUSE_SKIPPABLE_JOBS` (the two
+   `Smoke — Browser` jobs) succeeded on their latest attempt.
+
+The proof comes from git objects and the Actions API, never from anything the pull
+request run wrote. A merge after main moved fails check 6: the run tested an older base.
+
 ## Pull request cache cleanup
 
 Per-PR cache saves (`...-turbo-pr-<N>-test|build|check-...`,
