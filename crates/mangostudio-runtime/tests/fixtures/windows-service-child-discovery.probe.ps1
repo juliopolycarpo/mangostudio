@@ -86,5 +86,11 @@ function Invoke-ServiceChildDiscoveryProbe {
   Assert-ServiceTestProbeFailure { Find-ServiceTestChildren $shell ${function:Invoke-FakeServiceChildQuery} } 'expected child PID distinct from parent 200 | received: 200'
   $passed += 'self-parent-query-row-fails'
 
+  $stalled = Format-ServiceTestStall 'expected the stand-in runner to start cmd.exe and its child' 20012 41 9800 87 @($shell, $leaf)
+  Assert-ServiceTestProbe ($stalled -eq 'expected the stand-in runner to start cmd.exe and its child | received: not ready after 20012 ms, 41 polls (slowest 9800 ms), cpu load 87%, processes: 200<-100 cmd.exe, 400<-200 PING.EXE') "expected the stall report to name the wait, the slowest poll, the load and each process | received: $stalled"
+  $nothing = Format-ServiceTestStall 'expected X' 5 1 5 $null @()
+  Assert-ServiceTestProbe ($nothing -eq 'expected X | received: not ready after 5 ms, 1 polls (slowest 5 ms), cpu load unknown, processes: none') "expected an empty sample reported as none with unknown load | received: $nothing"
+  $passed += 'stall-report-names-the-wait-and-its-processes'
+
   [pscustomobject]@{ cases = @($passed); count = $passed.Count; native = $false; capturedProcessIds = @($captured.processId); queriedParentProcessIds = @($script:ServiceChildFakeQueries) }
 }

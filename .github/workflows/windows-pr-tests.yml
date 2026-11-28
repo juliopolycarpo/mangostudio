@@ -66,6 +66,29 @@ jobs:
       # change. Built here because no job of this workflow produces a Windows one.
       - uses: $/.github/actions/local-runtime
 
+      # 18 of about 500 runs of this job lost a spawn-bound test to the 15 s default
+      # timeout (#2661). The first case of install-ps1-layout and of install-sh-layout
+      # took 13 to 17 s while the cases after it took 0.15 to 2 s: a first start that
+      # decays over three cases is something cold, and Defender real-time protection is
+      # off on this image. This step starts the same tools twice and reads the trees
+      # they load from, before any test runs, and prints `[windows-cold-start]` lines.
+      # It tests the cold-start hypothesis only: 3 of the 18 jobs were slow across many
+      # tests at once, minutes in, and a probe at minute 0 cannot see that.
+      #
+      # What to compare across runs, green ones included (14 of 93 jobs showed a slow
+      # first case before the install.ps1 warm-up, so the signal is in passing runs). A
+      # `start ... COLD` line, or a `read ...` line of several seconds, names the cold
+      # component and its cost on that VM; the first install-ps1-layout and
+      # install-sh-layout cases in the lanes below should then take about as long as
+      # their second cases (under 3 s), because this step has paid for the start. If
+      # every line here is fast and the first cases still take 13 s or more, the cost is
+      # not the tools or their files: look at the symlink and archive work those cases
+      # do first. Advisory, so it never fails the job.
+      - name: Time first starts of the layout test tools
+        continue-on-error: true
+        timeout-minutes: 5
+        run: bun scripts/ci/windows-cold-start.ts
+
       - name: API unit lane
         run: bun run --filter @mangostudio/api test:unit
 

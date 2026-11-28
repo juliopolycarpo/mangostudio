@@ -9,12 +9,18 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
 import { readText } from './support/read-text';
 import { assertSignalablePid, signalPid } from './support/signal-pid';
+import {
+  describePortHolder,
+  describeSmokeStall,
+  readTimedText,
+  type SmokeEvent,
+} from './support/smoke-stall-report';
 
 const scratchRoots: string[] = [];
 const spawnedServers = new Set<number>();
@@ -27,46 +33,26 @@ afterEach(() => {
   for (const pid of pids) if (isAlive(pid)) signalPid(pid, 'SIGKILL');
 });
 
-interface SmokeOutcome {
-  readonly code: number | null;
-  readonly signal: string | number | null;
-  readonly output: string;
-}
-
 /**
- * The fake hub's event log. A smoke script killed by its spawn timeout before
- * the hub started leaves no file; that fails here with the script's exit,
- * signal and output instead of an ENOENT that says nothing about the script.
+ * The fake hub's event log; empty when the hub never ran its first line, which
+ * is itself evidence {@link describeSmokeStall} names.
  */
-function readSmokeEvents(
-  eventsPath: string,
-  outcome: SmokeOutcome
-): { event: string; pid: number }[] {
+function readSmokeEvents(eventsPath: string): SmokeEvent[] {
   let raw: string;
   try {
     raw = readFileSync(eventsPath, 'utf8');
   } catch {
-    throw new Error(
-      `(build smoke): expected the fake hub to record its startup before the script exited | received: exit ${outcome.code}, signal ${outcome.signal ?? 'none'}, no events file; output: ${outcome.output || '(empty)'}`
-    );
+    return [];
   }
   return raw
     .trim()
     .split('\n')
-    .map((line) => JSON.parse(line) as { event: string; pid: number });
+    .map((line) => JSON.parse(line) as SmokeEvent);
 }
 
 describe('readSmokeEvents', () => {
-  test('a missing events file reports the script exit, signal and output', () => {
-    expect(() =>
-      readSmokeEvents(join(tmpdir(), 'mango-build-smoke-absent', 'events.jsonl'), {
-        code: null,
-        signal: 'SIGTERM',
-        output: 'waiting for the hub',
-      })
-    ).toThrow(
-      '(build smoke): expected the fake hub to record its startup before the script exited | received: exit null, signal SIGTERM, no events file; output: waiting for the hub'
-    );
+  test('a missing events file reads as no events', () => {
+    expect(readSmokeEvents(join(tmpdir(), 'mango-build-smoke-absent', 'events.jsonl'))).toEqual([]);
   });
 
   test('parses one event per line', () => {
@@ -74,7 +60,7 @@ describe('readSmokeEvents', () => {
     scratchRoots.push(root);
     const eventsPath = join(root, 'events.jsonl');
     writeFileSync(eventsPath, '{"event":"startup","pid":7}\n{"event":"exit","pid":7}\n');
-    expect(readSmokeEvents(eventsPath, { code: 1, signal: null, output: '' })).toEqual([
+    expect(readSmokeEvents(eventsPath)).toEqual([
       { event: 'startup', pid: 7 },
       { event: 'exit', pid: 7 },
     ]);
@@ -163,8 +149,9 @@ describe('test-build foreground server cleanup', () => {
         hostname: '127.0.0.1',
         fetch: () => new Response(),
       });
-      const port = reservation.port;
+      const port = reservation.port as number;
       await reservation.stop(true);
+      const spawnedAt = performance.now();
       const smoke = Bun.spawn([process.execPath, script], {
         env: {
           ...process.env,
@@ -178,19 +165,37 @@ describe('test-build foreground server cleanup', () => {
         stderr: 'pipe',
         timeout: 10_000,
       });
-      const [stdout, stderr, code] = await Promise.all([
-        new Response(smoke.stdout).text(),
-        new Response(smoke.stderr).text(),
+      const [out, err, code] = await Promise.all([
+        readTimedText(smoke.stdout, spawnedAt),
+        readTimedText(smoke.stderr, spawnedAt),
         smoke.exited,
       ]);
-      const events = readSmokeEvents(eventsPath, {
-        code,
-        signal: smoke.signalCode,
-        output: `${stdout}${stderr}`,
-      });
+      const elapsedMs = performance.now() - spawnedAt;
+      const stdout = out.text;
+      const stderr = err.text;
+      const events = readSmokeEvents(eventsPath);
       const startup = events.find(({ event }) => event === 'startup');
-      expect(startup, `${stdout}${stderr}`).toBeDefined();
-      if (!startup) throw new Error(`Expected the fake hub to start; output: ${stdout}${stderr}`);
+      if (!startup) {
+        // A script killed by its spawn timeout (#2762) explains itself here: the
+        // stage it reached, when it first spoke, who holds the port and the load.
+        const firstChunks = [out, err].flatMap(({ firstChunkMs }) =>
+          firstChunkMs === null ? [] : [firstChunkMs]
+        );
+        throw new Error(
+          describeSmokeStall({
+            code,
+            signal: smoke.signalCode,
+            elapsedMs,
+            firstOutputMs: firstChunks.length > 0 ? Math.min(...firstChunks) : null,
+            stdout,
+            stderr,
+            events,
+            port,
+            portState: describePortHolder(port),
+            load: loadavg(),
+          })
+        );
+      }
       spawnedServers.add(assertSignalablePid(startup.pid));
       expect(code, `${stdout}${stderr}`).toBe(1);
       expect(stderr).toContain('/api/health content-type is not JSON');
@@ -199,7 +204,7 @@ describe('test-build foreground server cleanup', () => {
       expect(isAlive(startup.pid), 'failed binary smoke left its foreground hub running').toBe(
         false
       );
-      expect(events.map(({ event }) => event)).toEqual(['startup', 'sigterm', 'exit']);
+      expect(events.map(({ event }) => event)).toEqual(['boot', 'startup', 'sigterm', 'exit']);
       expect(readdirSync(tempDir)).toEqual([]);
 
       const nextServer = Bun.serve({ port, hostname: '127.0.0.1', fetch: () => new Response() });

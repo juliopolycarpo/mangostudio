@@ -100,6 +100,11 @@ const TEST_ONLY_READS: ReadonlyArray<{ source: string; target: string; reason: s
   },
   {
     source: 'crates/mangostudio-runtime/src/cli/user_service.rs',
+    target: 'crates/mangostudio-runtime/tests/fixtures/windows-service-stall-report.ps1',
+    reason: 'inside `#[cfg(all(test, windows))] mod windows_tests`: a PowerShell fixture',
+  },
+  {
+    source: 'crates/mangostudio-runtime/src/cli/user_service.rs',
     target: 'crates/mangostudio-runtime/tests/fixtures/windows-service-process-lifetimes.ps1',
     reason: 'inside `#[cfg(all(test, windows))] mod windows_tests`: a PowerShell fixture',
   },
