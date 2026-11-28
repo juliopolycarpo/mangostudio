@@ -316,16 +316,16 @@ async function stageRuntime(
       : cargoRuntimeOutputPath(cargoTargetDir(ROOT_DIR), target);
   copyFileSync(from, runtimePath);
   if (process.platform !== 'win32') chmodSync(runtimePath, 0o755);
-  // A prebuilt runtime arrives stamped by `scripts/build-runtime.ts`. A host cargo build is not:
-  // its release version is written into the staged copy, so cargo's own output stays unstamped.
-  if (source.kind === 'cargo') {
-    try {
-      stampRuntimeFile(runtimePath, version);
-    } catch (caught) {
-      console.error(`❌ Runtime for ${target.arch} (from ${from}) could not be stamped:`);
-      console.error(`   ${caught instanceof Error ? caught.message : String(caught)}`);
-      return false;
-    }
+  // The release version is written into the staged copy, never the source: cargo's own output
+  // stays unstamped, and a caller's runtime directory is never modified. A runtime that
+  // `scripts/build-runtime.ts` already stamped with this version passes through unchanged; one
+  // stamped with another version is refused.
+  try {
+    stampRuntimeFile(runtimePath, version);
+  } catch (caught) {
+    console.error(`❌ Runtime for ${target.arch} (from ${from}) could not be stamped:`);
+    console.error(`   ${caught instanceof Error ? caught.message : String(caught)}`);
+    return false;
   }
 
   const verification = await verifyRuntimeBinary({

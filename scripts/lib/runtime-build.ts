@@ -22,6 +22,7 @@ import {
   type ReleaseRuntimeBinaryName,
   runtimeBinaryName,
 } from './release-targets';
+import { readReleaseStamp } from './runtime-stamp';
 
 /** The cargo package (and binary) that ships as `mangostudio-runtime[.exe]`. */
 const RUNTIME_CARGO_PACKAGE = 'mangostudio-runtime';
@@ -474,6 +475,27 @@ export function embeddedBuildPathProblems(bytes: Buffer, needles: readonly strin
   return problems;
 }
 
+/**
+ * What is wrong with the release stamp in a runtime's bytes, or `[]`. Reads the slot back instead
+ * of running the binary, so a target this host cannot execute (a cross-built darwin or arm64
+ * runtime) is checked too.
+ *
+ * @example
+ * releaseStampProblems(bytes, '0.1.1'); // → ['expected release stamp: 0.1.1 | received: unstamped']
+ */
+function releaseStampProblems(bytes: Uint8Array, version: string): string[] {
+  try {
+    const stamped = readReleaseStamp(bytes).version;
+    return stamped === version
+      ? []
+      : [`expected release stamp: ${version} | received: ${stamped ?? 'unstamped'}`];
+  } catch (caught) {
+    return [
+      `expected release stamp: ${version} | received: ${caught instanceof Error ? caught.message : String(caught)}`,
+    ];
+  }
+}
+
 export interface RuntimeVerification {
   /** `null` when the file is not a recognisable executable at all. */
   readonly header: ExecutableHeader | null;
@@ -515,6 +537,7 @@ export async function verifyRuntimeBinary(
   const problems = [
     ...runtimeHeaderProblems(target.arch, header, { enforceGlibcFloor }),
     ...embeddedBuildPathProblems(bytes, buildPathNeedles()),
+    ...releaseStampProblems(bytes, version),
   ].map((problem) => `${path}: ${problem}`);
   if (!canRunOnHost(target.arch, hostPlatform)) {
     return { header, reportedVersion: null, problems };

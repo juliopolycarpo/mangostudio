@@ -1,11 +1,30 @@
 // Minimal executable headers for the header-parsing tests: just the bytes
 // `readExecutableHeader` reads, laid out the way each format places them.
 
+import { RELEASE_STAMP_MAGIC, RELEASE_STAMP_SLOT_BYTES } from '../../lib/runtime-stamp';
+
 const ELF_MACHINE = { x64: 0x3e, arm64: 0xb7 } as const;
 const MACHO_CPU = { x64: 0x0100_0007, arm64: 0x0100_000c } as const;
 const PE_MACHINE = { x64: 0x8664, arm64: 0xaa64 } as const;
 
 type Arch = keyof typeof ELF_MACHINE;
+
+/**
+ * The release stamp slot `src/main.rs` links in: the magic, a zero length byte and a zeroed value
+ * field, or, with `version`, the slot the patcher writes for it.
+ *
+ * @example
+ * withTail(fakePe('x64'), releaseStampSlot('0.1.1'));
+ */
+export function releaseStampSlot(version?: string): Uint8Array {
+  const slot = new Uint8Array(RELEASE_STAMP_SLOT_BYTES);
+  slot.set(RELEASE_STAMP_MAGIC, 0);
+  if (version !== undefined) {
+    slot[RELEASE_STAMP_MAGIC.length] = version.length;
+    slot.set(new TextEncoder().encode(version), RELEASE_STAMP_MAGIC.length + 1);
+  }
+  return slot;
+}
 
 /**
  * A 64-bit little-endian ELF with one program header: `PT_INTERP` naming

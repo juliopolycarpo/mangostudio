@@ -25,7 +25,13 @@ import {
   selectRuntimeTargets,
   verifyRuntimeBinary,
 } from '../lib/runtime-build';
-import { fakeElf, fakeMachO, fakePe } from './support/executable-fixtures';
+import {
+  fakeElf,
+  fakeMachO,
+  fakePe,
+  releaseStampSlot,
+  withTail,
+} from './support/executable-fixtures';
 import { readText } from './support/read-text';
 import { walkRuntimeImports } from './support/runtime-imports';
 
@@ -399,7 +405,10 @@ describe('runtime version check', () => {
     try {
       const path = join(dir, 'mangostudio-runtime.exe');
       const leak = '/home/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio/x.rs';
-      writeFileSync(path, Buffer.concat([fakePe('arm64'), Buffer.from(leak)]));
+      writeFileSync(
+        path,
+        Buffer.concat([withTail(fakePe('arm64'), releaseStampSlot('0.1.1')), Buffer.from(leak)])
+      );
       const result = await verifyRuntimeBinary({
         path,
         target: target('windows-arm64'),
@@ -415,11 +424,49 @@ describe('runtime version check', () => {
     }
   });
 
+  test('verifyRuntimeBinary fails a target this host cannot run when its stamp is wrong', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'runtime-verify-'));
+    try {
+      const path = join(dir, 'mangostudio-runtime.exe');
+      const verify = async (slot: Uint8Array) => {
+        writeFileSync(path, withTail(fakePe('arm64'), slot));
+        return verifyRuntimeBinary({
+          path,
+          target: target('windows-arm64'),
+          version: '0.1.1-canary.1234abc',
+          hostPlatform: 'linux-x64',
+          enforceGlibcFloor: true,
+        });
+      };
+
+      expect((await verify(releaseStampSlot())).problems).toEqual([
+        `${path}: expected release stamp: 0.1.1-canary.1234abc | received: unstamped`,
+      ]);
+      expect((await verify(releaseStampSlot('0.1.1'))).problems).toEqual([
+        `${path}: expected release stamp: 0.1.1-canary.1234abc | received: 0.1.1`,
+      ]);
+      expect((await verify(releaseStampSlot('0.1.1-canary.1234abc'))).problems).toEqual([]);
+      writeFileSync(path, fakePe('arm64'));
+      const missing = await verifyRuntimeBinary({
+        path,
+        target: target('windows-arm64'),
+        version: '0.1.1',
+        hostPlatform: 'linux-x64',
+        enforceGlibcFloor: true,
+      });
+      expect(missing.problems[0]).toContain(
+        'expected release stamp: 0.1.1 | received: expected exactly 1 release stamp slot'
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('verifyRuntimeBinary does not run a binary built for another machine', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'runtime-verify-'));
     try {
       const path = join(dir, 'mangostudio-runtime.exe');
-      writeFileSync(path, fakePe('arm64'));
+      writeFileSync(path, withTail(fakePe('arm64'), releaseStampSlot('0.1.1')));
       const result = await verifyRuntimeBinary({
         path,
         target: target('windows-arm64'),
