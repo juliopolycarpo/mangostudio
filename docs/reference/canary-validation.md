@@ -83,10 +83,15 @@ It never trusts the run's own skip decision. Instead it reads main's code
 scanning analyses (`GET /code-scanning/analyses?ref=refs/heads/main`, newest
 first, at most five pages), keeps commits whose `CodeQL` analyses from the
 `analyze-rust` job have no upload error in both `/language:rust` and
-`/language:rust/windows`, and tries the newest five. A candidate covers the SHA
-when it is the SHA itself, or when the compare API shows a complete linear range
-(either direction, under 300 files, both sides of renames) with no path matching
-`CODEQL_RUST_PATTERN`. The comparison is against the last analyzed commit, never
+`/language:rust/windows`, and tries the newest five. Those rows only nominate
+candidates, because an uploader chooses a row's ref, commit and category. A
+candidate counts only with Actions evidence: a completed `codeql.yml` run in
+this repository on `main` for that exact SHA (push, schedule or manual dispatch)
+whose latest attempt has `Analyze (rust)` and `Analyze (rust, windows)` both
+successful, from a workflow file with the qualification revision's bytes. A
+candidate covers the SHA when it is the SHA itself, or when the compare API shows
+a complete linear range (either direction, under 300 files, both sides of
+renames) with no path matching `CODEQL_RUST_PATTERN`. The comparison is against the last analyzed commit, never
 the push's parent: a superseded main run can leave a Rust change without an
 analysis, and the next commit then differs from the last analyzed one by that
 change. A skipped, uncovered SHA is rejected, as is any lookup failure, a partial

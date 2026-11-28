@@ -325,3 +325,44 @@ describe('decideRustLegsForPush keeps alerts current', () => {
     expect(diff.asked).toEqual([]);
   });
 });
+
+describe('resolveRustCoverage evidence hook', () => {
+  test('a candidate that passes the path check still needs its evidence', () => {
+    const diff = new FakeTreeDiff({ [sha('1')]: ['docs/a.md'] });
+    const result = resolveRustCoverage(HEAD, [sha('1')], diff.pathsBetween, (candidate) =>
+      candidate === sha('1') ? 'no Actions evidence: forged row' : undefined
+    );
+    expect(result).toEqual({
+      covered: false,
+      reason: `no candidate covers ${HEAD}: ${sha('1')} (no Actions evidence: forged row)`,
+    });
+  });
+
+  test('falls through to the next candidate whose evidence holds', () => {
+    const diff = new FakeTreeDiff({ [sha('2')]: ['docs/a.md'], [sha('1')]: ['docs/b.md'] });
+    const result = resolveRustCoverage(
+      HEAD,
+      [sha('2'), sha('1')],
+      diff.pathsBetween,
+      (candidate) => (candidate === sha('2') ? 'forged' : undefined)
+    );
+    expect(result).toMatchObject({ covered: true, base: sha('1') });
+  });
+
+  test('the head itself needs evidence too, and is never diffed', () => {
+    const diff = new FakeTreeDiff({});
+    const result = resolveRustCoverage(HEAD, [HEAD], diff.pathsBetween, () => 'forged');
+    expect(result.covered).toBe(false);
+    expect(diff.asked).toEqual([]);
+  });
+
+  test('evidence is not asked for a candidate the path check already rejected', () => {
+    const asked: string[] = [];
+    const diff = new FakeTreeDiff({ [sha('1')]: ['Cargo.lock'] });
+    resolveRustCoverage(HEAD, [sha('1')], diff.pathsBetween, (candidate) => {
+      asked.push(candidate);
+      return undefined;
+    });
+    expect(asked).toEqual([]);
+  });
+});

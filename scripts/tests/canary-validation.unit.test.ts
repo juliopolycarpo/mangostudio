@@ -160,6 +160,42 @@ class FakeQualificationApi implements CanaryValidationApi {
       )
     );
   }
+  /**
+   * The Actions side of a candidate: the codeql.yml run for `commit` with its Rust jobs and
+   * the pinned workflow bytes. Defaults describe a green push run on main.
+   */
+  recordCandidateRun(
+    commit: string,
+    options: {
+      branch?: string;
+      event?: string;
+      rustConclusion?: string;
+      windowsConclusion?: string;
+      workflowBytes?: string;
+    } = {}
+  ) {
+    const runId = 7000 + parseInt(commit.slice(0, 2), 16);
+    this.values.set(`contents/.github/workflows/codeql.yml?ref=${commit}`, {
+      encoding: 'base64',
+      content: Buffer.from(
+        options.workflowBytes ?? readFileSync('.github/workflows/codeql.yml', 'utf8')
+      ).toString('base64'),
+    });
+    this.values.set(`actions/workflows/45/runs?branch=main&head_sha=${commit}&per_page=100`, [
+      run(runId, 'codeql.yml', 45, {
+        head_sha: commit,
+        head_branch: options.branch ?? 'main',
+        event: options.event ?? 'push',
+      }),
+    ]);
+    this.values.set(
+      `actions/runs/${runId}/jobs?filter=all&per_page=100`,
+      jobs(runId, ['Analyze (rust)', 'Analyze (rust, windows)']).map((job, index) => ({
+        ...job,
+        conclusion: (index === 0 ? options.rustConclusion : options.windowsConclusion) ?? 'success',
+      }))
+    );
+  }
   /** `ancestor...descendant` as a clean, linear range changing `files`. */
   recordRange(ancestor: string, descendant: string, files: readonly string[]) {
     this.values.set(`compare/${ancestor}...${descendant}`, {
@@ -370,6 +406,7 @@ describe('canary required validation producers', () => {
     test('accepts skipped legs when an earlier analysis differs only by non-Rust paths', () => {
       const api = skippedApi();
       api.recordRustAnalyses([{ commit: analyzed }]);
+      api.recordCandidateRun(analyzed);
       api.recordRange(analyzed, source.sourceSha, ['docs/guide.md', 'apps/api/src/index.ts']);
       const receipt = qualifyCanarySource(source, api);
       expect(receipt.codeqlRust).toMatchObject({ analyzed: false });
@@ -385,6 +422,7 @@ describe('canary required validation producers', () => {
       const api = skippedApi();
       const later = 'd'.repeat(40);
       api.recordRustAnalyses([{ commit: later }]);
+      api.recordCandidateRun(later, { event: 'schedule' });
       // Source is the ancestor: compare later...source is 'behind', source...later is the real range.
       api.values.set(`compare/${later}...${source.sourceSha}`, {
         status: 'behind',
@@ -394,6 +432,101 @@ describe('canary required validation producers', () => {
       });
       api.recordRange(source.sourceSha, later, ['README.md']);
       expect(qualifyCanarySource(source, api).codeqlRust?.analyzed).toBe(false);
+    });
+
+    describe('code scanning rows are nominations, never the proof', () => {
+      /** Rows say X is analyzed and the range to the source is docs-only; Actions evidence is the variable. */
+      function nominatedApi() {
+        const api = skippedApi();
+        api.recordRustAnalyses([{ commit: analyzed }]);
+        api.recordRange(analyzed, source.sourceSha, ['docs/guide.md']);
+        return api;
+      }
+      const missingEvidence = (reason: string) => `${analyzed} (no Actions evidence: ${reason}`;
+
+      test('forged rows without any codeql.yml run for the candidate are rejected', () => {
+        // An uploader can post an empty SARIF for X under refs/heads/main; X's Rust code never ran.
+        const api = nominatedApi();
+        api.values.set(`contents/.github/workflows/codeql.yml?ref=${analyzed}`, {
+          encoding: 'base64',
+          content: readFileSync('.github/workflows/codeql.yml').toString('base64'),
+        });
+        api.values.set(
+          `actions/workflows/45/runs?branch=main&head_sha=${analyzed}&per_page=100`,
+          []
+        );
+        expect(() => qualifyCanarySource(source, api)).toThrow(
+          missingEvidence(
+            `expected a completed codeql.yml run on main for ${analyzed} (push, schedule or workflow_dispatch); received none`
+          )
+        );
+      });
+
+      test.each(['failure', 'cancelled', 'skipped'])(
+        'rows plus a run whose Rust job was %s are rejected',
+        (conclusion) => {
+          const api = nominatedApi();
+          api.recordCandidateRun(analyzed, { windowsConclusion: conclusion });
+          expect(() => qualifyCanarySource(source, api)).toThrow(
+            `${analyzed} (no Actions evidence: Analyze (rust) and Analyze (rust, windows) did not both succeed in a codeql.yml run on main for ${analyzed}; received run`
+          );
+        }
+      );
+
+      test('rows plus a Linux-only success are rejected', () => {
+        const api = nominatedApi();
+        api.recordCandidateRun(analyzed, { windowsConclusion: 'cancelled' });
+        expect(() => qualifyCanarySource(source, api)).toThrow('Analyze (rust, windows)');
+      });
+
+      test('rows plus a green run on a non-main branch are rejected', () => {
+        const api = nominatedApi();
+        api.recordCandidateRun(analyzed, { branch: 'attacker-branch' });
+        expect(() => qualifyCanarySource(source, api)).toThrow(
+          missingEvidence(`expected a completed codeql.yml run on main for ${analyzed}`)
+        );
+      });
+
+      test('rows plus a green pull request run are rejected', () => {
+        const api = nominatedApi();
+        api.recordCandidateRun(analyzed, { event: 'pull_request' });
+        expect(() => qualifyCanarySource(source, api)).toThrow(
+          missingEvidence(`expected a completed codeql.yml run on main for ${analyzed}`)
+        );
+      });
+
+      test('rows plus a green run from a workflow file with other bytes are rejected', () => {
+        const api = nominatedApi();
+        api.recordCandidateRun(analyzed, { workflowBytes: 'name: CodeQL\njobs: {}\n' });
+        expect(() => qualifyCanarySource(source, api)).toThrow(
+          missingEvidence(
+            `.github/workflows/codeql.yml at ${analyzed} differs from the qualification revision`
+          )
+        );
+      });
+
+      test('a manually dispatched green run on main is evidence', () => {
+        const api = nominatedApi();
+        api.recordCandidateRun(analyzed, { event: 'workflow_dispatch' });
+        expect(qualifyCanarySource(source, api).codeqlRust?.analyzed).toBe(false);
+      });
+
+      test('a forged newest candidate falls back to a genuinely evidenced older one', () => {
+        const forged = 'c'.repeat(40);
+        const api = skippedApi();
+        api.recordRustAnalyses([{ commit: forged }, { commit: analyzed }]);
+        api.recordCandidateRun(analyzed);
+        api.values.set(`contents/.github/workflows/codeql.yml?ref=${forged}`, {
+          encoding: 'base64',
+          content: readFileSync('.github/workflows/codeql.yml').toString('base64'),
+        });
+        api.values.set(`actions/workflows/45/runs?branch=main&head_sha=${forged}&per_page=100`, []);
+        api.recordRange(forged, source.sourceSha, ['docs/a.md']);
+        api.recordRange(analyzed, source.sourceSha, ['docs/b.md']);
+        const receipt = qualifyCanarySource(source, api);
+        expect(receipt.codeqlRust?.reason).toContain(analyzed);
+        expect(receipt.codeqlRust?.reason).not.toContain(forged);
+      });
     });
 
     test('rejects a Rust change whose own analysis was cancelled and a docs commit followed', () => {
@@ -437,6 +570,40 @@ describe('canary required validation producers', () => {
         base_commit: { sha: analyzed },
         merge_base_commit: { sha: analyzed },
         files: Array.from({ length: 300 }, () => ({ filename: 'README.md' })),
+      });
+      api.values.set(`compare/${source.sourceSha}...${analyzed}`, { status: 'diverged' });
+      expect(() => qualifyCanarySource(source, api)).toThrow(`${analyzed} (difference unproven)`);
+    });
+
+    test('a file renamed from a Rust-relevant path to a non-Rust path is Rust-relevant', () => {
+      // The new name is docs, but the old side removed Rust source: both sides count.
+      const api = skippedApi();
+      api.recordRustAnalyses([{ commit: analyzed }]);
+      api.recordCandidateRun(analyzed);
+      api.values.set(`compare/${analyzed}...${source.sourceSha}`, {
+        status: 'ahead',
+        base_commit: { sha: analyzed },
+        merge_base_commit: { sha: analyzed },
+        files: [
+          {
+            filename: 'docs/old-runtime.md',
+            status: 'renamed',
+            previous_filename: 'crates/mangostudio-runtime/src/lib.rs',
+          },
+        ],
+      });
+      expect(() => qualifyCanarySource(source, api)).toThrow(`${analyzed} (Rust-relevant change)`);
+    });
+
+    test('a renamed entry without previous_filename is unproven, not irrelevant', () => {
+      const api = skippedApi();
+      api.recordRustAnalyses([{ commit: analyzed }]);
+      api.recordCandidateRun(analyzed);
+      api.values.set(`compare/${analyzed}...${source.sourceSha}`, {
+        status: 'ahead',
+        base_commit: { sha: analyzed },
+        merge_base_commit: { sha: analyzed },
+        files: [{ filename: 'docs/old-runtime.md', status: 'renamed' }],
       });
       api.values.set(`compare/${source.sourceSha}...${analyzed}`, { status: 'diverged' });
       expect(() => qualifyCanarySource(source, api)).toThrow(`${analyzed} (difference unproven)`);

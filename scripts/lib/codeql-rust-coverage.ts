@@ -201,6 +201,12 @@ export function decideRustLegsForPush(input: {
           'the newest analyses of the two Rust categories do not sit on one commit, or one is missing',
       };
     }
+    // Trust boundary: this decision reads code scanning rows without checking
+    // Actions evidence. Rows are uploader-controlled (ref, commit and category
+    // are parameters of a SARIF upload), so a forged baseline could make this
+    // push skip Rust. That only costs alert freshness until the weekly run,
+    // and Canary never relies on it: it re-proves coverage from Actions job
+    // records before accepting a skipped SHA (canary-validation.ts).
     const coverage = resolveRustCoverage(input.head, [baseline], input.pathsBetween);
     return { rust: !coverage.covered, reason: coverage.reason };
   } catch (error) {
@@ -210,14 +216,24 @@ export function decideRustLegsForPush(input: {
 }
 
 /**
+ * Independent proof that a candidate's Rust legs really ran: undefined when the
+ * proof holds, otherwise the missing evidence. Code scanning rows alone cannot
+ * be this proof, because an uploader chooses their ref, commit and category.
+ */
+export type CandidateEvidence = (candidate: string) => string | undefined;
+
+/**
  * Apply the coverage rule to `head` against newest-first candidate commits.
+ * With `evidence`, a candidate that passes the path check still counts only if
+ * the evidence holds for it; the rows that nominated it are never the proof.
  * @example
  * resolveRustCoverage(headSha, candidates, pathsBetween); // { covered: true, base, reason }
  */
 export function resolveRustCoverage(
   head: string,
   candidates: readonly string[],
-  pathsBetween: PathsBetween
+  pathsBetween: PathsBetween,
+  evidence?: CandidateEvidence
 ): RustCoverage {
   if (candidates.length === 0) {
     return {
@@ -227,21 +243,29 @@ export function resolveRustCoverage(
   }
   const tried: string[] = [];
   for (const base of candidates.slice(0, CODEQL_RUST_MAX_CANDIDATES)) {
-    if (base === head) {
-      return { covered: true, base, reason: `${head} has both Rust analyses` };
-    }
-    const paths = pathsBetween(base, head);
+    const paths = base === head ? [] : pathsBetween(base, head);
     if (paths === undefined) {
       tried.push(`${base} (difference unproven)`);
-    } else if (paths.length > 0 && codeqlRustRelevant(paths)) {
-      tried.push(`${base} (Rust-relevant change)`);
-    } else {
-      return {
-        covered: true,
-        base,
-        reason: `no Rust-relevant path differs between analyzed ${base} and ${head}`,
-      };
+      continue;
     }
+    if (paths.length > 0 && codeqlRustRelevant(paths)) {
+      tried.push(`${base} (Rust-relevant change)`);
+      continue;
+    }
+    // The path check passed; the candidate still needs independent proof.
+    const missing = evidence?.(base);
+    if (missing !== undefined) {
+      tried.push(`${base} (${missing})`);
+      continue;
+    }
+    return {
+      covered: true,
+      base,
+      reason:
+        base === head
+          ? `${head} has both Rust analyses`
+          : `no Rust-relevant path differs between analyzed ${base} and ${head}`,
+    };
   }
   return { covered: false, reason: `no candidate covers ${head}: ${tried.join(', ')}` };
 }

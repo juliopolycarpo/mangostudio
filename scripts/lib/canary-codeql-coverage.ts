@@ -2,6 +2,7 @@
 // covered. It recomputes the rule from GitHub's own records instead of
 // trusting the codeql.yml run that skipped the legs.
 import {
+  type CandidateEvidence,
   type PathsBetween,
   readRustAnalyzedCommits,
   resolveRustCoverage,
@@ -74,15 +75,18 @@ function comparePathsBetween(api: CanaryCoverageApi, repository: string): PathsB
 }
 
 /**
- * Whether main's recorded Rust analyses cover `sourceSha`.
+ * Whether main's Rust analyses cover `sourceSha`. Code scanning rows only
+ * nominate candidates: uploaders choose a row's ref, commit and category, so
+ * each candidate must also pass `evidence`, the Actions job proof.
  * @example
- * const coverage = rustCoverageFromGitHub(api, 'owner/repo', sourceSha);
+ * const coverage = rustCoverageFromGitHub(api, 'owner/repo', sourceSha, evidence);
  */
 export function rustCoverageFromGitHub(
   api: CanaryCoverageApi,
   repository: string,
-  sourceSha: string
+  sourceSha: string,
+  evidence: CandidateEvidence
 ): RustCoverage {
   const candidates = readRustAnalyzedCommits(repository, (path) => api.get(path));
-  return resolveRustCoverage(sourceSha, candidates, comparePathsBetween(api, repository));
+  return resolveRustCoverage(sourceSha, candidates, comparePathsBetween(api, repository), evidence);
 }

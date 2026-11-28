@@ -165,6 +165,85 @@ function requireJobs(
 }
 
 const CODEQL_RUST_JOBS = ['Analyze (rust)', 'Analyze (rust, windows)'] as const;
+// A covering analysis may come from any codeql.yml run on main that analyzes every leg.
+const CODEQL_COVERING_EVENTS = ['push', 'schedule', 'workflow_dispatch'];
+
+function matchesQualificationBytes(
+  api: CanaryValidationApi,
+  repository: string,
+  path: string,
+  ref: string
+): boolean {
+  const content = object(
+    api.get(`repos/${repository}/contents/${path}?ref=${ref}`),
+    `${ref} ${path}`
+  );
+  return (
+    content.encoding === 'base64' &&
+    typeof content.content === 'string' &&
+    Buffer.from(content.content, 'base64').toString('utf8') ===
+      readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
+  );
+}
+
+/**
+ * Actions proof that a candidate commit's CodeQL Rust legs ran: a completed
+ * codeql.yml run on main in this repository for that exact SHA whose latest
+ * attempt has both Rust jobs successful, from a workflow file with the
+ * qualification revision's bytes. Code scanning rows cannot stand in for it,
+ * since an uploader picks their ref, commit and category. Returns undefined when
+ * the proof holds, else the missing evidence.
+ */
+function missingRustJobEvidence(
+  api: CanaryValidationApi,
+  repository: string,
+  candidate: string
+): string | undefined {
+  const path = '.github/workflows/codeql.yml';
+  if (!matchesQualificationBytes(api, repository, path, candidate)) {
+    return `no Actions evidence: ${path} at ${candidate} differs from the qualification revision`;
+  }
+  const workflowId = integer(
+    object(api.get(`repos/${repository}/actions/workflows/codeql.yml`), 'codeql.yml').id,
+    'codeql.yml ID'
+  );
+  const runs = api
+    .list(
+      `repos/${repository}/actions/workflows/${workflowId}/runs?branch=main&head_sha=${candidate}&per_page=100`,
+      'workflow_runs'
+    )
+    .map((run) => object(run, 'codeql.yml candidate run'))
+    .filter(
+      (run) =>
+        run.workflow_id === workflowId &&
+        run.path === path &&
+        object(run.repository, 'candidate run repository').full_name === repository &&
+        object(run.head_repository, 'candidate run head repository').full_name === repository &&
+        run.head_sha === candidate &&
+        run.head_branch === 'main' &&
+        CODEQL_COVERING_EVENTS.includes(String(run.event)) &&
+        run.status === 'completed'
+    );
+  if (runs.length === 0) {
+    return `no Actions evidence: expected a completed codeql.yml run on main for ${candidate} (push, schedule or workflow_dispatch); received none`;
+  }
+  const failures: string[] = [];
+  for (const run of runs) {
+    try {
+      requireJobs(
+        api,
+        repository,
+        integer(run.id, 'candidate run ID'),
+        integer(run.run_attempt, 'candidate run attempt'),
+        CODEQL_RUST_JOBS
+      );
+      return undefined;
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  return `no Actions evidence: ${CODEQL_RUST_JOBS.join(' and ')} did not both succeed in a codeql.yml run on main for ${candidate}; received ${failures.join('; ')}`;
+}
 
 /**
  * Settle the two CodeQL Rust legs of a successful codeql.yml run. Both
@@ -217,7 +296,9 @@ function settleCodeqlRust(
       `codeql.yml run ${runId}: Rust analyses were skipped but ${predicatePath} at ${source.sourceSha} differs from the qualification revision; expected identical relevance predicate bytes or both Rust analyses on the SHA`
     );
   }
-  const coverage = rustCoverageFromGitHub(api, source.repository, source.sourceSha);
+  const coverage = rustCoverageFromGitHub(api, source.repository, source.sourceSha, (candidate) =>
+    missingRustJobEvidence(api, source.repository, candidate)
+  );
   if (!coverage.covered) {
     throw new Error(
       `codeql.yml run ${runId}: Rust analyses were skipped for ${source.sourceSha} but no earlier or later main analysis covers it; expected a commit with ${CODEQL_RUST_JOBS.join(' and ')} analyses and no CodeQL-Rust-relevant path difference; received ${coverage.reason}`
