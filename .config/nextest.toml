@@ -21,6 +21,7 @@ package(mangostudio-runtime) & (
   | test(=cli::native_operation::user_service::windows_tests::owned_fixture_fallback_preserves_failure_and_independently_ends_captured_lifetimes)
   | test(=cli::native_operation::user_service::windows_tests::a_stall_sample_names_the_runner_process_and_reads_the_cpu_load)
   | test(=cli::native_operation::user_service::windows_tests::a_survivor_report_names_each_process_and_its_retried_kill)
+  | test(=cli::native_operation::user_service::windows_tests::a_failing_script_reports_its_message_as_plain_text_not_clixml)
   | test(=cli::native_operation::user_service::windows_tests::the_runner_tree_is_terminated_after_the_runner_itself_is_gone)
   | test(=cli::native_operation::user_service::windows_tests::the_slot_fallback_ends_a_shim_run_that_no_task_started)
 )
