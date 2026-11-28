@@ -964,9 +964,13 @@ describe('release workflow binary gate', () => {
     const runtime = readText('.github/workflows/runtime-build.yml');
     const cacheStep = extractStepBlocks(runtime).find((step) => step.includes('id: rust-cache'));
 
-    expect(cacheStep, 'runtime-build.yml rust-cache step').toContain('uses: Swatinem/rust-cache@');
+    expect(cacheStep, 'runtime-build.yml rust-cache step').toContain(
+      'uses: ./.github/actions/rust-cache'
+    );
     expect(cacheStep).toContain('if: inputs.cache');
-    expect(cacheStep).toContain('save-if: $' + "{{ github.ref == 'refs/heads/main' }}");
+    // Saving from main only is the composite's gate (pinned in cache-policy.unit.test.ts); the
+    // step must not switch it off or override it.
+    expect(cacheStep).not.toMatch(/read-only:|save-if:/);
     // Canary publishes main's CI distribution, so main only looks the entry up
     // and saves a clean build when it is stale; it never restores one.
     expect(cacheStep, 'runtime-build.yml rust-cache restores on main').toContain(

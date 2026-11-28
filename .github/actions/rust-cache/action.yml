@@ -1,0 +1,174 @@
+name: Rust cache
+description: >
+  The one place Swatinem/rust-cache runs. It leaves rustup with the toolchains
+  the job needs, keys the cache generation on the Cargo profile settings
+  alone, and saves only from main. Callers must run actions/checkout first.
+
+  rust-cache's restore key is `<prefix>-<job or shared key>-<OS>-<arch>-<env
+  hash>`, without the lockfile hash, so a pull request restores main's entry
+  after a dependency bump only while the prefix and the environment hash match.
+  Two inputs to those used to change for reasons that have nothing to do with
+  the build. The prefix hashed the whole root manifest, which every dependency
+  bump edits. The environment hash covers `rustc -vV` of every installed
+  toolchain, including the `stable` the runner image preinstalls and moves.
+  This action pins both: the prefix hashes only `[profile.*]` and `rust-version`,
+  and every toolchain but the pinned and the named ones is uninstalled first.
+
+inputs:
+  shared-key:
+    description: Cache key shared by jobs that build the same thing; wins over the job id.
+    required: false
+    default: ""
+  key:
+    description: Extra key segment added next to the job id.
+    required: false
+    default: ""
+  workspaces:
+    description: Cargo workspaces to cache, as rust-cache takes them; empty means the checkout root.
+    required: false
+    default: ""
+  profile-manifest:
+    description: >
+      Manifest whose `[profile.*]` tables and `rust-version` start a new cache generation when they
+      change. A workspace the root manifest excludes names its own.
+    required: false
+    default: Cargo.toml
+  keep-toolchains:
+    description: >
+      Whitespace-separated toolchains to keep besides the one rust-toolchain.toml pins, each already
+      installed. A release such as `1.98.0` matches `1.98.0-<host triple>`.
+    required: false
+    default: ""
+  lookup-only:
+    description: "'true' checks whether the entry exists without downloading it."
+    required: false
+    default: "false"
+  read-only:
+    description: "'true' never saves. Without it the cache is saved from main only."
+    required: false
+    default: "false"
+
+outputs:
+  cache-hit:
+    description: "'true' when rust-cache found an exact match."
+    value: ${{ steps.cache.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    # Runs before everything else: rust-cache reads the toolchain list when it
+    # computes the key. Written for the bash 3.2 of the macOS runners, and for
+    # the CRLF rustup prints on Windows.
+    - id: prune
+      name: Keep only the toolchains this job names
+      shell: bash
+      env:
+        KEEP_TOOLCHAINS: ${{ inputs.keep-toolchains }}
+      run: |
+        set -euo pipefail
+        set -f # toolchain names are words, never globs
+
+        # With no toolchain named, rustup installs the active one: the channel,
+        # components and profile of rust-toolchain.toml.
+        rustup toolchain install >/dev/null
+        pinned=$(rustup show active-toolchain | tr -d '\r' | awk 'NR == 1 { print $1 }')
+        if [ -z "$pinned" ]; then
+          echo "::error::expected rustup to name the toolchain rust-toolchain.toml pins | received: none" >&2
+          exit 1
+        fi
+        installed=$(rustup toolchain list --quiet | tr -d '\r')
+
+        # names WANTED NAME -> success when NAME is WANTED or WANTED is its release prefix:
+        # `1.98.0` keeps `1.98.0-x86_64-unknown-linux-gnu`, never `1.98.01-...`.
+        names() { [ "$2" = "$1" ] || [ "${2#"$1"-}" != "$2" ]; }
+
+        # A named toolchain nobody installed is a step in the wrong order, and
+        # the key would be computed without it. Refuse before removing anything.
+        for wanted in $pinned $KEEP_TOOLCHAINS; do
+          found=false
+          while IFS= read -r name; do
+            if names "$wanted" "$name"; then found=true; fi
+          done <<<"$installed"
+          if [ "$found" = false ]; then
+            echo "::error::expected toolchain ${wanted} installed before pruning (rustup toolchain install ${wanted} --profile minimal) | received: $(tr '\n' ' ' <<<"$installed")" >&2
+            exit 1
+          fi
+        done
+
+        surplus=''
+        while IFS= read -r name; do
+          [ -n "$name" ] || continue
+          keep=false
+          for wanted in $pinned $KEEP_TOOLCHAINS; do
+            if names "$wanted" "$name"; then keep=true; fi
+          done
+          if [ "$keep" = false ]; then surplus="$surplus $name"; fi
+        done <<<"$installed"
+
+        # The image's default is the toolchain about to be removed; a cargo call
+        # outside the checkout would have rustup install it again.
+        rustup default "$pinned" >/dev/null
+        if [ -n "$surplus" ]; then
+          # shellcheck disable=SC2086 # names carry no whitespace; one argument each
+          rustup toolchain uninstall $surplus >/dev/null
+          echo "uninstalled:$surplus"
+        fi
+        echo "toolchains: $(rustup toolchain list --quiet | tr -d '\r' | tr '\n' ' ')"
+
+    # What a profile edit changes and rust-cache's own key misses: cargo reuses
+    # nothing built under another profile, yet an exact-key hit restores those
+    # artifacts and is never saved over. The digest covers the `[profile.*]`
+    # tables and `rust-version`, so a profile edit opens a new generation and a
+    # dependency bump, a member edit or a comment does not. Comments and blank
+    # lines are dropped; awk is POSIX, so it runs the same on all three runners.
+    - id: profile
+      name: Digest the Cargo profile settings
+      shell: bash
+      env:
+        PROFILE_MANIFEST: ${{ inputs.profile-manifest }}
+      run: |
+        set -euo pipefail
+        if [ ! -f "$PROFILE_MANIFEST" ]; then
+          echo "::error::expected a Cargo manifest at ${PROFILE_MANIFEST} | received: no such file in $(pwd)" >&2
+          exit 1
+        fi
+        settings=$(tr -d '\r' <"$PROFILE_MANIFEST" | awk '
+          /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
+          /^[[:space:]]*\[/ {
+            section = $0
+            sub(/[[:space:]]*#.*$/, "", section)
+            gsub(/[[:space:]]/, "", section)
+            keep = (section ~ /^\[profile(\]|\.)/)
+            if (keep) print section
+            next
+          }
+          {
+            line = $0
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+            if (keep) print line
+            else if ((section == "[workspace.package]" || section == "[package]") && line ~ /^rust-version[[:space:]]*=/) print "rust-version:" line
+          }
+        ')
+        if [ -z "$settings" ]; then
+          echo "::error::expected [profile.*] tables or a rust-version in ${PROFILE_MANIFEST} | received: neither" >&2
+          exit 1
+        fi
+        if command -v sha256sum >/dev/null 2>&1; then
+          digest=$(printf '%s\n' "$settings" | sha256sum | awk '{ print $1 }')
+        else
+          digest=$(printf '%s\n' "$settings" | shasum -a 256 | awk '{ print $1 }')
+        fi
+        echo "Cargo profile digest of ${PROFILE_MANIFEST}: ${digest}"
+        echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+    - id: cache
+      name: Restore the cargo cache
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        prefix-key: v0-rust-profile-${{ steps.profile.outputs.digest }}
+        shared-key: ${{ inputs.shared-key }}
+        key: ${{ inputs.key }}
+        workspaces: ${{ inputs.workspaces }}
+        lookup-only: ${{ inputs.lookup-only }}
+        # Pull requests restore main's entries but never replace them.
+        save-if: ${{ inputs.read-only != 'true' && github.ref == 'refs/heads/main' }}

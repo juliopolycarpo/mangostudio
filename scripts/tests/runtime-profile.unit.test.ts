@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
+import { ROOT_DIR } from '../lib/config';
 import { ALL_BINARY_TARGETS } from '../lib/release-targets';
+import { runCompositeStep } from './support/cache-scoped-steps';
 import { readText } from './support/read-text';
 import {
   extractJobBlock,
@@ -37,11 +42,32 @@ function hashEnv(overrides: Record<string, string>): string {
   return hash.digest('hex').substring(0, 8);
 }
 
-// GitHub's hashFiles() over one file: SHA-256 of that file's SHA-256 digest bytes.
-function hashFilesOf(path: string): string {
-  const fileDigest = createHash('sha256').update(readText(path)).digest();
-  return createHash('sha256').update(fileDigest).digest('hex');
-}
+const RUST_CACHE_ACTION = '.github/actions/rust-cache/action.yml';
+
+// The digest the composite's `profile` step prints for the root manifest, from the script as
+// shipped. The key's prefix is `v0-rust-profile-<digest>`, from the action's `prefix-key` input.
+const ROOT_PROFILE_DIGEST = await (async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mango-runtime-profile-digest-'));
+  try {
+    copyFileSync(join(ROOT_DIR, 'Cargo.toml'), join(dir, 'Cargo.toml'));
+    const run = await runCompositeStep(
+      'profile',
+      { PROFILE_MANIFEST: 'Cargo.toml' },
+      dir,
+      RUST_CACHE_ACTION
+    );
+    const digest = run.outputs.digest;
+    if (!/^[a-f0-9]{64}$/.test(digest ?? '')) {
+      throw new Error(
+        `expected the profile step to print a 64-hex digest | received: ${digest} (exit ${run.exitCode}: ${run.stderr})`
+      );
+    }
+    return digest;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+})();
+const ROOT_PROFILE_PREFIX = `v0-rust-profile-${ROOT_PROFILE_DIGEST}`;
 
 function cacheStep(): string {
   const runtime = extractJobBlock(readText(RUNTIME_WORKFLOW), 'runtime');
@@ -60,15 +86,17 @@ function cacheInput(step: string, name: string): string {
   return value;
 }
 
+/** An input the step sets, or undefined. */
+function optionalCacheInput(step: string, name: string): string | undefined {
+  return new RegExp(`^ {10}${name}: (.+)$`, 'm').exec(step)?.[1];
+}
+
 // Resolves only the expressions the cache key is built from. Anything else is an error, so a new
 // input cannot enter the key without this test learning about it.
 function resolveKeyExpression(raw: string, platform: string): string {
   return raw.replace(/\$\{\{ (.+?) \}\}/g, (_match, expression: string) => {
-    if (expression === "hashFiles('Cargo.toml')") return hashFilesOf('Cargo.toml');
     if (expression === 'matrix.platform') return platform;
-    throw new Error(
-      `expected a cache key expression: hashFiles('Cargo.toml') | matrix.platform | received: ${expression}`
-    );
+    throw new Error(`expected a cache key expression: matrix.platform | received: ${expression}`);
   });
 }
 
@@ -82,16 +110,32 @@ interface CacheScenario {
 /** The key rust-cache computes for a run: prefix, shared key, runner, environment hash, lock hash. */
 function rustCacheKey(scenario: CacheScenario, platform: string, lockHash: string): string {
   const step = cacheStep();
-  const prefix = resolveKeyExpression(cacheInput(step, 'prefix-key'), platform);
+  // The prefix is the composite's: the step names no profile manifest of its own, so it digests
+  // the root one, and passes no `prefix-key` to override it.
+  expect(optionalCacheInput(step, 'prefix-key'), 'the step must not set its own prefix').toBe(
+    undefined
+  );
+  expect(optionalCacheInput(step, 'profile-manifest'), 'the root manifest must be digested').toBe(
+    undefined
+  );
   const shared = resolveKeyExpression(cacheInput(step, 'shared-key'), platform);
-  return `${prefix}-${shared}-Linux-x64-${hashEnv(jobProfileEnv(scenario.profile))}-${lockHash}`;
+  return `${ROOT_PROFILE_PREFIX}-${shared}-Linux-x64-${hashEnv(jobProfileEnv(scenario.profile))}-${lockHash}`;
 }
 
-/** Evaluates the cache step's `github.ref == 'refs/heads/main'` write gate for a scenario. */
+/**
+ * Evaluates the write gate for a scenario. The gate is the composite's
+ * (`inputs.read-only != 'true' && github.ref == 'refs/heads/main'`), so the step must leave
+ * `read-only` and `save-if` unset for it to apply.
+ */
 function cacheWrites(scenario: CacheScenario): boolean {
-  const gate = `${EXPR} github.ref == 'refs/heads/main' }}`;
   const step = cacheStep();
-  expect(cacheInput(step, 'save-if')).toBe(gate);
+  expect(optionalCacheInput(step, 'read-only'), 'the writer step must not be read-only').toBe(
+    undefined
+  );
+  expect(optionalCacheInput(step, 'save-if'), 'the gate lives in the composite').toBe(undefined);
+  expect(readText(RUST_CACHE_ACTION)).toContain(
+    `save-if: ${EXPR} inputs.read-only != 'true' && github.ref == 'refs/heads/main' }}`
+  );
   return scenario.ref === 'refs/heads/main';
 }
 
@@ -374,8 +418,9 @@ describe('runtime profile callers and cache isolation', () => {
     expect(build).not.toContain('CARGO_PROFILE_RELEASE_');
     const cache = cacheStep();
     expect(cache).toContain('shared-key: runtime-build-');
-    expect(cache).toContain(`save-if: ${EXPR} github.ref == 'refs/heads/main' }}`);
     expect(cache).toContain(`lookup-only: ${EXPR} github.ref == 'refs/heads/main' }}`);
+    // Saving from main only is the composite's default; this step must not turn it off.
+    expect(cacheWrites(MAIN_SEED)).toBe(true);
     // rust-cache v2.9.3 hashes CARGO* at job scope into both exact/fallback keys.
     expect(cache).not.toContain('env-vars:');
     expect(cache).not.toContain('restore-keys:');
@@ -393,11 +438,12 @@ describe('runtime profile callers and cache isolation', () => {
     expect(seedKey, 'seed save key != PR light restore key').toBe(prKey);
     expect(seedKey).toMatch(
       new RegExp(
-        `^v0-rust-[0-9a-f]{64}-runtime-build-${platform}-Linux-x64-[0-9a-f]{8}-${lockHash}$`
+        `^v0-rust-profile-[0-9a-f]{64}-runtime-build-${platform}-Linux-x64-[0-9a-f]{8}-${lockHash}$`
       )
     );
-    // The prefix covers the root manifest, so a profile edit rotates both keys together.
-    expect(seedKey).toContain(`v0-rust-${hashFilesOf('Cargo.toml')}-runtime-build-${platform}-`);
+    // The prefix digests the root profile tables, so a profile edit rotates both keys together
+    // and a dependency bump rotates neither.
+    expect(seedKey).toContain(`${ROOT_PROFILE_PREFIX}-runtime-build-${platform}-`);
     // A different Cargo.lock misses for both: the seed never serves a stale lock.
     expect(rustCacheKey(PR_LIGHT, platform, 'deadbeef')).not.toBe(seedKey);
     // The seed never lands in the shipping entry, and shipping never lands in the light one.
@@ -453,13 +499,23 @@ describe('runtime profile callers and cache isolation', () => {
     const restore = cacheStep();
     expect(lookup).toContain("if: inputs.mode == 'cache-seed'");
     expect(lookup).toContain('lookup-only: true');
-    expect(lookup).toContain('save-if: false');
-    expect(lookup.match(/uses: Swatinem\/rust-cache@[^ ]+/)?.[0]).toBe(
-      restore.match(/uses: Swatinem\/rust-cache@[^ ]+/)?.[0]
+    expect(lookup).toContain('read-only: true');
+    expect(lookup.match(/uses: \S+\/actions\/rust-cache/)?.[0]).toBe(
+      restore.match(/uses: \S+\/actions\/rust-cache/)?.[0]
     );
     expect(lookup).not.toContain('env:');
-    for (const input of ['prefix-key', 'shared-key']) {
-      expect(cacheInput(lookup, input), input).toBe(cacheInput(restore, input));
+    // The lookup and the writer prune the same toolchains and digest the same manifest, so the
+    // only inputs that may reach the key are the shared key and the (equal) defaults.
+    expect(cacheInput(lookup, 'shared-key'), 'shared-key').toBe(cacheInput(restore, 'shared-key'));
+    for (const input of [
+      'prefix-key',
+      'profile-manifest',
+      'keep-toolchains',
+      'workspaces',
+      'key',
+    ]) {
+      expect(optionalCacheInput(lookup, input), `lookup ${input}`).toBe(undefined);
+      expect(optionalCacheInput(restore, input), `restore ${input}`).toBe(undefined);
     }
     const rust = steps.findIndex((step) => step.includes('rustup show active-toolchain'));
     const lookupIndex = steps.indexOf(lookup);
@@ -616,12 +672,13 @@ describe('runtime profile callers and cache isolation', () => {
     for (const target of ALL_BINARY_TARGETS) expect(workflow).toContain(`"${target.arch}"`);
     expect(extractJobBlocks(workflow).map(({ job }) => job)).toEqual(['runtime']);
     const cacheSteps = extractStepBlocks(extractJobBlock(workflow, 'runtime')).filter((step) =>
-      step.includes('uses: Swatinem/rust-cache@')
+      /uses: \S+\/actions\/rust-cache/.test(step)
     );
     expect(cacheSteps).toHaveLength(2);
-    expect(cacheSteps.filter((step) => cacheInput(step, 'save-if') !== 'false')).toEqual([
-      cacheStep(),
-    ]);
+    expect(
+      cacheSteps.filter((step) => optionalCacheInput(step, 'read-only') !== 'true'),
+      'only the cache step that can save may omit read-only'
+    ).toEqual([cacheStep()]);
     expect(workflow).not.toContain('actions/cache/save');
     const cargo = readText('Cargo.toml');
     expect(cargo).toContain('lto = "fat"\ncodegen-units = 1');

@@ -2488,13 +2488,13 @@ CI's `runtime-cache-seed` job fills the light entry. It runs only on a push to
 `mode: cache-seed`, `profile: light` and `cache: true`. The default mode is
 `artifact`. A seed and a PR light build share the matrix, runner, and job
 environment. Both use the same Cargo cache key,
-`v0-rust-<sha256 of Cargo.toml>-runtime-build-<platform>-<OS>-<arch>-<CARGO env
+`v0-rust-profile-<sha256 of the root profile tables>-runtime-build-<platform>-<OS>-<arch>-<CARGO env
 hash>-<lockfile hash>`.
 
 After Rust toolchain selection, the seed checks for an exact cache hit before
 installing Bun, Zig, and cargo-zigbuild. This lookup is the only mode-specific
-step before the shared cache step. It uses the same pinned rust-cache action and
-key inputs, with `lookup-only: true` and `save-if: false`. A hit skips setup and
+step before the shared cache step. It uses the same rust-cache composite and
+key inputs, with `lookup-only: true` and `read-only: true`. A hit skips setup and
 the build. A miss runs the shared setup and cache step so the cache excludes tools
 installed before the writer runs. `runtime-profile.unit.test.ts` checks the shared
 key inputs and reproduces rust-cache v2.9.3's hash for both paths and every target.
@@ -2507,8 +2507,8 @@ single `actions/upload-artifact` step is conditional on `mode == 'artifact'`,
 and the job holds `contents: read` only. Light bytes that did reach a bundle
 would still stop at publication: the distribution manifest records the runtime
 profile, and Release and Canary require `shipping` (see `releasing.md`). A
-lockfile, root manifest, toolchain, or Cargo environment change can produce an
-exact-key miss. The next main push also replaces an entry evicted by the 12-day
+lockfile, root profile table, `rust-version`, pinned toolchain, or Cargo environment change can
+produce an exact-key miss; a root manifest edit that leaves the profiles alone cannot. The next main push also replaces an entry evicted by the 12-day
 retention.
 
 The job waits on the Gate and nothing waits on it, so it never gates a
@@ -2609,9 +2609,33 @@ deletes older committed generations by exact ID only when a newer replacement
 is listed under `refs/heads/main`. The explicit family registry preserves the
 runner OS and architecture, target, compiler/environment hash and cache archive
 version, including distinct shipping and light-profile environment hashes.
-Only the root-manifest prefix and dependency hash rotate. Sole entries, unknown
-families, fuzz and other cache kinds remain untouched (the fuzz key has no manifest
-segment and `protocol-fuzz.yml` pins its nightly; see "Fuzzing" in `docs/protocol/conformance.md`). Before each deletion the
+Only the profile prefix and dependency hash rotate. Sole entries, unknown
+families, fuzz and other cache kinds remain untouched (the fuzz key is not a registered
+family and `protocol-fuzz.yml` pins its nightly; see "Fuzzing" in `docs/protocol/conformance.md`).
+
+Every workflow reaches `Swatinem/rust-cache` through `.github/actions/rust-cache`, which
+`scripts/tests/cache-policy.unit.test.ts` pins. rust-cache's restore key is
+`<prefix>-<shared key or job>-<OS>-<arch>-<environment hash>`: it leaves the lockfile hash out, so
+a dependency bump restores the previous entry, but only while the prefix and the environment hash
+are unchanged. The composite keeps both stable:
+
+- The prefix is `v0-rust-profile-<sha256>` over the root `[profile.*]` tables and
+  `[workspace.package].rust-version`, comments and blank lines dropped. A profile edit starts a new
+  generation, because rust-cache's own key ignores `[profile.*]` and would restore artifacts built
+  under the old profile. A dependency bump, a member edit or a comment does not. The retired prefix
+  was `v0-rust-<sha256 of Cargo.toml>`, which every dependency bump rotated, so a pull request
+  after one found nothing to restore.
+- The environment hash covers `rustc -vV` of every installed toolchain, including the runner
+  image's preinstalled `stable`, which moves with image updates. Before the cache step the
+  composite installs the toolchain `rust-toolchain.toml` pins, uninstalls every other one and makes
+  the pinned one the default. A job that needs another (the fuzz nightly) names it in
+  `keep-toolchains`; it must already be installed.
+
+The retired prefix's entries stay recognizable to the cleanup. The first main run that saves a
+profile-generation entry for a family, runner and archive version lets the cleanup delete that
+family's remaining `v0-rust-<sha256 of Cargo.toml>` entries, whatever their environment hash:
+pruning the image's toolchain moved every environment hash at once, so the ordinary rule, which
+keeps one entry per environment, would never pair them. Before each deletion the
 script audits active main writers and fetches the complete listing again; a
 detected writer, changed generation or lost replacement defers cleanup until a
 later writer's completion. The audit checks pre-start statuses before running

@@ -89,10 +89,14 @@ jobs:
       # explicitly with `+"$FUZZ_NIGHTLY"` instead. libFuzzer instrumentation
       # needs `-Z` flags only nightly accepts.
       - run: rustup toolchain install "$FUZZ_NIGHTLY" --profile minimal
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # The action prunes every other toolchain, so the nightly is named to
+      # survive. The fuzz workspace has its own `[profile.*]`; the root one
+      # never applies to it, so its own manifest starts the cache generation.
+      - uses: $/.github/actions/rust-cache
         with:
           workspaces: crates/mango-protocol/fuzz
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          profile-manifest: crates/mango-protocol/fuzz/Cargo.toml
+          keep-toolchains: ${{ env.FUZZ_NIGHTLY }}
       - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
         with:
           tool: cargo-fuzz@0.13.2

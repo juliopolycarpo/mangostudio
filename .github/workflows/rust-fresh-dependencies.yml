@@ -133,11 +133,9 @@ jobs:
       - uses: $/.github/actions/setup-bun
 
       - id: ready
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        uses: $/.github/actions/rust-cache
         with:
-          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
           key: fresh-dependencies
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # A Clippy failure still needs test evidence for this resolved graph.
       # The final setup outcome prevents diagnostics after lock/tool setup fails.

@@ -28,20 +28,20 @@ export interface StepResult {
 }
 
 /**
- * The `run:` script of one cache-scoped step, by step id.
+ * The `run:` script of one composite step, by step id.
  *
  * Throws with the ids that do exist, so a test for a step that was never
  * written fails on the missing step and not on an incidental parse error.
  *
- * // Usage: compositeStepScript('keys').includes('primary_key=');
+ * // Usage: compositeStepScript('keys', CACHE_SCOPED_MANIFEST).includes('primary_key=');
  */
-function compositeStepScript(stepId: string): string {
-  const manifest = Bun.YAML.parse(readText(CACHE_SCOPED_MANIFEST)) as CompositeManifest;
+function compositeStepScript(stepId: string, manifestPath: string): string {
+  const manifest = Bun.YAML.parse(readText(manifestPath)) as CompositeManifest;
   const step = manifest.runs.steps.find((candidate) => candidate.id === stepId);
   if (step?.run === undefined) {
     const ids = manifest.runs.steps.map((candidate) => candidate.id ?? '(no id)');
     throw new Error(
-      `expected ${CACHE_SCOPED_MANIFEST} step with id '${stepId}' and a run script | received step ids: ${ids.join(', ')}`
+      `expected ${manifestPath} step with id '${stepId}' and a run script | received step ids: ${ids.join(', ')}`
     );
   }
   return step.run;
@@ -79,12 +79,16 @@ function parseGithubOutput(text: string): Record<string, string> {
  * to the caller: the `env:` values GitHub would have interpolated are passed
  * in `env` directly.
  *
+ * `manifestPath` names another composite action; it defaults to cache-scoped.
+ *
  * // Usage: await runCompositeStep('keys', { FAMILY: 'turbo', MODE: 'restore' }, cwd);
+ * // Usage: await runCompositeStep('prune', env, cwd, '.github/actions/rust-cache/action.yml');
  */
 export async function runCompositeStep(
   stepId: string,
   env: Readonly<Record<string, string>>,
-  cwd: string
+  cwd: string,
+  manifestPath: string = CACHE_SCOPED_MANIFEST
 ): Promise<StepResult> {
   const scratch = mkdtempSync(join(tmpdir(), 'cache-scoped-step-'));
   try {
@@ -93,7 +97,7 @@ export async function runCompositeStep(
     const scriptFile = join(scratch, 'step.sh');
     writeFileSync(outputFile, '');
     writeFileSync(summaryFile, '');
-    writeFileSync(scriptFile, compositeStepScript(stepId));
+    writeFileSync(scriptFile, compositeStepScript(stepId, manifestPath));
 
     const proc = Bun.spawn({
       cmd: ['bash', '--noprofile', '--norc', scriptFile],

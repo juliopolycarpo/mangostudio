@@ -31,6 +31,7 @@ import {
   type CacheScopedCallSite,
   cacheScopedCallSites,
   compositeActionFiles,
+  parseWithInputs,
   workflowFiles,
 } from './support/workflow-files';
 
@@ -44,12 +45,28 @@ const RETIRED_SCOPED_CACHE_FAMILIES = new Set(['playwright', 'bun']);
 const EXPECTED_FAMILIES = SCOPED_CACHE_FAMILIES.filter(
   (family) => !RETIRED_SCOPED_CACHE_FAMILIES.has(family)
 );
-const RUST_CACHE_PREFIX_KEY = `prefix-key: v0-rust-${EXPRESSION_START} hashFiles('Cargo.toml') }}`;
-const RUST_CACHE_SAVE_IF = `save-if: ${EXPRESSION_START} github.ref == 'refs/heads/main' }}`;
+// Swatinem/rust-cache runs in one composite and nowhere else; every workflow reaches it through
+// that composite, which owns the toolchain pruning, the generation prefix and the save gate.
+const RUST_CACHE_ACTION = '.github/actions/rust-cache/action.yml';
+const RUST_CACHE_ACTION_SHA = 'd1527c8f67ef9af357290475d4af4b0fab8f12e0';
+const RUST_CACHE_PREFIX_KEY = `prefix-key: v0-rust-profile-${EXPRESSION_START} steps.profile.outputs.digest }}`;
+const RUST_CACHE_SAVE_IF = `save-if: ${EXPRESSION_START} inputs.read-only != 'true' && github.ref == 'refs/heads/main' }}`;
+// Inputs a call site may pass. `prefix-key` and `save-if` are not among them: the prefix is the
+// action's to derive, and a caller can only switch saving off (`read-only: true`).
+const RUST_CACHE_CALL_INPUTS = new Set([
+  'shared-key',
+  'key',
+  'workspaces',
+  'profile-manifest',
+  'keep-toolchains',
+  'lookup-only',
+  'read-only',
+]);
+const RUST_CACHE_USES = /^\s*(?:-\s+)?uses: [.$]\/\.github\/actions\/rust-cache(?:\s|$)/m;
 // The fuzz workspace is excluded from the root workspace and has its own
-// manifest, so the root manifest's profiles never apply to it. It is exempt
-// from the prefix-key policy only; it still saves only from main.
-const RUST_PREFIX_KEY_EXEMPT_FILES = new Set(['.github/workflows/protocol-fuzz.yml']);
+// manifest, so the root manifest's profiles never apply to it. Its cache is not a registered
+// family: the cleanup tooling ignores it and the entries age out.
+const RUST_UNREGISTERED_FAMILY_FILES = new Set(['.github/workflows/protocol-fuzz.yml']);
 // Keep existing physical entries recognizable to lifecycle accounting until
 // their post-merge disposition is verified; these families have no writer.
 const RETIRED_RUST_CACHE_FAMILIES = new Set(['semver-checks', 'schema-equality']);
@@ -111,14 +128,14 @@ function permissions(source: string, indent: number): Record<string, string> | s
 }
 
 /**
- * Every Swatinem/rust-cache step across workflows (steps at indent 6) and
- * composite actions (steps at indent 4).
+ * Every call of the rust-cache composite across workflows (steps at indent 6)
+ * and other composite actions (steps at indent 4).
  *
  * @example
- * for (const step of rustCacheSteps()) expect(step.block).toContain('prefix-key:');
+ * for (const step of rustCacheSteps()) expect(step.block).toContain('shared-key:');
  */
 function rustCacheSteps(): RustCacheStep[] {
-  const isRustCache = (block: string) => /^\s*(?:-\s+)?uses: Swatinem\/rust-cache@/m.test(block);
+  const isRustCache = (block: string) => RUST_CACHE_USES.test(block);
   const workflowSteps = workflowFiles().flatMap((file) =>
     extractJobBlocks(readText(file)).flatMap(({ job, block }) =>
       extractStepBlocksAtIndent(block, 6).map((step) => ({ file, job, block: step }))
@@ -259,11 +276,7 @@ describe('CI cache policy', () => {
     }
     const observed = new Set<string>();
     for (const step of rustCacheSteps()) {
-      if (RUST_PREFIX_KEY_EXEMPT_FILES.has(step.file)) continue;
-      expect(step.block, step.file).toContain(
-        'Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0'
-      );
-      expect(step.block, step.file).not.toMatch(/add-(?:job-id|rust-environment-hash)-key:.*false/);
+      if (RUST_UNREGISTERED_FAMILY_FILES.has(step.file)) continue;
       const shared = /^\s+shared-key: (.+)$/m.exec(step.block)?.[1];
       const inputKey = /^\s+key: (.+)$/m.exec(step.block)?.[1];
       const family = shared ?? [inputKey, step.job].filter(Boolean).join('-');
@@ -467,32 +480,87 @@ describe('CI cache policy', () => {
   });
 
   // The two policies below only see steps the job/step split recognises. A
-  // rust-cache step it misses (a column-0 comment ending the `jobs:` block, a
+  // rust-cache call it misses (a column-0 comment ending the `jobs:` block, a
   // differently indented step list) would escape both without failing them.
-  test('finds every rust-cache step the policies below check', () => {
+  test('finds every rust-cache call site the policies below check', () => {
     const files = [...workflowFiles(), ...compositeActionFiles()];
     const declared = files.reduce(
-      (total, file) => total + [...readText(file).matchAll(/uses: Swatinem\/rust-cache@/g)].length,
+      (total, file) =>
+        total + [...readText(file).matchAll(new RegExp(RUST_CACHE_USES.source, 'gm'))].length,
       0
     );
+    expect(declared, 'expected rust-cache call sites in the workflows').toBeGreaterThan(0);
     expect(rustCacheSteps().length, `rust-cache steps found, of ${declared} declared`).toBe(
       declared
     );
+  });
+
+  // Toolchain pruning, the generation prefix and the save gate live in one
+  // composite. A workflow that called Swatinem/rust-cache itself would key on
+  // whatever toolchains its runner image happens to carry and bring back the
+  // dependency-bump misses this composite removes.
+  test('reaches Swatinem/rust-cache only through the composite, pinned once', () => {
+    const direct = [...workflowFiles(), ...compositeActionFiles()].filter(
+      (file) => file !== RUST_CACHE_ACTION && /uses: Swatinem\/rust-cache@/.test(readText(file))
+    );
+    expect(
+      direct,
+      `expected no direct Swatinem/rust-cache step outside ${RUST_CACHE_ACTION} | received: ${direct.join(', ')}`
+    ).toEqual([]);
+
+    const action = readText(RUST_CACHE_ACTION);
+    expect(
+      [...action.matchAll(/uses: Swatinem\/rust-cache@(\S+)/g)].map((match) => match[1]),
+      `expected one rust-cache use pinned to ${RUST_CACHE_ACTION_SHA}`
+    ).toEqual([RUST_CACHE_ACTION_SHA]);
+    // Either flag drops the environment or job part of the key the composite relies on.
+    expect(action).not.toMatch(/add-(?:job-id|rust-environment-hash)-key:/);
+    // Anything written to the job environment could fork rust-cache's environment hash.
+    expect(action).not.toContain('GITHUB_ENV');
+    expect(action).not.toMatch(/restore-keys:|env-vars:/);
+  });
+
+  test('prunes toolchains and digests the profiles before rust-cache computes its key', () => {
+    const manifest = Bun.YAML.parse(readText(RUST_CACHE_ACTION)) as {
+      runs: { steps: { id?: string }[] };
+    };
+    expect(manifest.runs.steps.map((step) => step.id)).toEqual(['prune', 'profile', 'cache']);
   });
 
   // rust-cache keys on the lockfile, toolchain, and environment, not on
   // `[profile.*]`. A profile change then restores an exact-match entry full of
   // artifacts built under the old profile, cargo rebuilds every crate, and the
   // save step skips an exact hit ("Cache up-to-date"), so the stale entry is
-  // never replaced. Hashing the root manifest into the prefix makes a profile
-  // change a new key.
-  test('keys every rust-cache step on the root manifest', () => {
-    const steps = rustCacheSteps().filter((step) => !RUST_PREFIX_KEY_EXEMPT_FILES.has(step.file));
+  // never replaced. The prefix therefore carries a digest of the profile tables
+  // and rust-version. It must not carry the whole manifest: every dependency
+  // bump edits that, and rust-cache's restore key then never matches anything
+  // (the restore key omits the lockfile hash, not the prefix).
+  test('keys the generation on the profile digest and never on the whole root manifest', () => {
+    const cache = extractStepBlocksAtIndent(readText(RUST_CACHE_ACTION), 4).find((block) =>
+      block.includes('uses: Swatinem/rust-cache@')
+    );
+    expect(cache, `${RUST_CACHE_ACTION}: rust-cache step with the profile prefix-key`).toContain(
+      RUST_CACHE_PREFIX_KEY
+    );
+    const hashedManifests = [...workflowFiles(), ...compositeActionFiles()].filter((file) =>
+      /hashFiles\([^)]*Cargo\.toml/.test(readText(file))
+    );
+    expect(
+      hashedManifests,
+      `expected no hashFiles over a Cargo.toml in a cache key | received: ${hashedManifests.join(', ')}`
+    ).toEqual([]);
+  });
+
+  test('call sites pass only inputs the composite owns the meaning of', () => {
+    const steps = rustCacheSteps();
     expect(steps.length).toBeGreaterThan(0);
     for (const step of steps) {
-      expect(step.block, `${step.file}: rust-cache step without the manifest prefix-key`).toContain(
-        RUST_CACHE_PREFIX_KEY
-      );
+      for (const input of Object.keys(parseWithInputs(step.block))) {
+        expect(
+          RUST_CACHE_CALL_INPUTS.has(input),
+          `${step.file}: expected a rust-cache input in [${[...RUST_CACHE_CALL_INPUTS].join(', ')}] | received: ${input}`
+        ).toBe(true);
+      }
     }
   });
 
@@ -500,24 +568,28 @@ describe('CI cache policy', () => {
   // pull request adds nothing to the configured repository allowance that main's own
   // entries already fill most of.
   test('saves rust caches only from main', () => {
-    const steps = rustCacheSteps();
-    expect(steps.length).toBeGreaterThan(0);
-    for (const step of steps) {
-      const conditions = step.block.match(/^ +save-if: .+$/gm) ?? [];
-      expect(conditions, `${step.file}: rust-cache must declare one save condition`).toHaveLength(
-        1
-      );
+    const cache = extractStepBlocksAtIndent(readText(RUST_CACHE_ACTION), 4).find((block) =>
+      block.includes('uses: Swatinem/rust-cache@')
+    );
+    const conditions = cache?.match(/^ +save-if: .+$/gm) ?? [];
+    expect(
+      conditions.map((line) => line.trim()),
+      `${RUST_CACHE_ACTION}: save conditions`
+    ).toEqual([RUST_CACHE_SAVE_IF]);
+    // A caller can only switch saving off.
+    for (const step of rustCacheSteps()) {
+      const readOnly = parseWithInputs(step.block)['read-only'];
       expect(
-        [RUST_CACHE_SAVE_IF, 'save-if: false'],
-        `${step.file}: rust-cache must save only from main or disable saving`
-      ).toContain(conditions[0]?.trim() ?? '<missing>');
+        [undefined, 'true'],
+        `${step.file}: expected read-only to be absent or true | received: ${readOnly}`
+      ).toContain(readOnly);
     }
   });
 
   test('demotes only the measured Ubuntu candidates and retains other platform caches', () => {
     const protocol = readText('.github/workflows/protocol-ci.yml');
     for (const job of ['semver-checks', 'schema-equality']) {
-      expect(extractJobBlock(protocol, job), job).not.toContain('Swatinem/rust-cache@');
+      expect(extractJobBlock(protocol, job), job).not.toContain('actions/rust-cache');
     }
     const interopCache = rustCacheSteps().filter(
       (step) => step.file === '.github/workflows/protocol-ci.yml' && step.job === 'interop'
