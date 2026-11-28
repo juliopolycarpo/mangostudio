@@ -14,7 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 
 import { assertNoUnexpectedArguments, parseArgs } from '../lib/args';
 import { nearestRank } from '../lib/latency-stats';
-import { sha256File } from '../release/verify-checksum';
+import { sha256OfFile } from '../lib/script-guards';
 
 const PREFIX = 'EXTERNAL_AGENT_BOUNDARY_SAMPLE ';
 const REPO_ROOT = resolve(import.meta.dir, '../..');
@@ -212,7 +212,7 @@ export async function collectBoundarySamples(options: {
     ['head', head],
   ];
   const sha256Before = Object.fromEntries(
-    sides.map(([role, side]) => [role, sha256File(resolve(side.binary))])
+    sides.map(([role, side]) => [role, sha256OfFile(resolve(side.binary))])
   ) as Record<BoundaryRole, string>;
   const raw: RawBoundarySample[] = [];
   for (const test of tests) {
@@ -232,7 +232,7 @@ export async function collectBoundarySamples(options: {
     }
   }
   for (const [role, side] of sides) {
-    const after = sha256File(resolve(side.binary));
+    const after = sha256OfFile(resolve(side.binary));
     if (after !== sha256Before[role])
       throw new Error(
         `Expected the ${role} binary ${side.binary} unchanged while sampling; sha256 before: ${sha256Before[role]}, after: ${after}.`

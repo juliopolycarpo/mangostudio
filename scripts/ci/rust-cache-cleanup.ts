@@ -6,7 +6,8 @@
 import { appendFileSync, readFileSync } from 'node:fs';
 
 import { GitHubRetry } from '../lib/github-retry';
-import { parseCacheEntry, record } from './actions-api/client';
+import { isJsonRecord } from '../lib/script-guards';
+import { parseCacheEntry } from './actions-api/client';
 import { cleanupRustCaches } from './rust-cache/cleanup';
 import { MAIN_CACHE_REF } from './rust-cache/families';
 import { GithubRustCacheApi } from './rust-cache/github';
@@ -63,7 +64,7 @@ export function readFixtureListing(path: string): RustCacheEntry[] {
       `Invalid fixture ${path}: expected ${expected} | received invalid JSON ${JSON.stringify(text.slice(0, 80))}`
     );
   }
-  const entries = record(parsed) ? parsed.actions_caches : undefined;
+  const entries = isJsonRecord(parsed) ? parsed.actions_caches : undefined;
   if (!Array.isArray(entries)) {
     throw new Error(
       `Invalid fixture ${path}: expected ${expected} | received ${JSON.stringify(parsed)?.slice(0, 80)}`

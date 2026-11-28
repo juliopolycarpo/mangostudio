@@ -93,6 +93,8 @@ describe('classifyChangedPaths', () => {
     ['apps/shared/src/i18n/pt-BR.ts', false, true],
     ['apps/shared/src/i18n/en.ts', false, true],
     ['scripts/lib/rust-lanes.ts', true, true],
+    // rust-lanes.ts imports it, so editing it changes lane detection.
+    ['scripts/lib/script-guards.ts', true, true],
     ['packages/protocol/src/session.ts', false, true],
     // Files a crate reads from outside crates/: a change must run the crate.
     ['spec/schema/1/protocol.json', true, true],

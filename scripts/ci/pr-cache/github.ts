@@ -1,10 +1,10 @@
 import { type GithubFetch, type GitHubRetry, parseJsonReply } from '../../lib/github-retry';
+import { isJsonRecord } from '../../lib/script-guards';
 import {
   type ActionsCacheEntry,
   deleteActionsCache,
   GithubActionsClient,
   listActionsCaches,
-  record,
 } from '../actions-api/client';
 import { type PullRequestState } from './selection';
 
@@ -48,9 +48,9 @@ export class GithubPullRequestCacheApi implements PullRequestCacheApi {
       { request: `GET /pulls/${pullRequest}` },
       'a pull request object'
     );
-    if (!record(body) || (body.state !== 'open' && body.state !== 'closed')) {
+    if (!isJsonRecord(body) || (body.state !== 'open' && body.state !== 'closed')) {
       throw new Error(
-        `Invalid pull request ${pullRequest} state ${JSON.stringify(record(body) ? body.state : body)}; expected "open" or "closed"`
+        `Invalid pull request ${pullRequest} state ${JSON.stringify(isJsonRecord(body) ? body.state : body)}; expected "open" or "closed"`
       );
     }
     return body.state;

@@ -63,6 +63,7 @@ importing the specific module in new code:
 | `github-retry.ts`         | One retry policy for GitHub reads over `fetch` and `gh`; built-ins only, so safe without install         |
 | `fs.ts`                   | Cross-platform `removePaths` (no spawned `rm`)                                                           |
 | `fs-assert.ts`            | `assertFile`/`assertDirectory` (throw) + `fileError` (collect)                                           |
+| `script-guards.ts`        | Dependency-free JSON object and integer guards (one failure format), SHA-256 digests, `toPosixPath`      |
 | `config.ts`               | Workspace definitions + root lint/format path lists                                                      |
 | `import-cycles.ts`        | TypeScript-resolved JS/TS graph scan shared by workspace checks and QA                                   |
 | `import-cycle-command.ts` | Builds the scanner's argv without loading the compiler                                                   |
@@ -825,6 +826,9 @@ Nothing under `generated/` is formatted; see `bunfig.toml` for the current exclu
   key. `workflow-hygiene.unit.test.ts` scans the workflow policy tests for the rest; when
   a workflow-wide fact is the point (a count, a single-step composite), put
   `// whole-file: <reason>` on the line above.
+- **Guard untrusted JSON with `lib/script-guards.ts`**, not a private `object()`/`positive()` copy:
+  its failures name the label, the expected shape and the received value. It imports only
+  Node built-ins, so the `changes` jobs and `lib/rust-lanes.ts` can load it before `bun install`.
 - **Wrap third-party tools** behind a project-owned module (see `lib/changelog.ts`
   around git-cliff) so the integration is testable and swappable.
 

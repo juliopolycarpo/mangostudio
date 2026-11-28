@@ -49,6 +49,7 @@ on:
       - "scripts/bench/rust-test-inventory.ts"
       - "scripts/lib/rust-lanes.ts"
       - "scripts/ci/rust-lanes.ts"
+      - "scripts/lib/script-guards.ts"
       - "scripts/lib/changed-paths.ts"
       - "scripts/ci/changed-paths.ts"
       - "scripts/lib/ci-lanes.ts"

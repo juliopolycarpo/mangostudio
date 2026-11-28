@@ -16,6 +16,7 @@ import {
 } from './distribution-manifest';
 import { captureCommand } from './exec';
 import type { BinaryTarget, ReleasePlatformId } from './release-targets';
+import { isJsonRecord } from './script-guards';
 
 const BUN_VERSION_FILE = join(ROOT_DIR, '.bun-version');
 const CACHE_DIR = join(ROOT_DIR, '.mango', 'artifacts', 'bun-cross');
@@ -171,13 +172,9 @@ function hostLibc(arch: 'x64' | 'arm64'): 'glibc' | 'musl' | null {
   if (loaders.glibc.some((path) => existsSync(path))) return 'glibc';
 
   const report: unknown = process.report?.getReport();
-  const header = isRecord(report) ? report.header : undefined;
-  const glibcVersion = isRecord(header) ? header.glibcVersionRuntime : undefined;
+  const header = isJsonRecord(report) ? report.header : undefined;
+  const glibcVersion = isJsonRecord(header) ? header.glibcVersionRuntime : undefined;
   return typeof glibcVersion === 'string' && glibcVersion.length > 0 ? 'glibc' : null;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
 }
 
 /**
@@ -257,7 +254,7 @@ async function readProvenance(installDir: string): Promise<BunRuntimeProvenance 
   if (!(await file.exists())) return null;
   try {
     const recorded: unknown = await file.json();
-    if (!isRecord(recorded) || typeof recorded.sha256 !== 'string') return null;
+    if (!isJsonRecord(recorded) || typeof recorded.sha256 !== 'string') return null;
     return {
       source: 'channel',
       revision: null,

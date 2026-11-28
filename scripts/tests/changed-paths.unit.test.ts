@@ -403,6 +403,8 @@ describe('relevance policy parity', () => {
         ...sharedDetectorInputs,
         'scripts/lib/rust-lanes.ts',
         'scripts/ci/rust-lanes.ts',
+        // rust-lanes.ts imports it.
+        'scripts/lib/script-guards.ts',
       ];
       const matches = (globs: readonly string[]) =>
         globs.some((glob) => new Bun.Glob(glob).match(path));

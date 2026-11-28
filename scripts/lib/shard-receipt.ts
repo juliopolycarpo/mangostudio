@@ -4,6 +4,8 @@
 // omitted duration/attempts/findings are unavailable (null), never measured zero
 // or an invented first attempt. A malformed field is invalid in either format.
 
+import { isJsonRecord } from './script-guards';
+
 export type ShardIdentity = number | string;
 
 export interface CurrentShardReceipt {
@@ -38,8 +40,6 @@ export type ParsedShardReceipt =
   | { readonly kind: 'invalid'; readonly why: string };
 
 const invalid = (why: string): ParsedShardReceipt => ({ kind: 'invalid', why });
-const record = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 // `String` for numbers so NaN and Infinity are not reported as JSON's `null`.
 const found = (value: unknown): string =>
@@ -78,7 +78,8 @@ export const validateShardReceipt = (
   value: unknown,
   requirements: ReceiptRequirements = {}
 ): ParsedShardReceipt => {
-  if (!record(value)) return invalid(`shard-meta.json must be an object (found ${found(value)})`);
+  if (!isJsonRecord(value))
+    return invalid(`shard-meta.json must be an object (found ${found(value)})`);
   const current = value.schemaVersion === 1;
   if (value.schemaVersion !== undefined && !current) {
     return invalid(

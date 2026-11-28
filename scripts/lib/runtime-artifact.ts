@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -6,6 +5,7 @@ import type { RuntimeProfile } from './distribution-manifest';
 import { readExecutableHeader } from './executable-header';
 import type { BinaryTarget, ReleasePlatformId } from './release-targets';
 import { prebuiltRuntimePath, runtimeHeaderProblems, runtimeVersionProblem } from './runtime-build';
+import { sha256OfBytes } from './script-guards';
 
 export interface RuntimeArtifactIdentity {
   readonly sourceSha: string;
@@ -24,10 +24,6 @@ export interface RuntimeArtifactReceipt extends RuntimeArtifactIdentity {
 
 function runtimeReceiptPath(binary: string): string {
   return join(dirname(binary), 'runtime-build.json');
-}
-
-function runtimeDigest(bytes: Uint8Array): string {
-  return createHash('sha256').update(bytes).digest('hex');
 }
 
 /** Record the identity and bytes of a runtime staged by the build command.
@@ -53,7 +49,7 @@ export function writeRuntimeArtifactReceipt(
     sourceSha: identity.sourceSha,
     version: identity.version,
     profile: identity.profile,
-    sha256: runtimeDigest(bytes),
+    sha256: sha256OfBytes(bytes),
     size: bytes.length,
     reportedVersion: reportedVersion?.trim() ?? null,
   };
@@ -101,7 +97,7 @@ export function readRuntimeArtifactReceipt(
     );
   }
   const bytes = readFileSync(path);
-  const actualSha = runtimeDigest(bytes);
+  const actualSha = sha256OfBytes(bytes);
   if (bytes.length === 0 || row.size !== bytes.length || row.sha256 !== actualSha) {
     throw new Error(
       `expected ${target.arch} runtime: ${String(row.size)} bytes SHA256 ${String(row.sha256)} | received: ${bytes.length} bytes SHA256 ${actualSha}`

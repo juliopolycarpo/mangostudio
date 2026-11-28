@@ -3,6 +3,7 @@
 // script and its imports dependency-free: Gate does not run `bun install`.
 import { appendFileSync } from 'node:fs';
 
+import { isJsonRecord } from '../lib/script-guards';
 import { cacheFamily } from './cache-families';
 import {
   BYTES_PER_GB,
@@ -54,10 +55,6 @@ export const CACHE_REPORT_LIMITS: CacheReportLimits = {
   reportTimeoutMs: 15_000,
   maxPages: 50,
 };
-
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function natural(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 0;
@@ -114,7 +111,11 @@ async function inventory(
     for (let page = 1; page <= limits.maxPages; page++) {
       const body = await boundedRead((signal) => api.listCaches(page, signal), started, limits);
       pages++;
-      if (!record(body) || !natural(body.total_count) || !Array.isArray(body.actions_caches)) {
+      if (
+        !isJsonRecord(body) ||
+        !natural(body.total_count) ||
+        !Array.isArray(body.actions_caches)
+      ) {
         throw new Error(`Malformed cache page ${page}; expected total_count and actions_caches`);
       }
       if (expectedCount !== undefined && expectedCount !== body.total_count) {
@@ -129,7 +130,7 @@ async function inventory(
       }
       for (const [index, raw] of batch.entries()) {
         if (
-          !record(raw) ||
+          !isJsonRecord(raw) ||
           !natural(raw.id) ||
           raw.id === 0 ||
           typeof raw.key !== 'string' ||
@@ -185,7 +186,7 @@ export async function collectCacheReport(
     boundedRead((signal) => api.getAllowance(signal), started, limits).then(
       (body) => {
         if (
-          !record(body) ||
+          !isJsonRecord(body) ||
           !natural(body[STORAGE_LIMIT_FIELD]) ||
           body[STORAGE_LIMIT_FIELD] === 0 ||
           !natural(Number(body[STORAGE_LIMIT_FIELD]) * BYTES_PER_GB)
@@ -201,7 +202,7 @@ export async function collectCacheReport(
     boundedRead((signal) => api.getUsage(signal), started, limits).then(
       (body) => {
         if (
-          !record(body) ||
+          !isJsonRecord(body) ||
           !natural(body.active_caches_size_in_bytes) ||
           !natural(body.active_caches_count)
         ) {

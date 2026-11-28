@@ -55,8 +55,9 @@ import {
 } from './lib/release-targets';
 import { resolveReleaseVersion } from './lib/release-version';
 import type { RuntimeHandshakeProbe } from './lib/runtime-handshake';
+import { sha256OfFile } from './lib/script-guards';
 import { waitForServerReady } from './lib/wait-for-health';
-import { findChecksum, sha256File } from './release/verify-checksum';
+import { findChecksum } from './release/verify-checksum';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -272,7 +273,7 @@ function validateRawReleaseAssets(): void {
     [RAW_RUNTIME_ASSET_NAME, runtimePath],
   ] as const) {
     const expected = findChecksum(manifest, name);
-    const actual = sha256File(path);
+    const actual = sha256OfFile(path);
     if (actual !== expected) fail(`Checksum mismatch for ${name}`);
   }
   pass(`Raw hub and runtime assets verify against SHA256SUMS`);

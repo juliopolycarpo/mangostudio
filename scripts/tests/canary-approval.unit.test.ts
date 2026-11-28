@@ -968,3 +968,36 @@ test.each(['bad', 'A'.repeat(64)])(
     expect(deps.github.calls).toEqual([]);
   }
 );
+
+// Each guard names the value it rejected, so a failed approval load can be read without the payload.
+test('rejects a release record that is not an object, naming the value', async () => {
+  const { deps, payload, promotion, builderBundle } = await fixture();
+  durable(deps, payload, promotion, builderBundle);
+  deps.github.release = { status: 200, body: null };
+  await expect(loadCanaryApproval(source, VERSION, EXECUTION, deps)).rejects.toThrow(
+    'Invalid release evidence: expected object; received null'
+  );
+});
+test('rejects a release evidence asset whose digest is malformed, naming the value', async () => {
+  const { deps, payload, promotion, builderBundle } = await fixture();
+  durable(deps, payload, promotion, builderBundle);
+  deps.github.assets = deps.github.assets.map((asset, index) =>
+    index === 0 ? { ...(asset as Record<string, unknown>), digest: 'sha256:short' } : asset
+  );
+  await expect(loadCanaryApproval(source, VERSION, EXECUTION, deps)).rejects.toThrow(
+    'Invalid evidence asset digest: expected sha256:64 lowercase hex; received "sha256:short"'
+  );
+});
+test('rejects an approval artifact digest and job timestamp that are malformed, naming the value', async () => {
+  const digestCase = await fixture();
+  addApproval(digestCase.deps, digestCase.payload).artifact.digest = 'not-a-digest';
+  await expect(loadCanaryApproval(source, VERSION, EXECUTION, digestCase.deps)).rejects.toThrow(
+    'Invalid approval artifact digest: expected sha256:64 lowercase hex; received "not-a-digest"'
+  );
+
+  const timestampCase = await fixture();
+  addApproval(timestampCase.deps, timestampCase.payload).job.started_at = '2026-11-04 10:00:00';
+  await expect(loadCanaryApproval(source, VERSION, EXECUTION, timestampCase.deps)).rejects.toThrow(
+    'Invalid approval start: expected canonical UTC ISO timestamp; received "2026-11-04 10:00:00"'
+  );
+});

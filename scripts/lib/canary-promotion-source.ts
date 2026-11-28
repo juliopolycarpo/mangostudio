@@ -1,6 +1,7 @@
 import { type CanaryDistribution, resolveCanaryDistribution } from './canary-promotion';
 import { type ApprovedArtifact, type ArtifactEvidence } from './distribution-artifact';
 import { parseGitHubTimestamp } from './github-timestamp';
+import { requireJsonRecord, requirePositiveSafeInteger } from './script-guards';
 
 /** Frozen CI identity selected before resolving any distribution metadata. */
 export type CanaryPromotionSelection = Pick<
@@ -12,20 +13,6 @@ export type CanaryPromotionSelection = Pick<
 export interface CanaryPromotionApi {
   get(path: string): unknown;
   list(path: string, key: string): readonly unknown[];
-}
-
-function object(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`${label}: expected object; received ${JSON.stringify(value)}`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function integer(value: unknown, label: string): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
-    throw new Error(`${label}: expected positive safe integer; received ${JSON.stringify(value)}`);
-  }
-  return value;
 }
 
 /**
@@ -45,25 +32,25 @@ export function resolveCanaryPromotionSource(
       `Promotion source SHA: expected full lowercase SHA; received ${source.sourceSha}`
     );
   }
-  integer(source.runId, 'Promotion run ID');
-  integer(source.runAttempt, 'Promotion run attempt');
+  requirePositiveSafeInteger(source.runId, 'Promotion run ID');
+  requirePositiveSafeInteger(source.runAttempt, 'Promotion run attempt');
   const base = `repos/${source.repository}/actions`;
-  const workflow = object(api.get(`${base}/workflows/ci.yml`), 'CI workflow');
-  const workflowId = integer(workflow.id, 'CI workflow ID');
+  const workflow = requireJsonRecord(api.get(`${base}/workflows/ci.yml`), 'CI workflow');
+  const workflowId = requirePositiveSafeInteger(workflow.id, 'CI workflow ID');
   if (workflow.path !== '.github/workflows/ci.yml' || workflow.state !== 'active') {
     throw new Error(
       `CI workflow: expected active .github/workflows/ci.yml; received ${JSON.stringify(workflow)}`
     );
   }
-  const rawRun = object(
+  const rawRun = requireJsonRecord(
     api.get(`${base}/runs/${source.runId}/attempts/${source.runAttempt}`),
     'Frozen CI attempt'
   );
-  const repository = object(rawRun.repository, 'CI repository');
-  const headRepository = object(rawRun.head_repository, 'CI head repository');
-  const repositoryId = integer(repository.id, 'CI repository ID');
-  integer(headRepository.id, 'CI head repository ID');
-  integer(rawRun.run_number, 'CI run number');
+  const repository = requireJsonRecord(rawRun.repository, 'CI repository');
+  const headRepository = requireJsonRecord(rawRun.head_repository, 'CI head repository');
+  const repositoryId = requirePositiveSafeInteger(repository.id, 'CI repository ID');
+  requirePositiveSafeInteger(headRepository.id, 'CI head repository ID');
+  requirePositiveSafeInteger(rawRun.run_number, 'CI run number');
   const expectedUrl = `https://github.com/${source.repository}/actions/runs/${source.runId}`;
   if (
     rawRun.id !== source.runId ||
@@ -86,11 +73,11 @@ export function resolveCanaryPromotionSource(
   }
   const jobs = api.list(`${base}/runs/${source.runId}/jobs?filter=all&per_page=100`, 'jobs');
   const producers = jobs
-    .map((job) => object(job, 'CI job'))
+    .map((job) => requireJsonRecord(job, 'CI job'))
     .filter((job) => job.name === 'Distribution / Build immutable distribution');
   for (const producer of producers) {
-    integer(producer.run_attempt, 'Distribution producer attempt');
-    integer(producer.id, 'Distribution producer ID');
+    requirePositiveSafeInteger(producer.run_attempt, 'Distribution producer attempt');
+    requirePositiveSafeInteger(producer.id, 'Distribution producer ID');
     if (producer.run_id !== source.runId || producer.head_sha !== source.sourceSha) {
       throw new Error(
         `Distribution producer: expected run ${source.runId} source ${source.sourceSha}; received ${JSON.stringify(producer)}`
@@ -122,7 +109,7 @@ export function resolveCanaryPromotionSource(
   }
   const artifacts = api.list(`${base}/runs/${source.runId}/artifacts?per_page=100`, 'artifacts');
   for (const artifact of artifacts) {
-    const metadata = object(artifact, 'Distribution artifact');
+    const metadata = requireJsonRecord(artifact, 'Distribution artifact');
     if (typeof metadata.name !== 'string') {
       throw new Error(
         `Distribution artifact name: expected string; received ${JSON.stringify(metadata.name)}`
@@ -130,7 +117,13 @@ export function resolveCanaryPromotionSource(
     }
   }
   return resolveCanaryDistribution(
-    { ...source, producerAttempt: integer(producer.run_attempt, 'Distribution producer attempt') },
+    {
+      ...source,
+      producerAttempt: requirePositiveSafeInteger(
+        producer.run_attempt,
+        'Distribution producer attempt'
+      ),
+    },
     version,
     {
       run: rawRun as unknown as ArtifactEvidence['run'],

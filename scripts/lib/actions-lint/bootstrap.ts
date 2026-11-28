@@ -4,12 +4,12 @@
 // ignored `.mango/artifacts/tools/` cache. Nothing unverified is ever
 // executed, and a populated cache works fully offline.
 
-import { createHash } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, join, win32 } from 'node:path';
 
 import { extractTarArchive, openTarArchive } from '../archive';
 import { ROOT_DIR } from '../config';
+import { sha256OfBytes } from '../script-guards';
 import {
   extractZipArchive,
   openZipArchive,
@@ -103,10 +103,6 @@ export function assertSafeArchiveEntries(entries: string[]): void {
   }
 }
 
-function sha256Hex(bytes: Uint8Array): string {
-  return createHash('sha256').update(bytes).digest('hex');
-}
-
 /** Cache location of a tool's extracted install directory. */
 function toolInstallDir(cacheDir: string, entry: ToolManifestEntry, platform: PlatformKey): string {
   return join(cacheDir, entry.name, entry.version, platform);
@@ -156,7 +152,7 @@ export async function installTool(
   const url = toolAssetUrl(entry, platform);
   const bytes = await io.download(url);
 
-  const actual = sha256Hex(bytes);
+  const actual = sha256OfBytes(bytes);
   if (actual !== asset.sha256) {
     throw new Error(
       `SHA-256 mismatch for ${asset.assetName}: expected ${asset.sha256}, got ${actual}. ` +

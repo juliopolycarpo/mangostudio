@@ -8,6 +8,7 @@ import {
   STANDARD_RETRY_POLICY,
   UnstableListing,
 } from './github-retry';
+import { requireJsonRecord, requirePositiveSafeInteger } from './script-guards';
 
 /** Captured gh result; credentials stay in gh's normal environment and keychain. */
 export interface GhCommandResult {
@@ -95,8 +96,8 @@ export class CanaryGitHub {
     const releases = await this.list(`${this.base}/releases?per_page=100`);
     const matches: Record<string, unknown>[] = [];
     for (const entry of releases) {
-      const release = object(entry, 'release listing entry');
-      positiveId(release.id, 'release listing ID');
+      const release = requireJsonRecord(entry, 'release listing entry');
+      requirePositiveSafeInteger(release.id, 'release listing ID');
       if (
         typeof release.tag_name !== 'string' ||
         release.tag_name.length === 0 ||
@@ -122,10 +123,10 @@ export class CanaryGitHub {
     const response = await this.getJson(`${this.base}/git/ref/tags/${encodeURIComponent(tag)}`);
     if (response.status === 404) return response;
     requireOk(response.status, 'tag reference');
-    let current = object(response.body, 'tag reference').object;
+    let current = requireJsonRecord(response.body, 'tag reference').object;
     const seen = new Set<string>();
     for (let depth = 0; depth < 8; depth += 1) {
-      const target = object(current, 'tag target');
+      const target = requireJsonRecord(current, 'tag target');
       if (typeof target.sha !== 'string' || !/^[a-f0-9]{40}$/.test(target.sha)) {
         throw new Error(
           `Invalid tag target SHA: ${String(target.sha)}; expected full lowercase SHA`
@@ -139,14 +140,14 @@ export class CanaryGitHub {
       seen.add(target.sha);
       const annotation = await this.getJson(`${this.base}/git/tags/${target.sha}`);
       requireOk(annotation.status, 'annotated tag');
-      current = object(annotation.body, 'annotated tag').object;
+      current = requireJsonRecord(annotation.body, 'annotated tag').object;
     }
     throw new Error('Annotated tag depth exceeds8; expected bounded tag chain ending in commit');
   }
 
   /** Read every asset page before deciding release completeness. Example: await client.listAssets(123). */
   async listAssets(releaseId: number): Promise<readonly unknown[]> {
-    positiveId(releaseId, 'release ID');
+    requirePositiveSafeInteger(releaseId, 'release ID');
     return this.list(`${this.base}/releases/${releaseId}/assets?per_page=100`);
   }
 
@@ -174,7 +175,7 @@ export class CanaryGitHub {
 
   /** Download a small release evidence asset without rendering bytes or credentials. Example: await client.readAsset(456). */
   async readAsset(assetId: number): Promise<GitHubResponse<Uint8Array>> {
-    positiveId(assetId, 'asset ID');
+    requirePositiveSafeInteger(assetId, 'asset ID');
     return await Promise.resolve(
       this.read(`${this.base}/releases/assets/${assetId}`, 'application/octet-stream')
     );
@@ -216,7 +217,7 @@ export class CanaryGitHub {
       if (key === undefined) {
         values = page;
       } else {
-        const collection = object(page, 'GitHub page');
+        const collection = requireJsonRecord(page, 'GitHub page');
         if (!Number.isSafeInteger(collection.total_count) || Number(collection.total_count) < 0) {
           throw new Error(
             `GitHub page total_count: expected nonnegative safe integer; received ${String(collection.total_count)}`
@@ -242,7 +243,7 @@ export class CanaryGitHub {
     const seen = new Set<number>();
     for (const entry of entries) {
       if (!entry || typeof entry !== 'object' || !('id' in entry)) continue;
-      positiveId(entry.id, 'paginated entry ID');
+      requirePositiveSafeInteger(entry.id, 'paginated entry ID');
       // An entry shifting to the next page while the listing is being read shows up as a repeat.
       if (seen.has(Number(entry.id)))
         throw new UnstableListing(`Duplicate GitHub paginated entry ID: ${String(entry.id)}`);
@@ -390,15 +391,4 @@ function startsWithHttpStatusLine(stdout: Uint8Array): boolean {
 
 function requireOk(status: number, name: string): void {
   if (status !== 200) throw new Error(`GitHub ${name}: expected HTTP200; received HTTP${status}`);
-}
-function object(value: unknown, name: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`GitHub ${name}: expected object`);
-  }
-  return value as Record<string, unknown>;
-}
-function positiveId(value: unknown, name: string): void {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
-    throw new Error(`Invalid ${name}: expected positive safe integer; received ${String(value)}`);
-  }
 }

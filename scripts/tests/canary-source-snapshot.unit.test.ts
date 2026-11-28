@@ -317,6 +317,16 @@ test('no eligible CI fails without scheduler HEAD substitution', async () => {
     `expected a completed successful main push CI run created since ${WINDOW_START} | received: none`
   );
 });
+test.each([
+  [null, 'Invalid repository: expected object; received null'],
+  [[], 'Invalid repository: expected object; received []'],
+  [{ id: 0 }, 'Invalid repository ID: expected positive safe integer; received 0'],
+  [{ id: '1' }, 'Invalid repository ID: expected positive safe integer; received "1"'],
+])('repository record %j fails naming the rejected value', async (body, message) => {
+  const deps = new FakeSnapshotDependencies();
+  deps.values.set(BASE, { status: 200, body });
+  await expect(resolveCanarySourceSnapshot(execution, deps)).rejects.toThrow(message);
+});
 test('initial selection lists only runs created inside the retention window', async () => {
   const deps = new FakeSnapshotDependencies();
   await resolveCanarySourceSnapshot(execution, deps);

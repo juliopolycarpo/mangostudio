@@ -1,16 +1,11 @@
 #!/usr/bin/env bun
 // Verify one release asset against the SHA256SUMS manifest shipped beside it.
 
-import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 
 import { error, success } from '../lib/runner';
-
-/** Return a file's SHA-256 digest. // Usage: sha256File('release-assets/app.tar.gz') */
-export function sha256File(filePath: string): string {
-  return createHash('sha256').update(readFileSync(filePath)).digest('hex');
-}
+import { sha256OfFile } from '../lib/script-guards';
 
 /** Find an asset checksum in a sha256sum-compatible manifest. // Usage: findChecksum(manifest, 'app.tar.gz') */
 export function findChecksum(manifest: string, assetName: string): string {
@@ -35,7 +30,7 @@ const main = (): void => {
   if (!manifestPath || !assetPath || extra.length > 0) printHelp();
 
   const expected = findChecksum(readFileSync(manifestPath, 'utf8'), basename(assetPath));
-  const actual = sha256File(assetPath);
+  const actual = sha256OfFile(assetPath);
   if (actual !== expected) throw new Error(`Checksum mismatch for ${basename(assetPath)}`);
   success(`Checksum verified: ${basename(assetPath)}`);
 };

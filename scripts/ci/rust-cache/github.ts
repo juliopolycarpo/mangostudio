@@ -1,10 +1,6 @@
 import type { GithubFetch, GitHubRetry } from '../../lib/github-retry';
-import {
-  deleteActionsCache,
-  GithubActionsClient,
-  listActionsCaches,
-  record,
-} from '../actions-api/client';
+import { isJsonRecord } from '../../lib/script-guards';
+import { deleteActionsCache, GithubActionsClient, listActionsCaches } from '../actions-api/client';
 import { MAIN_CACHE_REF, MAIN_WRITER_EVENTS, RUST_CACHE_WRITERS } from './families';
 import type { RustCacheEntry } from './selection';
 
@@ -45,14 +41,14 @@ export function isMainCacheWriter(run: CacheWriterRun, repository: string): bool
 
 function parseRun(value: unknown): CacheWriterRun {
   if (
-    !record(value) ||
+    !isJsonRecord(value) ||
     !Number.isSafeInteger(value.id) ||
     Number(value.id) < 1 ||
     typeof value.path !== 'string' ||
     typeof value.event !== 'string' ||
     typeof value.status !== 'string' ||
     typeof value.head_branch !== 'string' ||
-    !record(value.head_repository) ||
+    !isJsonRecord(value.head_repository) ||
     typeof value.head_repository.full_name !== 'string'
   ) {
     throw new Error(

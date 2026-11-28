@@ -9,9 +9,10 @@
 // qualification jobs run it without `bun install`.
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 
 import { validateChangedPaths } from './changed-paths';
+import { toPosixPath } from './script-guards';
 
 /**
  * Paths whose change makes the Rust workspace lanes (fmt, clippy, tests,
@@ -59,6 +60,8 @@ export const RUST_WORKSPACE_PATHS = [
   // Changes to detection itself must exercise the lanes it selects.
   'scripts/lib/rust-lanes.ts',
   'scripts/ci/rust-lanes.ts',
+  // rust-lanes.ts imports it, so a change to it changes lane detection.
+  'scripts/lib/script-guards.ts',
   'scripts/lib/changed-paths.ts',
   'scripts/ci/changed-paths.ts',
   'scripts/lib/ci-lanes.ts',
@@ -210,10 +213,6 @@ function reachesResolver(start: string, resolver: string, imports: Map<string, s
   return false;
 }
 
-function toPosix(path: string): string {
-  return path.split(sep).join('/');
-}
-
 /**
  * Finds every Rust-backed test file under `<root>/apps/api/tests`: a
  * `*.test.ts` whose relative-import closure reaches
@@ -236,7 +235,7 @@ export function discoverQualificationTests(
   const tests = listSources(join(apiDir, 'tests')).filter((file) => file.endsWith('.test.ts'));
   for (const file of tests) {
     if (!reachesResolver(file, resolver, imports)) continue;
-    const path = toPosix(relative(apiDir, file));
+    const path = toPosixPath(relative(apiDir, file));
     if (excluded.includes(path)) continue;
     (path.startsWith('tests/unit/') ? unit : integration).push(path);
   }

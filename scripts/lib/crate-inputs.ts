@@ -15,7 +15,9 @@
 //     macro at all and is still an input of `cargo test`.
 
 import { readdirSync, readFileSync } from 'node:fs';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, join, relative } from 'node:path';
+
+import { toPosixPath } from './script-guards';
 
 /** One file a crate reads from outside its own source file. */
 export interface CrateInput {
@@ -35,10 +37,6 @@ const PATH_ATTRIBUTE = /#\[path\s*=\s*"([^"]+)"\s*\]/g;
 const MANIFEST_DIR = 'env!("CARGO_MANIFEST_DIR")';
 // A literal directly after the manifest dir: `, "/../x"` (concat!) or `.join("../x")`.
 const AFTER_MANIFEST_DIR = /^\)*\s*(?:,\s*|\.join\(\s*)"([^"\n]*)"/;
-
-function toPosix(path: string): string {
-  return path.split(sep).join('/');
-}
 
 function lineOf(text: string, index: number): number {
   return text.slice(0, index).split('\n').length;
@@ -76,7 +74,7 @@ function stringLiterals(text: string): string[] {
 export function extractCrateInputs(source: string, text: string, crateDir: string): CrateInput[] {
   const found = new Map<string, CrateInput>();
   const add = (index: number, base: string, literal: string): void => {
-    const path = toPosix(join(base, literal.replace(/^\/+/, ''))).replace(/\/+$/, '');
+    const path = toPosixPath(join(base, literal.replace(/^\/+/, ''))).replace(/\/+$/, '');
     const trailing = /[\\/]$/.test(literal) ? '/' : '';
     found.set(path + trailing, { source, line: lineOf(text, index), path: path + trailing });
   };
@@ -137,7 +135,7 @@ export function scanCrateInputs(root: string): CrateInput[] {
     if (!crate.isDirectory()) continue;
     const crateDir = `crates/${crate.name}`;
     for (const file of listRustSources(join(cratesDir, crate.name))) {
-      const source = toPosix(relative(root, file));
+      const source = toPosixPath(relative(root, file));
       inputs.push(...extractCrateInputs(source, readFileSync(file, 'utf8'), crateDir));
     }
   }

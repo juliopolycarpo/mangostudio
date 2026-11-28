@@ -114,7 +114,7 @@ describe('frozen canary source', () => {
   test('every successful candidate still needs a valid run number to establish ordering', () => {
     expect(() =>
       selectCanarySource([run({ run_number: undefined }), run({ run_number: 11 })], repository, 42)
-    ).toThrow('Invalid run_number: undefined; expected positive safe integer');
+    ).toThrow('Invalid run_number: expected positive safe integer; received undefined');
   });
   test('identity failures identify the mismatched fields without logging unrelated API payloads', () => {
     let failure: unknown;
@@ -137,7 +137,7 @@ describe('frozen canary source', () => {
   });
   test('a malformed winning repository object names its field and expected shape', () => {
     expect(() => selectCanarySource([run({ head_repository: null })], repository, 42)).toThrow(
-      'head_repository object'
+      'Invalid CI run 100 head_repository: expected object; received null'
     );
   });
   test('rejects ambiguous ordering and invalid lookup identity', () => {
@@ -149,7 +149,7 @@ describe('frozen canary source', () => {
       'expected positive safe integer'
     );
     expect(() => selectCanarySource([null], repository, 42)).toThrow(
-      'Expected workflow run object'
+      'Invalid workflow run: expected object; received null'
     );
   });
 });

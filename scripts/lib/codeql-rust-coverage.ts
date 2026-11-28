@@ -12,6 +12,7 @@
 //
 // Dependency-free: codeql.yml runs it before `bun install`.
 import { codeqlRustRelevant } from './ci-lanes';
+import { isJsonRecord } from './script-guards';
 
 /** Analysis key code scanning records for the `analyze-rust` job of codeql.yml. */
 export const CODEQL_RUST_ANALYSIS_KEY = '.github/workflows/codeql.yml:analyze-rust';
@@ -40,10 +41,6 @@ export type PathsBetween = (base: string, head: string) => readonly string[] | u
 /** Reads one page of an analyses listing by API path; throws on a failed request. */
 export type FetchAnalysesPage = (path: string) => unknown;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /**
  * API path of one page of main's CodeQL analyses, newest first.
  * @example
@@ -67,7 +64,7 @@ interface ValidRustAnalysis {
 function validRustAnalyses(analyses: readonly unknown[]): ValidRustAnalysis[] {
   const valid: ValidRustAnalysis[] = [];
   for (const entry of analyses) {
-    if (!isRecord(entry) || !isRecord(entry.tool)) continue;
+    if (!isJsonRecord(entry) || !isJsonRecord(entry.tool)) continue;
     const { commit_sha: sha, category, created_at: createdAt } = entry;
     if (
       entry.ref !== 'refs/heads/main' ||

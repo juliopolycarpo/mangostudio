@@ -1,4 +1,5 @@
 import { isValidSemver, normalizeVersion } from './release-version';
+import { requireJsonRecord, requirePositiveSafeInteger } from './script-guards';
 
 interface ExpectedAsset {
   readonly name: string;
@@ -64,8 +65,8 @@ export async function verifyCanaryReleasePublication(
     return { state: 'absent', releaseId: null, present: [], missing: [...assets.values()] };
   }
   requireSuccess(response.status, `release ${tag}`);
-  const release = object(response.body, `release ${tag}`);
-  const releaseId = positiveInteger(release.id, `release ${tag} ID`);
+  const release = requireJsonRecord(response.body, `release ${tag}`);
+  const releaseId = requirePositiveSafeInteger(release.id, `release ${tag} ID`);
   const expectedUrl = `https://github.com/${expected.repository}/releases/tag/${tag}`;
   const apiUrl = `https://api.github.com/repos/${expected.repository}/releases/${releaseId}`;
   const draftUrlPrefix = `https://github.com/${expected.repository}/releases/tag/untagged-`;
@@ -112,8 +113,8 @@ export async function verifyCanaryReleasePublication(
   const present = new Set<string>();
   const ids = new Set<number>();
   for (const value of existing) {
-    const asset = object(value, `release ${tag} asset`);
-    const id = positiveInteger(asset.id, `release ${tag} asset ID`);
+    const asset = requireJsonRecord(value, `release ${tag} asset`);
+    const id = requirePositiveSafeInteger(asset.id, `release ${tag} asset ID`);
     const name = asset.name;
     if (typeof name !== 'string' || !assets.has(name) || present.has(name) || ids.has(id)) {
       throw new Error(
@@ -192,7 +193,7 @@ function validateExpectation(
   }
   const assets = new Map<string, ExpectedAsset>();
   for (const value of expected.assets) {
-    const asset = object(value, 'expected release asset');
+    const asset = requireJsonRecord(value, 'expected release asset');
     if (
       typeof asset.name !== 'string' ||
       asset.name.length === 0 ||
@@ -214,22 +215,6 @@ function validateExpectation(
     assets.set(asset.name, { name: asset.name, size: asset.size, sha256: asset.sha256 });
   }
   return assets;
-}
-
-function object(value: unknown, label: string): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`Invalid ${label}: expected object; received ${JSON.stringify(value)}`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function positiveInteger(value: unknown, label: string): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
-    throw new Error(
-      `Invalid ${label}: expected positive safe integer; received ${JSON.stringify(value)}`
-    );
-  }
-  return value;
 }
 
 function requireSuccess(status: number, label: string): void {
