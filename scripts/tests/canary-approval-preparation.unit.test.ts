@@ -669,7 +669,9 @@ test.each([
     script: 'qualify-canary-source' as const,
     reason:
       'ci.yml: source validation contract differs from qualification revision; expected identical reviewed workflow bytes, select a compatible successful source',
-    expected: 'ci.yml: source validation contract differs from qualification revision',
+    // The refusal names the recovery: nothing in canary.yml selects another source (#2725).
+    expected:
+      'ci.yml: source validation contract differs from qualification revision; the workflow changed on main after the newest successful CI run. Wait for a successful main CI run at a commit with the current workflows, then run Canary again',
   },
   {
     script: 'load-canary-approval' as const,
