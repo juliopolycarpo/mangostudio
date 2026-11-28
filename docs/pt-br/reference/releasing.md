@@ -261,6 +261,26 @@ arquivos e o layout de dois binários permanecem iguais. Os toolchains Rust são
   `--version`, a linha que o doctor do hub e o provisionamento WSL/SSH comparam
   literalmente. Um binário sem carimbo (`cargo build`, `cargo test`) informa a
   versão do manifesto.
+- **Digest das entradas.** Em um push para a main, cada job de runtime shipping
+  calcula um hash de tudo que determina o binário sem carimbo
+  (`scripts/lib/runtime-input-digest.ts`): os arquivos versionados dos cinco
+  crates que o runtime linka (sem `tests/`, `examples/` e `benches/`),
+  `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo/config.toml`, os
+  JSON gerados do contrato do runtime e o `login.json` que os crates embutem, a
+  action setup-zigbuild, o comando do cargo, o perfil, o ambiente que afeta a
+  compilação e as versões de `rustc`, zig e cargo-zigbuild que o job observa. Ele
+  envia a saída do próprio cargo, que o carimbo nunca toca, como
+  `runtime-unstamped-<plataforma>-<digest>` com um `receipt.json` (sete dias) e
+  imprime o digest ao lado do SHA-256 do binário no resumo do step, para que um
+  mantenedor confira que duas execuções com o mesmo digest geraram o mesmo
+  binário. Nada lê o artefato ainda e uma falha nesses steps só emite um aviso. A
+  imagem do runner, o Xcode e o MSVC ficam no recibo, não no digest: mudam quase
+  toda semana e o job não consegue fixá-los.
+  `runtime-input-digest-policy.unit.test.ts` falha quando um crate passa a ler um
+  arquivo ou variável que o digest não cobre. Localmente, `bun
+./scripts/ci/runtime-input-digest.ts digest --platform linux-x64-musl
+--profile shipping` o imprime (`--manifest` mostra as entradas, `--allow-dirty`
+  inclui as não commitadas).
 - **Verificações.** `scripts/build-runtime.ts` e o staging com `--runtime-dir`
   leem o cabeçalho de cada binário (`scripts/lib/executable-header.ts`): formato,
   CPU, loader glibc ou binário estático, e nenhum símbolo `GLIBC_` acima do piso.

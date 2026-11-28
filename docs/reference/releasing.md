@@ -397,6 +397,26 @@ stay the same. Rust toolchains remain:
   verbatim, and the post-build `--version` check is what catches an optimizer
   that folded the slot. An unstamped binary (`cargo build`, `cargo test`)
   reports the manifest version.
+- **Input digest.** On a push to main, each shipping runtime job hashes
+  everything that determines the unstamped binary
+  (`scripts/lib/runtime-input-digest.ts`): the tracked files of the five crates
+  the runtime links (not their `tests/`, `examples/` or `benches/`),
+  `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo/config.toml`, the
+  generated runtime-contract JSON and `login.json` the crates embed, the
+  setup-zigbuild action, the cargo command, the profile, the build-related
+  environment, and the `rustc`, zig and cargo-zigbuild versions the job
+  observes. It uploads cargo's own output, which stamping never touches, as
+  `runtime-unstamped-<platform>-<digest>` with a `receipt.json` (seven days),
+  and prints the digest beside the binary's SHA-256 in the step summary, so a
+  maintainer can check that two runs with one digest built one binary. Nothing
+  reads the artifact yet and a failure in these steps only warns. The runner
+  image, Xcode and MSVC versions are in the receipt but not in the digest:
+  they change about weekly and the job cannot pin them.
+  `runtime-input-digest-policy.unit.test.ts` fails when a crate starts reading a
+  file or variable the digest does not cover. Locally, `bun
+./scripts/ci/runtime-input-digest.ts digest --platform linux-x64-musl
+--profile shipping` prints it (`--manifest` shows the inputs, `--allow-dirty`
+  hashes uncommitted ones).
 - **Checks.** `scripts/build-runtime.ts` and the `--runtime-dir` staging both
   read each binary's header (`scripts/lib/executable-header.ts`): ELF, Mach-O,
   or PE; x64 or arm64; the glibc loader for gnu, no interpreter for musl; no
