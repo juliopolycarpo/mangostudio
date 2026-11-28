@@ -251,6 +251,24 @@ export function parseCanaryPromotionReceipt(
         `Invalid qualification codeqlRust: expected analyzed boolean and reason; received ${JSON.stringify(codeqlRust)}`
       );
   }
+  // Absent in receipts written before skipped Cargo Shim and Protocol CI lanes needed coverage.
+  if (qualification.laneCoverage !== undefined) {
+    const laneCoverage = requireJsonRecord(
+      qualification.laneCoverage,
+      'qualification laneCoverage'
+    );
+    for (const lane of ['cargo', 'protocol']) {
+      const entry = requireJsonRecord(laneCoverage[lane], `qualification laneCoverage ${lane}`);
+      if (
+        typeof entry.ranOnSource !== 'boolean' ||
+        typeof entry.reason !== 'string' ||
+        entry.reason.length === 0
+      )
+        throw new Error(
+          `Invalid qualification laneCoverage ${lane}: expected ranOnSource boolean and reason; received ${JSON.stringify(entry)}`
+        );
+    }
+  }
   if (!Array.isArray(qualification.siblings))
     throw new Error('Invalid qualification siblings: expected receipt array');
   const workflows = new Set<string>();

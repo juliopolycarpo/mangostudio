@@ -100,9 +100,36 @@ differs from the qualification revision. The receipt records the outcome in
 `codeqlRust`. This lookup needs `security-events: read` in the three `canary.yml`
 jobs that qualify.
 
-Cargo Shim and Protocol CI do not have this protection: their push path filter
-compares the push's own range, so a Rust change whose run was cancelled does not
-force the next push to rerun them.
+Cargo Shim and Protocol CI follow the same rule when the lane did not run in
+full on the SHA: no run exists because the push range proved it irrelevant, or
+Protocol CI's run skipped its compiled jobs (`TypeScript`, `cargo-deny`,
+`Schema equality and round trip`) for a push that touched only prose guides. The
+push path filter compares only the push's own range, so a Rust change whose run
+was cancelled or failed does not force the next push to rerun them, and a green
+Protocol Gate over a skipped matrix validates nothing earlier. Such a SHA counts
+only when a main commit covers it: the qualifier reads one page each of the
+workflow's newest successful `push` and `workflow_dispatch` runs on `main`
+(`status=success`, newest 20 per event; a page without an event filter would
+also hold pull request runs from a fork's `main`) as nominations, merges them by
+run number and tries the newest five distinct commits. A failed read of either
+page rejects the SHA. A candidate needs Actions evidence, as above, restricted to those two
+events (a dispatch runs every job of both workflows): a completed run for that
+exact SHA on `main` in this repository, from a workflow file with the
+qualification revision's bytes, whose latest attempt has `Cargo Shim Gate`
+successful (Cargo Shim), or `Protocol Gate`, `TypeScript`, `cargo-deny` and
+`Schema equality and round trip` successful (Protocol CI). It covers the SHA
+when it is the SHA itself, or when a complete linear compare in either
+direction (under 300 files, both sides of renames) matches no Cargo Shim
+relevance path (`QUALIFICATION_PATHS`) or compiled protocol path
+(`needsCompiledProtocolValidation`, the predicate `protocol-ci.yml` itself uses;
+the known prose guides are not compiled paths). A SHA whose lane has no covering
+commit is rejected, as is any failed or malformed lookup. To recover, re-run the
+cancelled or failed run of the newest relevant commit on `main`, dispatch the
+workflow on `main` while main has no newer relevant change, or land a relevant
+change. The receipt records the outcome in `laneCoverage` (`cargo` and
+`protocol`, each with `ranOnSource` and a reason); receipts without it predate
+the rule. A lane whose run on the SHA ran every evidence job needs no earlier
+run.
 
 Authentication failures, failed API calls, malformed pages and missing mandatory
 results fail closed. The receipt records source identity, job IDs and attempts,

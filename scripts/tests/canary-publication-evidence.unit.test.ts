@@ -224,6 +224,45 @@ describe('CodeQL Rust coverage in the persisted receipt', () => {
   });
 });
 
+describe('Cargo Shim and Protocol CI coverage in the persisted receipt', () => {
+  const covered = {
+    cargo: { ranOnSource: false, reason: 'no Cargo Shim-relevant path differs' },
+    protocol: { ranOnSource: true, reason: 'Protocol CI ran' },
+  };
+
+  test('accepts a recorded coverage and still accepts receipts without the field', () => {
+    const { receipt, sha } = fixture();
+    expect(receipt.qualification.laneCoverage).toBeUndefined();
+    expect(parseCanaryPromotionReceipt(JSON.stringify(receipt), 'owner/repo', sha)).toEqual(
+      receipt
+    );
+    Object.assign(receipt.qualification, { laneCoverage: covered });
+    expect(parseCanaryPromotionReceipt(JSON.stringify(receipt), 'owner/repo', sha)).toEqual(
+      receipt
+    );
+  });
+
+  test.each([
+    { ...covered, cargo: { ranOnSource: 'yes', reason: 'covered' } },
+    { ...covered, cargo: { ranOnSource: false, reason: '' } },
+    { ...covered, protocol: { ranOnSource: true } },
+  ])('refuses malformed coverage %j and names the received value', (laneCoverage) => {
+    const { receipt, sha } = fixture();
+    Object.assign(receipt.qualification, { laneCoverage });
+    expect(() => parseCanaryPromotionReceipt(JSON.stringify(receipt), 'owner/repo', sha)).toThrow(
+      /Invalid qualification laneCoverage (cargo|protocol): expected ranOnSource boolean and reason; received/
+    );
+  });
+
+  test('refuses a coverage that omits a lane', () => {
+    const { receipt, sha } = fixture();
+    Object.assign(receipt.qualification, { laneCoverage: { cargo: covered.cargo } });
+    expect(() => parseCanaryPromotionReceipt(JSON.stringify(receipt), 'owner/repo', sha)).toThrow(
+      'qualification laneCoverage protocol'
+    );
+  });
+});
+
 test('retains frozen workflow and run identity separately from publisher revision', () => {
   const { raw, receipt, sha } = fixture();
   expect(
