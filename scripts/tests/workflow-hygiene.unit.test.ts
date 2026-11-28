@@ -1,11 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 
+import {
+  installActionPinViolations,
+  installActionTools,
+  repositoryInstallActionTools,
+} from './support/install-action-tools';
 import { readText } from './support/read-text';
 import { wholeFileWorkflowAssertions } from './support/whole-file-workflow-assertions';
 import {
   extractJobBlock,
   extractJobBlocks,
   extractStepBlocks,
+  extractStepBlocksUsing,
   githubScripts,
   runScriptLines,
 } from './support/workflow-blocks';
@@ -439,6 +445,115 @@ describe('workflow hygiene', () => {
     }
     // Guards against the policy silently covering zero workflows.
     expect(checked).toBeGreaterThan(0);
+  });
+});
+
+// Every `taiki-e/install-action` tool, in every workflow and composite action. A
+// bare name installs the newest release, so a tool release could change a gate's
+// verdict (cargo-deny's advisory handling, a semver-checks diagnostic) on a
+// commit nobody touched. Dependabot does not bump `tool:` strings: raising a pin
+// is a manual edit, and `docs/reference/testing.md` lists the versions.
+describe('install-action tools are pinned', () => {
+  const INSTALL = 'uses: taiki-e/install-action@0123456789abcdef0123456789abcdef01234567 # v2.0.0';
+
+  test('a repository-wide scan reaches every install-action step', () => {
+    // The walk keys off exact step indentation; a step written outside that shape
+    // would be exempt from the pin policy while the suite stayed green.
+    expect(
+      repositoryInstallActionTools().length,
+      'expected at least one install-action tool | received none'
+    ).toBeGreaterThan(0);
+    const files = [
+      ...workflowFiles().map((file) => ({ file, indent: 6 })),
+      ...compositeActionFiles().map((file) => ({ file, indent: 4 })),
+    ];
+    for (const { file, indent } of files) {
+      const text = readText(file);
+      const written = text.match(/uses: taiki-e\/install-action@/g)?.length ?? 0;
+      const reached = extractStepBlocksUsing(text, 'taiki-e/install-action', indent).length;
+      expect(
+        reached,
+        `${file}: expected every install-action step reached by the walk (${written} written) | received: ${reached}`
+      ).toBe(written);
+    }
+  });
+
+  test('every tool carries an exact @x.y.z and no tool appears at two versions', () => {
+    expect(installActionPinViolations(repositoryInstallActionTools())).toEqual([]);
+  });
+
+  test('installActionTools reads workflow and composite steps, comma lists and a missing tool', () => {
+    const workflow = [
+      'jobs:',
+      '  lint:',
+      '    steps:',
+      `      - ${INSTALL}`,
+      '        with:',
+      '          tool: cargo-deny@0.22.0, cargo-fuzz@0.13.2',
+      '      - uses: actions/checkout@abc',
+      '        with:',
+      '          tool: not-an-install',
+      `      - ${INSTALL}`,
+      '',
+    ].join('\n');
+    expect(installActionTools('w.yml', workflow, 6)).toEqual([
+      { file: 'w.yml', entry: 'cargo-deny@0.22.0' },
+      { file: 'w.yml', entry: 'cargo-fuzz@0.13.2' },
+      { file: 'w.yml', entry: '' },
+    ]);
+
+    const composite = [
+      'runs:',
+      '  steps:',
+      `    - ${INSTALL}`,
+      '      with:',
+      '        tool: cargo-zigbuild@0.24.1',
+      '',
+    ].join('\n');
+    expect(installActionTools('a.yml', composite, 4)).toEqual([
+      { file: 'a.yml', entry: 'cargo-zigbuild@0.24.1' },
+    ]);
+  });
+
+  test('installActionPinViolations accepts exact pins and the same version in two files', () => {
+    expect(
+      installActionPinViolations([
+        { file: 'a.yml', entry: 'cargo-deny@0.22.0' },
+        { file: 'b.yml', entry: 'cargo-deny@0.22.0' },
+      ])
+    ).toEqual([]);
+  });
+
+  test('installActionPinViolations rejects bare, latest, ranged, prerelease and missing tools', () => {
+    const received = [
+      'cargo-deny',
+      'cargo-deny@latest',
+      'cargo-deny@0.22',
+      'cargo-deny@^0.22.0',
+      'cargo-deny@0.22.0-rc.1',
+      '',
+    ];
+    const violations = installActionPinViolations(
+      received.map((entry) => ({ file: 'a.yml', entry }))
+    );
+    expect(violations).toHaveLength(received.length);
+    for (const entry of received) {
+      expect(violations).toContain(
+        `a.yml: expected tool: <name>@<major>.<minor>.<patch> | received: ${JSON.stringify(entry)}`
+      );
+    }
+  });
+
+  test('installActionPinViolations names a tool pinned at two versions', () => {
+    expect(
+      installActionPinViolations([
+        { file: 'a.yml', entry: 'cargo-deny@0.22.0' },
+        { file: 'b.yml', entry: 'cargo-deny@0.21.0' },
+        { file: 'c.yml', entry: 'cargo-fuzz@0.13.2' },
+      ])
+    ).toEqual([
+      'cargo-deny: expected one version across the repository | received: 0.22.0 (a.yml); 0.21.0 (b.yml)',
+    ]);
   });
 });
 
