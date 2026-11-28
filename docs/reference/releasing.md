@@ -436,17 +436,23 @@ stay the same. Rust toolchains remain:
   (never a pull request, the light profile, a dispatch or a release, which
   always compile). After the digest step, `scripts/ci/runtime-base-reuse.ts`
   lists the recent CI runs of this repository (at most 100 runs, 5 candidates,
-  60 s) and accepts a candidate only when all of these hold: a first-attempt
-  `ci.yml` push to main from this repository; its `Runtime <platform>` build
-  job succeeded (the run itself may have been cancelled later, which is why the
-  job decides, not the run); its commit is an ancestor of this one; exactly one
-  unexpired artifact carries this digest; its `receipt.json` parses strictly;
-  and the archive's SHA-256 equals both the receipt and the API digest. The
+  60 s) and accepts a candidate only when all of these hold: a `ci.yml` push to
+  main from this repository, read as its first attempt (`attempts/1`, so a
+  later re-run of the producer changes nothing); its `Runtime <platform>` build
+  job in that attempt succeeded (the run itself may have been cancelled later,
+  which is why the job decides, not the run); its commit is an ancestor of this
+  one; exactly one unexpired artifact carries this digest and was created
+  while that job ran. The download checks the ZIP's SHA-256 against the digest
+  the API recorded at upload; the verification then requires the `receipt.json`
+  to parse strictly and its binary SHA-256 to equal the extracted binary's. The
   binary must be unstamped and its header correct. Every refusal and every
   error before that point falls back to cargo with a warning. Once a base is
   verified the same `build-runtime.ts` stages, stamps and verifies it
   (`--prebuilt-unstamped`), and a failure there fails the job rather than
-  silently compiling. Reuse also needs an exact `rust-cache` hit, because the
+  silently compiling; the next push would pick the same base again, so the
+  job's error annotation says to run `gh variable set RUNTIME_REUSE --body
+false` (or delete the variable) and push again to compile from source. Reuse
+  also needs an exact `rust-cache` hit, because the
   post step would otherwise save an empty `target/` under the key. The reused
   base is not uploaded again: its seven days keep counting from the run that
   compiled it, and a 30-day `runtime-reuse-<platform>-<run>-<digest>-<sha256>`

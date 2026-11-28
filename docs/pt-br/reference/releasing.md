@@ -301,16 +301,22 @@ delete RUNTIME_REUSE` desliga) e vale só para o perfil shipping de um push
   compilam). Depois do step do digest, `scripts/ci/runtime-base-reuse.ts` lista as
   execuções recentes do CI deste repositório (no máximo 100 execuções, 5
   candidatas, 60 s) e só aceita uma candidata quando tudo isto vale: um push do
-  `ci.yml` na main, na primeira tentativa, deste repositório; o job `Runtime
-<plataforma>` dela teve sucesso (a execução pode ter sido cancelada depois,
-  por isso decide o job, não a execução); o commit dela é ancestral deste;
-  exatamente um artefato não expirado tem este digest; o `receipt.json` é
-  válido pela leitura estrita; e o SHA-256 do arquivo é igual ao do recibo e ao
-  digest da API. O binário precisa estar sem carimbo e com o cabeçalho correto.
-  Toda recusa e todo erro até esse ponto voltam ao cargo com um aviso. Com a base
-  verificada, o mesmo `build-runtime.ts` faz o staging, carimba e verifica
-  (`--prebuilt-unstamped`), e uma falha aí falha o job em vez de compilar em
-  silêncio. O reuso também exige um acerto exato do `rust-cache`, senão o
+  `ci.yml` na main deste repositório, lido como a primeira tentativa
+  (`attempts/1`, então um re-run posterior do produtor não muda nada); o job
+  `Runtime <plataforma>` dela, nessa tentativa, teve sucesso (a execução pode
+  ter sido cancelada depois, por isso decide o job, não a execução); o commit
+  dela é ancestral deste; exatamente um artefato não expirado tem este digest e
+  foi criado enquanto esse job rodava. O download confere o SHA-256 do ZIP com
+  o digest que a API registrou no upload; a verificação então exige que o
+  `receipt.json` seja válido pela leitura estrita e que o SHA-256 do binário
+  nele seja igual ao do binário extraído. O binário precisa estar sem carimbo e
+  com o cabeçalho correto. Toda recusa e todo erro até esse ponto voltam ao
+  cargo com um aviso. Com a base verificada, o mesmo `build-runtime.ts` faz o
+  staging, carimba e verifica (`--prebuilt-unstamped`), e uma falha aí falha o
+  job em vez de compilar em silêncio; o próximo push escolheria a mesma base,
+  então a anotação de erro do job manda rodar `gh variable set RUNTIME_REUSE
+--body false` (ou apagar a variável) e dar push de novo para compilar do
+  código-fonte. O reuso também exige um acerto exato do `rust-cache`, senão o
   post step salvaria um `target/` vazio sob a chave. A base reusada não é enviada
   de novo: seus sete dias continuam contando a partir da execução que a
   compilou, e um registro de 30 dias

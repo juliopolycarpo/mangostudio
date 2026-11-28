@@ -135,10 +135,12 @@ Every one of the source run's eight `Distribution / Runtime / Runtime <platform>
 jobs must be visible and successful. A job that ran the `Use reused runtime base`
 step reused an unstamped base (see the releasing guide). Canary then requires
 exactly one `runtime-reuse-<platform>-<run>-<digest>-<sha256>` artifact of that
-run, unexpired and created inside the job's window, and requires its producing
-run to be a first-attempt `ci.yml` push to `main` of this repository, an
-ancestor of the source, with a successful build job for that platform and no
-change to a runtime input path between the two. A missing, duplicate or
+run, unexpired and created inside the window of that job's latest attempt (a
+record an earlier attempt left under another producer's name is not counted),
+and requires its producing run, read as attempt 1, to be a `ci.yml` push to
+`main` of this repository, an ancestor of the source, with a successful build
+job for that platform in that attempt and no change to a runtime input path
+between the two. A later re-run of the producer does not affect this. A missing, duplicate or
 malformed record, or a producer that fails any check, rejects the source. The
 receipt records the outcome in `runtimeReuse` (`reused` with digest, binary
 SHA-256, producing run and commit, and `built`); the publication evidence
