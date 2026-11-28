@@ -251,8 +251,8 @@ describe('download retry budget', () => {
       }
     }
     // The counts prove the scan found the steps: an empty scan cannot pass.
-    expect(callers).toBe(3);
-    expect(declared).toEqual(['smoke-binary.yml: 3']);
+    expect(callers).toBe(4);
+    expect(declared).toEqual(['runtime-build.yml: 3', 'smoke-binary.yml: 3']);
   });
 });
 

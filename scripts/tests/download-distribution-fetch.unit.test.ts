@@ -135,6 +135,7 @@ describe('same-run distribution fetch', () => {
       'canary.yml',
       'release-dry-run.yml',
       'release.yml',
+      'runtime-build.yml',
       'smoke-binary.yml',
       'smoke-container.yml',
     ]);

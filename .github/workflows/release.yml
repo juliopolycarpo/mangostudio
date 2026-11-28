@@ -261,6 +261,7 @@ jobs:
       contents: read
       id-token: write # mint provenance for the stable release distribution
       attestations: write # persist provenance for stable release bundles
+      actions: read # only so the called runtime job may request it; a release never sets reuse
     uses: $/.github/workflows/distribution-build.yml
     with:
       version: ${{ needs.prepare.outputs.version }}

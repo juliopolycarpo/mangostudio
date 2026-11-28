@@ -231,6 +231,7 @@ jobs:
       contents: read
       id-token: write # mint the reusable builder's provenance attestation token
       attestations: write # persist provenance for main-push distribution bundles
+      actions: read # the runtime builds list runs and download a base with gh when they reuse one
     uses: $/.github/workflows/distribution-build.yml
     with:
       version: ${{ needs.changes.outputs.version }}
@@ -247,6 +248,8 @@ jobs:
       # those bundles.
       aot_order_platforms: ${{ github.event_name == 'pull_request' && 'linux-x64' || 'all' }}
       cache: true
+      # Takes effect only when the variable RUNTIME_REUSE is `true`; see runtime-build.yml.
+      reuse: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       frontend_artifact: ${{ needs.build.outputs.artifact }}
       frontend_bun_revision: ${{ needs.build.outputs.bun_revision }}
 
@@ -479,6 +482,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: read
+      actions: read # the called job requests it for reuse, which cache-seed mode never does
     uses: $/.github/workflows/runtime-build.yml
     with:
       version: ${{ needs.changes.outputs.version }}
