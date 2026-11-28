@@ -521,7 +521,9 @@ unit, stripping and unwinding, as described above. All 16 build cells exited 0.
 | release | CLI usage edit |       1 |              401.84 |   393.57 |       8.44 |       2105.05 |                         1/1 |
 
 Stamp cells changed only `MANGOSTUDIO_RELEASE_VERSION` to a distinct valid canary
-version and checked the resulting `--version`. The library rlib's path, bytes
+version and checked the resulting `--version`. That variable was a compile input when
+these cells were measured; the release version is now stamped into the linked binary,
+so the cell no longer recompiles anything. The library rlib's path, bytes
 and mtime remained unchanged. The release stamp still took 254.31 seconds:
 reusing the library leaves substantial binary compilation and linking work
 under fat LTO and one codegen unit.
@@ -631,8 +633,8 @@ studies keep their original source identities and admission rules.
 Receipts include the source head and Rust/Cargo input seal, toolchain, all-target dependency tree,
 stable default/all-feature metadata and the excluded fuzz graph. Every accepted build must exit
 successfully with a settled process tree and unchanged inputs. No-op builds require no new compiler
-artifact and an unchanged executable hash. Restamps require one rebuilt compiler unit, the expected
-version, a changed executable hash and unchanged library hashes. Only the runtime has a restamp workload: its existing `MANGOSTUDIO_RELEASE_VERSION` compile-time input changes the embedded version. The launcher uses Cargo package metadata and has no restamp workload. The downloader launcher is never executed for identity: its version comes from the sealed Cargo package metadata, so inspection cannot install a hub or read the user’s runtime state. All attempts and raw logs remain available if a later attempt
+artifact and an unchanged executable hash. Restamps require no rebuilt compiler unit, an unchanged unstamped binary, the expected
+version on the stamped copy, a changed stamped-executable hash and unchanged library hashes. Only the runtime has a restamp workload: the harness writes the version into a copy of cargo's output with `scripts/lib/runtime-stamp.ts`, because the release version is no longer a compile input. The launcher uses Cargo package metadata and has no restamp workload. The downloader launcher is never executed for identity: its version comes from the sealed Cargo package metadata, so inspection cannot install a hub or read the user’s runtime state. All attempts and raw logs remain available if a later attempt
 fails. GNU-time elapsed seconds (10 ms print resolution), final user/system CPU and maximum individual-process RSS are separate from the
 sampled process-tree RSS/CPU observations.
 

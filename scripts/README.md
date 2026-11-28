@@ -257,8 +257,9 @@ bun run build:binary --compiler bytecode --platform linux-arm64 --runtime-dir .m
 
 `--zig` links Linux targets through cargo-zigbuild (zig and cargo-zigbuild on
 `PATH`): gnu at the `GLIBC_2.17` floor, musl static. `--rustup` installs each
-target's standard library first. Both paths stamp the release version in at
-compile time (`MANGOSTUDIO_RELEASE_VERSION`) — or `dev` with `--dev`, the version a
+target's standard library first. Both paths write the release version into the
+staged copy after the link (`scripts/lib/runtime-stamp.ts`; it is not a compile input) —
+or `dev` with `--dev`, the version a
 source checkout's hub accepts — and check each binary's header —
 and its `--version`, when this machine can run it — before it is staged.
 Both paths also pass `--config` with a `--remap-path-prefix` that rewrites the
