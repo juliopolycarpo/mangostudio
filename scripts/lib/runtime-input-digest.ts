@@ -56,7 +56,7 @@
 //     rustc, the C toolchain and the linker (see `BUILD_ENV_PATTERNS`).
 //   - Tools the job can observe before it compiles: `rustc -vV` (pinned by
 //     rust-toolchain.toml, includes the LLVM version), `cargo --version`, and for
-//     zig-linked targets `zig version` and `cargo zigbuild --version`.
+//     zig-linked targets `zig version` and `cargo-zigbuild --version`.
 //
 // Not hashed, and why:
 //
@@ -414,7 +414,9 @@ export function observeBuildTools(
   };
   if (command[1] === 'zigbuild') {
     tools.zig = observeTool(run, ['zig', 'version']);
-    tools['cargo-zigbuild'] = observeTool(run, ['cargo', 'zigbuild', '--version']);
+    // The binary, not `cargo zigbuild --version`: the `zigbuild` subcommand
+    // rejects `--version` (exit 2); only the top-level command prints it.
+    tools['cargo-zigbuild'] = observeTool(run, ['cargo-zigbuild', '--version']);
   }
   return tools;
 }

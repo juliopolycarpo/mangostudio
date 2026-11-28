@@ -10,7 +10,7 @@ const FAKE_TOOL_OUTPUT: Readonly<Record<string, string>> = {
   'rustc -vV':
     'rustc 1.100.0 (0ef1bc386 2026-11-09)\nhost: x86_64-unknown-linux-gnu\nLLVM version: 22.1.0',
   'zig version': '0.15.2',
-  'cargo zigbuild --version': 'cargo-zigbuild 0.24.1',
+  'cargo-zigbuild --version': 'cargo-zigbuild 0.24.1',
   'xcodebuild -version': 'Xcode 26.0\nBuild version 17A324',
 };
 
