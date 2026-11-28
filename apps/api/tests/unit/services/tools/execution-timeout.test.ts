@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 
 import { buildShellTool } from '../../../../src/services/tools/builtin/_shell-tool';
 import {
@@ -16,6 +16,7 @@ import {
   mergeToolSettings,
   ToolParameterError,
 } from '../../../../src/services/tools/settings-policy';
+import { advanceFakeClock } from '../../../support/fake-clock';
 
 describe('resolveEffectiveToolTimeoutMs', () => {
   const bashTool = buildShellTool('bash');
@@ -130,11 +131,24 @@ describe('migrateLegacyToolParameters', () => {
 });
 
 describe('startToolTimeout', () => {
+  // The deadline is a plain `setTimeout`, so the fake clock lets a case stop one tick before it
+  // and at it, instead of sleeping on the real clock and hoping the stall was shorter than the gap.
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it('aborts with a ToolExecutionTimedOutError at the deadline and reports timedOut', async () => {
     const guard = startToolTimeout(undefined, 'slow_tool', 20);
     try {
       expect(guard.signal.aborted).toBe(false);
-      await new Promise((resolve) => setTimeout(resolve, 60));
+      await advanceFakeClock(19);
+      expect(guard.signal.aborted).toBe(false);
+      expect(guard.timedOut).toBe(false);
+      await advanceFakeClock(1);
 
       expect(guard.signal.aborted).toBe(true);
       expect(guard.timedOut).toBe(true);
@@ -164,7 +178,12 @@ describe('startToolTimeout', () => {
     parent.abort('already_stopped');
     const guard = startToolTimeout(parent.signal, 'slow_tool', 10);
 
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    // Up to the deadline, at it, and well past it.
+    await advanceFakeClock(9);
+    expect(guard.timedOut).toBe(false);
+    await advanceFakeClock(1);
+    expect(guard.timedOut).toBe(false);
+    await advanceFakeClock(30);
 
     expect(guard.signal.reason).toBe('already_stopped');
     expect(guard.timedOut).toBe(false);
@@ -175,7 +194,12 @@ describe('startToolTimeout', () => {
     guard.dispose();
     guard.dispose();
 
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    // Up to the deadline, at it, and well past it.
+    await advanceFakeClock(19);
+    expect(guard.signal.aborted).toBe(false);
+    await advanceFakeClock(1);
+    expect(guard.signal.aborted).toBe(false);
+    await advanceFakeClock(40);
 
     expect(guard.signal.aborted).toBe(false);
     expect(guard.timedOut).toBe(false);
