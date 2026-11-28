@@ -21,6 +21,9 @@ const REUSED = 'linux-x64';
 
 const API = `repos/${REPOSITORY}/actions`;
 const ARTIFACTS_PATH = `${API}/runs/${SOURCE_RUN}/artifacts?per_page=100`;
+// The producer is read as attempt 1: `runs/{id}` and `jobs?filter=all` follow later re-runs.
+const PRODUCER_ATTEMPT_PATH = `${API}/runs/${PRODUCER_RUN}/attempts/1`;
+const PRODUCER_JOBS_PATH = `${API}/runs/${PRODUCER_RUN}/attempts/1/jobs?per_page=100`;
 const RECORD_NAME = runtimeReuseArtifactName(REUSED, PRODUCER_RUN, DIGEST, BINARY_SHA);
 
 /** Reads served from a table keyed by the exact path; an unscripted path fails naming it. */
@@ -111,8 +114,8 @@ function acceptedApi(records: readonly Row[] = [recordRow()]): FakeReuseApi {
     { id: 1, name: `runtime-${SOURCE_SHA}-linux-x64`, expired: false },
     ...records,
   ]);
-  api.values.set(`${API}/runs/${PRODUCER_RUN}`, producerRun());
-  api.values.set(`${API}/runs/${PRODUCER_RUN}/jobs?filter=all&per_page=100`, [producerJob()]);
+  api.values.set(PRODUCER_ATTEMPT_PATH, producerRun());
+  api.values.set(PRODUCER_JOBS_PATH, [producerJob()]);
   api.values.set(`repos/${REPOSITORY}/compare/${PRODUCER_SHA}...${SOURCE_SHA}`, {
     status: 'ahead',
     base_commit: { sha: PRODUCER_SHA },
@@ -202,8 +205,45 @@ describe('settleRuntimeReuse', () => {
 
   test('accepts a producer run that was cancelled after its build job succeeded', () => {
     const api = acceptedApi();
-    api.values.set(`${API}/runs/${PRODUCER_RUN}`, producerRun({ conclusion: 'cancelled' }));
+    api.values.set(PRODUCER_ATTEMPT_PATH, producerRun({ conclusion: 'cancelled' }));
     expect(settleRuntimeReuse(api, SOURCE, reusingJobs()).reused).toHaveLength(1);
+  });
+
+  describe('a consuming job that was re-run', () => {
+    // Attempt 1 chose producer 701 (record created 08:00, before this job's 09:00 window);
+    // the re-run chose PRODUCER_RUN. Their names differ, so both records are listed.
+    const attempt1Record = () =>
+      recordRow({
+        id: 70,
+        name: runtimeReuseArtifactName(REUSED, 701, 'd'.repeat(64), BINARY_SHA),
+        created_at: '2026-11-28T08:05:00Z',
+      });
+
+    test('takes the record created inside the latest attempt job and ignores the earlier one', () => {
+      const receipt = settleRuntimeReuse(
+        acceptedApi([attempt1Record(), recordRow()]),
+        SOURCE,
+        reusingJobs()
+      );
+      expect(receipt.reused.map((entry) => [entry.producerRunId, entry.recordArtifactId])).toEqual([
+        [PRODUCER_RUN, 77],
+      ]);
+    });
+
+    test('a re-run that built from source is not blamed for the earlier attempt record', () => {
+      const api = new FakeReuseApi();
+      api.values.set(ARTIFACTS_PATH, [attempt1Record()]);
+      expect(settleRuntimeReuse(api, SOURCE, builtJobs())).toEqual({
+        reused: [],
+        built: PLATFORMS,
+      });
+    });
+
+    test('a re-run that reused but kept only the earlier record is refused', () => {
+      expect(refusalOf(acceptedApi([attempt1Record()]))).toContain(
+        'expected exactly one, because the job reused a base; received 0'
+      );
+    });
   });
 
   test.each([
@@ -278,7 +318,8 @@ describe('settleRuntimeReuse', () => {
         api: acceptedApi([recordRow({ created_at: '2026-11-28T12:00:00Z' })]),
         jobs: reusingJobs(),
       }),
-      "inside job 5000's window",
+      // Outside the job's window it is another attempt's record, so this job has none.
+      'expected exactly one, because the job reused a base; received 0',
     ],
     [
       'a job without steps',
@@ -331,20 +372,16 @@ describe('settleRuntimeReuse', () => {
         producerRun({ head_repository: { full_name: 'fork/repo' } }),
         `head_repository: expected ${REPOSITORY}; received "fork/repo"`,
       ],
-      [
-        'a re-run',
-        producerRun({ run_attempt: 2 }),
-        'run_attempt: expected 1 (a re-run may mix attempts)',
-      ],
+      ['a re-run', producerRun({ run_attempt: 2 }), 'run_attempt: expected 1 (the attempt read)'],
       ['a run with no commit', producerRun({ head_sha: 'abc' }), 'head_sha: expected 40-character'],
     ])('refuses %s', (_name, run, message) => {
       const api = acceptedApi();
-      api.values.set(`${API}/runs/${PRODUCER_RUN}`, run);
+      api.values.set(PRODUCER_ATTEMPT_PATH, run);
       expect(refusalOf(api)).toContain(message);
     });
 
     test('refuses a producer whose build job failed, was cancelled or ran twice', () => {
-      const jobsPath = `${API}/runs/${PRODUCER_RUN}/jobs?filter=all&per_page=100`;
+      const jobsPath = PRODUCER_JOBS_PATH;
       for (const job of [
         producerJob({ conclusion: 'failure' }),
         producerJob({ conclusion: 'cancelled' }),
@@ -368,7 +405,6 @@ describe('settleRuntimeReuse', () => {
           name: runtimeReuseArtifactName(REUSED, SOURCE_RUN, DIGEST, BINARY_SHA),
         }),
       ]);
-      api.values.set(`${API}/runs/${SOURCE_RUN}`, producerRun({ id: SOURCE_RUN }));
       expect(refusalOf(api)).toContain(`a run other than ${SOURCE_RUN}`);
     });
 

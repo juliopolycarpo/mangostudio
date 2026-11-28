@@ -1344,13 +1344,13 @@ describe('canary required validation producers', () => {
           workflow_run: { id: 100 },
         },
       ]);
-      api.values.set('actions/runs/700', {
+      api.values.set('actions/runs/700/attempts/1', {
         ...run(700, 'ci.yml', 42),
         head_sha: PRODUCER_SHA,
         run_attempt: 1,
         head_repository: { full_name: source.repository },
       });
-      api.values.set('actions/runs/700/jobs?filter=all&per_page=100', [
+      api.values.set('actions/runs/700/attempts/1/jobs?per_page=100', [
         {
           ...jobs(700, [runtimeBuildJobName(PLATFORM)])[0],
           started_at: '2026-11-20T09:00:00Z',
@@ -1405,7 +1405,7 @@ describe('canary required validation producers', () => {
     test('a reuse whose producer is not a main push of this repository rejects the source', () => {
       const api = new FakeQualificationApi();
       reuseLinux(api);
-      api.values.set('actions/runs/700', {
+      api.values.set('actions/runs/700/attempts/1', {
         ...run(700, 'ci.yml', 42),
         head_sha: PRODUCER_SHA,
         run_attempt: 1,

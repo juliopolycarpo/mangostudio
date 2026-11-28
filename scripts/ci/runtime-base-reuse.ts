@@ -146,12 +146,7 @@ if (import.meta.main) {
       // steps shows as a different id.
       const runId = requirePositiveFlag(values['--run-id'], '--run-id');
       const artifactId = requirePositiveFlag(values['--artifact-id'], '--artifact-id');
-      const { producer, artifact } = verifyRuntimeBaseCandidate(
-        api,
-        request,
-        api.get(`repos/${request.repository}/actions/runs/${runId}`),
-        Date.now()
-      );
+      const { producer, artifact } = verifyRuntimeBaseCandidate(api, request, runId, Date.now());
       if (producer.runId !== runId || artifact.id !== artifactId) {
         throw new Error(
           `expected run ${runId} artifact ${artifactId} | received: run ${producer.runId} artifact ${artifact.id}`

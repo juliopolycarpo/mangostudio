@@ -19,8 +19,10 @@
 //      the upload; a later failure of an unrelated lane says nothing about those
 //      bytes, and Canary independently demands a fully green run before it
 //      promotes anything.
-//   3. The run is attempt 1, so the jobs and the artifact belong to the same
-//      attempt; the artifact's creation time falls inside that job's window.
+//   3. The run and its jobs are read as attempt 1 (`attempts/1`), which a later
+//      re-run cannot change, so the jobs and the artifact belong to the same
+//      attempt; the artifact's creation time falls inside that job's window,
+//      which refuses a base that only an attempt 2 produced.
 //   4. The producer commit is an ancestor of the checkout (compare API) and no
 //      runtime input path changed between them, a second opinion on the digest
 //      that does not share its code.
@@ -236,13 +238,16 @@ export function runtimeBaseContextProblem(request: RuntimeBaseRequest): string |
 }
 
 /**
- * Verify one run as the producer of `platform`'s runtime for a build at
+ * Verify run `runId` as the producer of `platform`'s runtime for a build at
  * `sourceSha`. Throws, naming the value and the expected shape, on any doubt.
- * The run record comes from the run listing (resolver) or `actions/runs/{id}`
- * (Canary); both carry the fields read here.
+ *
+ * The run and its jobs are read from attempt 1 (`attempts/1`, `attempts/1/jobs`),
+ * never from `actions/runs/{id}`: that endpoint reports the LATEST attempt, so a
+ * maintainer re-running any job of the producer after others reused its base
+ * would turn every later verification into a refusal. Attempt 1 is frozen.
  *
  * @example
- * verifyProducerRun(api, { repository, platform: 'linux-x64', sourceSha, excludeRunId: 7 }, runRecord);
+ * verifyProducerRun(api, { repository, platform: 'linux-x64', sourceSha, excludeRunId: 7 }, 46128211509);
  */
 export function verifyProducerRun(
   api: RuntimeBaseApi,
@@ -252,14 +257,18 @@ export function verifyProducerRun(
     readonly sourceSha: string;
     readonly excludeRunId: number;
   },
-  value: unknown
+  producerRunId: number
 ): ProducerRun {
-  const run = requireJsonRecord(value, 'producer run');
-  const runId = requirePositiveSafeInteger(run.id, 'producer run id');
+  const runId = requirePositiveSafeInteger(producerRunId, 'producer run id');
   const label = `producer run ${runId}`;
   if (runId === scope.excludeRunId) {
     throw invalidValue(`${label} id`, `a run other than ${scope.excludeRunId}`, runId);
   }
+  const run = requireJsonRecord(
+    api.get(`repos/${scope.repository}/actions/runs/${runId}/attempts/1`),
+    `${label} attempt 1`
+  );
+  if (run.id !== runId) throw invalidValue(`${label} attempt 1 id`, String(runId), run.id);
   // Never an event that can carry another actor's workflow or inputs: only a
   // push to this repository's main branch, in the CI workflow file.
   for (const [field, expected] of [
@@ -275,17 +284,17 @@ export function verifyProducerRun(
       throw invalidValue(`${label} ${field}`, scope.repository, name);
     }
   }
-  // Attempt 1 only: a re-run can leave jobs and artifacts of different attempts
-  // under one run id, and the jobs listing then cannot say which attempt wrote
-  // the artifact.
+  // Attempt 1 only: a re-run can leave artifacts of different attempts under one
+  // run id. Binding to attempt 1 keeps the job and the artifact (checked against
+  // this job's time window) one attempt's, whatever re-runs happen later.
   if (run.run_attempt !== 1) {
-    throw invalidValue(`${label} run_attempt`, '1 (a re-run may mix attempts)', run.run_attempt);
+    throw invalidValue(`${label} run_attempt`, '1 (the attempt read)', run.run_attempt);
   }
   const sha = requireSha(run.head_sha, `${label} head_sha`);
 
   const jobName = runtimeBuildJobName(scope.platform);
   const jobs = api
-    .list(`repos/${scope.repository}/actions/runs/${runId}/jobs?filter=all&per_page=100`, 'jobs')
+    .list(`repos/${scope.repository}/actions/runs/${runId}/attempts/1/jobs?per_page=100`, 'jobs')
     .map((job, index) => requireJsonRecord(job, `${label} job ${index}`))
     .filter((job) => job.name === jobName);
   const [job] = jobs;
@@ -462,7 +471,7 @@ function describeError(error: unknown): string {
 export function verifyRuntimeBaseCandidate(
   api: RuntimeBaseApi,
   request: RuntimeBaseRequest,
-  run: unknown,
+  runId: number,
   now: number
 ): { readonly producer: ProducerRun; readonly artifact: ProducerArtifact } {
   const producer = verifyProducerRun(
@@ -473,7 +482,7 @@ export function verifyRuntimeBaseCandidate(
       sourceSha: request.sourceSha,
       excludeRunId: request.currentRunId,
     },
-    run
+    runId
   );
   const name = unstampedArtifactName(request.platform, request.digest);
   return {
@@ -555,7 +564,12 @@ export function resolveRuntimeBase(
       }
       stage = `candidate run ${String(candidate.id)}`;
       try {
-        return { reuse: true, ...verifyRuntimeBaseCandidate(api, request, candidate, deps.now()) };
+        // The listing shows the run's latest attempt; verification re-reads attempt 1.
+        const candidateId = requirePositiveSafeInteger(candidate.id, `${stage} id`);
+        return {
+          reuse: true,
+          ...verifyRuntimeBaseCandidate(api, request, candidateId, deps.now()),
+        };
       } catch (error) {
         rejected.push(`${stage}: ${describeError(error)}`);
       }

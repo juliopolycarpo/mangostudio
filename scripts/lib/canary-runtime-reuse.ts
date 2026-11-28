@@ -141,7 +141,24 @@ export function settleRuntimeReuse(
   const built: string[] = [];
   for (const { platform, job } of runtimeJobs) {
     const marker = stepConclusion(job, platform, RUNTIME_REUSE_MARKER_STEP);
-    const mine = records.filter((record) => record.parsed.platform === platform);
+    // `job` is the platform's job of the latest attempt, and the record names differ by
+    // producer, so a re-run that picked another producer leaves the earlier attempt's
+    // record beside its own. A record counts for this job only when it was created
+    // while this job ran; the earlier attempt's record falls outside the window and is
+    // not this job's claim. (Same producer, same name: `overwrite` replaces it.)
+    const startedAt = timestampMs(job.started_at, `runtime ${platform} job started_at`);
+    const completedAt = timestampMs(job.completed_at, `runtime ${platform} job completed_at`);
+    const mine = records.filter((record) => {
+      if (record.parsed.platform !== platform) return false;
+      const createdAt = timestampMs(
+        record.artifact.created_at,
+        `runtime ${platform} reuse record ${String(record.artifact.name)} created_at`
+      );
+      return (
+        createdAt >= startedAt - RECORD_CLOCK_SKEW_MS &&
+        createdAt <= completedAt + RECORD_CLOCK_SKEW_MS
+      );
+    });
     if (marker === null || marker === 'skipped') {
       if (mine.length > 0) {
         throw invalidValue(
@@ -176,20 +193,6 @@ export function settleRuntimeReuse(
     if (origin.id !== source.runId) {
       throw invalidValue(`${label} workflow_run.id`, String(source.runId), origin.id);
     }
-    // The name does not say which job uploaded it, so bind it to this one by time.
-    const createdAt = timestampMs(record.artifact.created_at, `${label} created_at`);
-    const startedAt = timestampMs(job.started_at, `${label} job started_at`);
-    const completedAt = timestampMs(job.completed_at, `${label} job completed_at`);
-    if (
-      createdAt < startedAt - RECORD_CLOCK_SKEW_MS ||
-      createdAt > completedAt + RECORD_CLOCK_SKEW_MS
-    ) {
-      throw invalidValue(
-        `${label} created_at ${String(record.artifact.created_at)}`,
-        `inside job ${String(job.id)}'s window`,
-        `${String(job.started_at)}..${String(job.completed_at)}`
-      );
-    }
     // The producer a record names must itself be a successful main push build job of this
     // repository whose inputs match the source's; the run record is read fresh from the API.
     const producer = verifyProducerRun(
@@ -200,7 +203,7 @@ export function settleRuntimeReuse(
         sourceSha: source.sourceSha,
         excludeRunId: source.runId,
       },
-      api.get(`repos/${source.repository}/actions/runs/${record.parsed.producerRunId}`)
+      record.parsed.producerRunId
     );
     if (producer.runId !== record.parsed.producerRunId) {
       throw invalidValue(

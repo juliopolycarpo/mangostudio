@@ -62,8 +62,10 @@ const DEPS: RuntimeBaseDeps = {
 
 const RUNS_PATH = `repos/${REPOSITORY}/actions/workflows/ci.yml/runs?event=push&branch=main&per_page=100`;
 const NOMINATION_PATH = `repos/${REPOSITORY}/actions/artifacts?name=${ARTIFACT_NAME}&per_page=100`;
+// Verification reads attempt 1 only: `actions/runs/{id}` and `jobs?filter=all` follow the latest attempt.
+const attemptPath = (runId: number) => `repos/${REPOSITORY}/actions/runs/${runId}/attempts/1`;
 const jobsPath = (runId: number) =>
-  `repos/${REPOSITORY}/actions/runs/${runId}/jobs?filter=all&per_page=100`;
+  `repos/${REPOSITORY}/actions/runs/${runId}/attempts/1/jobs?per_page=100`;
 const runArtifactsPath = (runId: number) =>
   `repos/${REPOSITORY}/actions/runs/${runId}/artifacts?name=${ARTIFACT_NAME}&per_page=100`;
 const comparePath = (sha: string) => `repos/${REPOSITORY}/compare/${sha}...${SOURCE_SHA}`;
@@ -162,6 +164,7 @@ function acceptedApi(runId = PRODUCER_RUN): FakeRuntimeBaseApi {
   const api = new FakeRuntimeBaseApi();
   api.values.set(RUNS_PATH, { workflow_runs: [runRow(runId)] });
   api.values.set(NOMINATION_PATH, { artifacts: [artifactRow(runId)] });
+  api.values.set(attemptPath(runId), runRow(runId));
   api.values.set(jobsPath(runId), [jobRow(runId)]);
   api.values.set(comparePath(PRODUCER_SHA), {
     status: 'ahead',
@@ -288,9 +291,41 @@ describe('resolveRuntimeBase', () => {
     api.values.set(RUNS_PATH, {
       workflow_runs: [runRow(PRODUCER_RUN, override)],
     });
+    api.values.set(attemptPath(PRODUCER_RUN), runRow(PRODUCER_RUN, override));
     api.values.set(NOMINATION_PATH, { artifacts: [artifactRow(PRODUCER_RUN)] });
     const reason = refusalOf(api);
     expect(reason).toMatch(new RegExp(`${field}|has an unexpired artifact`));
+  });
+
+  test('a producer re-run after others reused its base still verifies from attempt 1', () => {
+    const api = acceptedApi();
+    // The listing and `actions/runs/{id}` now report attempt 2; only attempt 1 is read.
+    api.values.set(RUNS_PATH, {
+      workflow_runs: [runRow(PRODUCER_RUN, { run_attempt: 2, conclusion: 'success' })],
+    });
+    expect(resolveRuntimeBase(api, REQUEST, DEPS).reuse).toBe(true);
+    expect(api.requests).toContain(attemptPath(PRODUCER_RUN));
+    expect(api.requests).toContain(jobsPath(PRODUCER_RUN));
+    expect(api.requests).not.toContain(`repos/${REPOSITORY}/actions/runs/${PRODUCER_RUN}`);
+    expect(api.requests.some((path) => path.includes('filter=all'))).toBe(false);
+  });
+
+  test('refuses a base that only exists from attempt 2', () => {
+    const api = acceptedApi();
+    // Attempt 1's build job failed; a re-run produced the artifact later.
+    api.values.set(jobsPath(PRODUCER_RUN), [jobRow(PRODUCER_RUN, { conclusion: 'failure' })]);
+    api.values.set(RUNS_PATH, {
+      workflow_runs: [runRow(PRODUCER_RUN, { run_attempt: 2, conclusion: 'success' })],
+    });
+    expect(refusalOf(api)).toContain(`job "${runtimeBuildJobName('linux-x64')}"`);
+  });
+
+  test('refuses an artifact that a re-run uploaded after attempt 1 build job finished', () => {
+    const api = acceptedApi();
+    api.values.set(runArtifactsPath(PRODUCER_RUN), {
+      artifacts: [artifactRow(PRODUCER_RUN, { created_at: '2026-11-29T10:00:00Z' })],
+    });
+    expect(refusalOf(api)).toContain("inside job 7000's window");
   });
 
   test('refuses the run being built itself, so a re-run cannot nominate its own artifact', () => {
@@ -419,6 +454,7 @@ describe('resolveRuntimeBase', () => {
     const newer = PRODUCER_RUN + 50;
     api.values.set(RUNS_PATH, { workflow_runs: [runRow(newer), runRow(PRODUCER_RUN)] });
     api.values.set(NOMINATION_PATH, { artifacts: [artifactRow(newer), artifactRow(PRODUCER_RUN)] });
+    api.values.set(attemptPath(newer), runRow(newer));
     api.values.set(jobsPath(newer), [jobRow(newer, { conclusion: 'failure' })]);
     const verdict = resolveRuntimeBase(api, REQUEST, DEPS);
     expect(verdict.reuse && verdict.producer.runId).toBe(PRODUCER_RUN);
@@ -432,7 +468,10 @@ describe('resolveRuntimeBase', () => {
     const ids = [30, 29, 28, 27];
     api.values.set(RUNS_PATH, { workflow_runs: ids.map((id) => runRow(id)) });
     api.values.set(NOMINATION_PATH, { artifacts: ids.map((id) => artifactRow(id)) });
-    for (const id of ids) api.values.set(jobsPath(id), [jobRow(id, { conclusion: 'failure' })]);
+    for (const id of ids) {
+      api.values.set(attemptPath(id), runRow(id));
+      api.values.set(jobsPath(id), [jobRow(id, { conclusion: 'failure' })]);
+    }
     const reason = refusalOf(api, REQUEST, {
       ...DEPS,
       bounds: { ...DEPS.bounds, maxCandidates: 2 },
@@ -502,7 +541,7 @@ describe('resolveRuntimeBase', () => {
 });
 
 describe('verifyProducerRun', () => {
-  test('is the check Canary reuses: it accepts a listed record and names the failing field', () => {
+  test('is the check Canary reuses: it reads attempt 1 and names the failing field', () => {
     const api = acceptedApi();
     const scope = {
       repository: REPOSITORY,
@@ -510,10 +549,23 @@ describe('verifyProducerRun', () => {
       sourceSha: SOURCE_SHA,
       excludeRunId: 1,
     };
-    expect(verifyProducerRun(api, scope, runRow(PRODUCER_RUN)).runId).toBe(PRODUCER_RUN);
+    expect(verifyProducerRun(api, scope, PRODUCER_RUN).runId).toBe(PRODUCER_RUN);
+    api.values.set(attemptPath(PRODUCER_RUN), runRow(PRODUCER_RUN, { event: 'pull_request' }));
+    expect(() => verifyProducerRun(api, scope, PRODUCER_RUN)).toThrow(
+      'Invalid producer run 700 event: expected push; received "pull_request"'
+    );
+  });
+
+  test('refuses an attempt record that names another run', () => {
+    const api = acceptedApi();
+    api.values.set(attemptPath(PRODUCER_RUN), runRow(701));
     expect(() =>
-      verifyProducerRun(api, scope, runRow(PRODUCER_RUN, { event: 'pull_request' }))
-    ).toThrow('Invalid producer run 700 event: expected push; received "pull_request"');
+      verifyProducerRun(
+        api,
+        { repository: REPOSITORY, platform: 'linux-x64', sourceSha: SOURCE_SHA, excludeRunId: 1 },
+        PRODUCER_RUN
+      )
+    ).toThrow('attempt 1 id: expected 700; received 701');
   });
 });
 
